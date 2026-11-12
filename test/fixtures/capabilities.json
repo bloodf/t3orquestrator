@@ -1,0 +1,184 @@
+{
+  "parentThreadId": "mcp:thread-0003",
+  "inheritedProviderInstanceId": "provider-a",
+  "inheritedModel": "model-small",
+  "inheritedOptions": [],
+  "runtimeMode": "full-access",
+  "interactionMode": "default",
+  "providers": [
+    {
+      "providerInstanceId": "provider-e",
+      "driverKind": "codex",
+      "displayName": "Provider Display Name",
+      "models": [
+        {
+          "id": "model-small",
+          "options": [
+            {
+              "id": "reasoningEffort",
+              "values": [
+                "low"
+              ],
+              "default": "low"
+            },
+            {
+              "id": "serviceTier",
+              "values": [
+                "default",
+                "priority"
+              ],
+              "default": "default"
+            }
+          ]
+        },
+        {
+          "id": "model-small",
+          "options": [
+            {
+              "id": "reasoningEffort",
+              "values": [
+                "low"
+              ],
+              "default": "low"
+            },
+            {
+              "id": "serviceTier",
+              "values": [
+                "default",
+                "priority"
+              ],
+              "default": "default"
+            }
+          ]
+        },
+        {
+          "id": "model-small",
+          "options": [
+            {
+              "id": "reasoningEffort",
+              "values": [
+                "low"
+              ],
+              "default": "low"
+            },
+            {
+              "id": "serviceTier",
+              "values": [
+                "default",
+                "priority"
+              ],
+              "default": "default"
+            }
+          ]
+        }
+      ],
+      "canRunChildTask": true,
+      "canRunCrossProviderChildTask": true,
+      "constraints": []
+    },
+    {
+      "providerInstanceId": "provider-f",
+      "driverKind": "codex",
+      "displayName": "Provider Display Name",
+      "models": [
+        {
+          "id": "model-small",
+          "options": [
+            {
+              "id": "reasoningEffort",
+              "values": [
+                "low"
+              ],
+              "default": "low"
+            },
+            {
+              "id": "serviceTier",
+              "values": [
+                "default",
+                "priority"
+              ],
+              "default": "default"
+            }
+          ]
+        },
+        {
+          "id": "model-small",
+          "options": [
+            {
+              "id": "reasoningEffort",
+              "values": [
+                "low"
+              ],
+              "default": "low"
+            },
+            {
+              "id": "serviceTier",
+              "values": [
+                "default",
+                "priority"
+              ],
+              "default": "default"
+            }
+          ]
+        },
+        {
+          "id": "model-small",
+          "options": [
+            {
+              "id": "reasoningEffort",
+              "values": [
+                "low"
+              ],
+              "default": "low"
+            },
+            {
+              "id": "serviceTier",
+              "values": [
+                "default",
+                "priority"
+              ],
+              "default": "default"
+            }
+          ]
+        }
+      ],
+      "canRunChildTask": true,
+      "canRunCrossProviderChildTask": true,
+      "constraints": []
+    },
+    {
+      "providerInstanceId": "provider-g",
+      "driverKind": "codex",
+      "displayName": "Provider Display Name",
+      "models": [
+        {
+          "id": "model-medium",
+          "options": []
+        },
+        {
+          "id": "model-medium",
+          "options": []
+        },
+        {
+          "id": "model-medium",
+          "options": []
+        }
+      ],
+      "canRunChildTask": false,
+      "canRunCrossProviderChildTask": false,
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    }
+  ],
+  "features": {
+    "appOwnedSubagents": true,
+    "asyncPolling": true,
+    "cancellation": true,
+    "batchThreadCreation": true,
+    "threadManagement": true,
+    "incrementalThreadRead": true,
+    "scheduledTasks": true,
+    "maxBatchThreads": 20
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "threadId": "mcp:thread-0005",
+  "runId": "run:thread:mcp%3Athread-0005:ordinal:1",
+  "status": "failed",
+  "reply": null,
+  "error": "The agent did not accept the model \"model-small\". Choose another model for this provider, then retry."
+}

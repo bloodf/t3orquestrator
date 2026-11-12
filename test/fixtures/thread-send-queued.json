@@ -1,0 +1,8 @@
+{
+  "threadId": "mcp:thread-0007",
+  "link": "<t3-thread-link:mcp:thread-0007>",
+  "messageId": "message:placeholder",
+  "runId": "run:thread:mcp%3Athread-0007:ordinal:2",
+  "status": "queued",
+  "delivery": "queued"
+}

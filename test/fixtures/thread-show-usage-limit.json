@@ -1,0 +1,46 @@
+{
+  "thread": {
+    "threadId": "mcp:launch:thread-0006",
+    "projectId": "project-0003",
+    "title": "Placeholder thread title",
+    "link": "<t3-thread-link:mcp:launch:thread-0006>",
+    "createdBy": "agent",
+    "creationSource": "mcp",
+    "status": "failed",
+    "latestRunId": "run:thread:mcp%3Alaunch%3Athread-0006:ordinal:13",
+    "activeRunId": null,
+    "providerInstanceId": "provider-b-2",
+    "model": "model-large",
+    "runtimeMode": "full-access",
+    "interactionMode": "default",
+    "linkedPullRequest": null,
+    "pullRequests": [],
+    "titleRegeneration": null,
+    "branch": "feature/placeholder-branch",
+    "worktreePath": "/path/to/worktrees/project-name/branch-name-0001",
+    "parentThreadId": null,
+    "relationshipToParent": null,
+    "runCount": 13,
+    "itemCount": 235,
+    "pendingRequestCount": 0,
+    "archived": true,
+    "settled": false,
+    "settledAt": null,
+    "snoozed": false,
+    "snoozedUntil": null,
+    "createdAt": "2026-11-05T01:17:27.375Z",
+    "updatedAt": "2026-11-05T21:38:00.620Z"
+  },
+  "messages": [
+    {
+      "role": "assistant",
+      "runId": "run:thread:mcp%3Alaunch%3Athread-0006:ordinal:10",
+      "text": "Placeholder message text"
+    },
+    {
+      "role": "user",
+      "runId": "run:thread:mcp%3Alaunch%3Athread-0006:ordinal:11",
+      "text": "Placeholder message text"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "thread": {
+    "threadId": "mcp:thread-0003",
+    "projectId": "project-0002",
+    "title": "Placeholder thread title",
+    "link": "<t3-thread-link:mcp:thread-0003>",
+    "createdBy": "agent",
+    "creationSource": "mcp",
+    "status": "completed",
+    "latestRunId": "run:thread:mcp%3Athread-0003:ordinal:1",
+    "activeRunId": null,
+    "providerInstanceId": "provider-a",
+    "model": "model-small",
+    "runtimeMode": "full-access",
+    "interactionMode": "default",
+    "linkedPullRequest": null,
+    "pullRequests": [],
+    "titleRegeneration": null,
+    "branch": null,
+    "worktreePath": null,
+    "parentThreadId": null,
+    "relationshipToParent": null,
+    "runCount": 1,
+    "itemCount": 63,
+    "pendingRequestCount": 0,
+    "archived": false,
+    "settled": false,
+    "settledAt": null,
+    "snoozed": false,
+    "snoozedUntil": null,
+    "createdAt": "2026-11-12T21:08:57.505Z",
+    "updatedAt": "2026-11-12T21:10:44.446Z"
+  },
+  "messages": [
+    {
+      "role": "assistant",
+      "runId": "run:thread:mcp%3Athread-0003:ordinal:1",
+      "text": "Placeholder message text"
+    },
+    {
+      "role": "assistant",
+      "runId": "run:thread:mcp%3Athread-0003:ordinal:1",
+      "text": "Placeholder message text"
+    }
+  ]
+}

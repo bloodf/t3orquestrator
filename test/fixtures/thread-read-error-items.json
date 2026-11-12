@@ -1,0 +1,36 @@
+[
+  {
+    "position": 232,
+    "visibility": "local",
+    "sourceThreadId": "mcp:launch:thread-0006",
+    "itemId": "turn-item:placeholder-8845",
+    "runId": "run:thread:mcp%3Alaunch%3Athread-0006:ordinal:12",
+    "messageId": null,
+    "createdBy": null,
+    "creationSource": null,
+    "type": "error",
+    "status": "failed",
+    "title": "Usage limit reached",
+    "text": "You’ve hit your usage limit. Visit <url> to purchase more credits or try again at Nov 9th, 2026 11:58 AM.",
+    "textTruncated": false,
+    "nextTextOffset": null,
+    "updatedAt": "2026-11-05T04:17:24.776Z"
+  },
+  {
+    "position": 234,
+    "visibility": "local",
+    "sourceThreadId": "mcp:launch:thread-0006",
+    "itemId": "turn-item:placeholder-3131",
+    "runId": "run:thread:mcp%3Alaunch%3Athread-0006:ordinal:13",
+    "messageId": null,
+    "createdBy": null,
+    "creationSource": null,
+    "type": "error",
+    "status": "failed",
+    "title": "Provider turn failed to start",
+    "text": "This conversation is open in another Codex client, such as the Codex app, the Codex CLI, or an IDE extension. Codex lets one client write to a conversation at a time. Quit that client, then send your message again.",
+    "textTruncated": false,
+    "nextTextOffset": null,
+    "updatedAt": "2026-11-05T04:34:32.793Z"
+  }
+]
