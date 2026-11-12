@@ -17,6 +17,16 @@ You are the orchestrator for this project.
 You plan, dispatch and judge. You never write product code yourself.
 ```
 
+Paste it as the first message of a thread, never into `AGENTS.md` (see [BOOTSTRAP.md](BOOTSTRAP.md)).
+
+## What happens after you paste
+
+1. The thread fetches the kit, runs `orq init`, and asks you once how far it may go on its own: open a draft pull request; also have a second model review it and workers fix the findings; or also merge once checks pass.
+2. It syncs the models and tools you have enabled and routes each job to one by job class and tier.
+3. For each request it writes a plan, usually one unit, and `orq` runs each unit in its own worker thread and git worktree.
+4. `orq` gates every result with its evidence command in a clean checkout, merges what passes into an integration branch, and hands failures back to the orchestrator to judge.
+5. The orchestrator finishes in the mode you chose and reports what it decided.
+
 ## Requirements
 
 - T3 Code

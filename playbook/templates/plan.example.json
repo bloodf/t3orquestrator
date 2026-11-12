@@ -1,0 +1,38 @@
+{
+  "goal": "Add tagging to notes: a shared tag store, a tag editor, and tag search.",
+  "base": "main",
+  "decisions": [
+    "Tags are lowercase strings of 1 to 32 characters; the store normalises them.",
+    "The store's public API is addTag, removeTag and listTags in src/tags/store.js."
+  ],
+  "units": [
+    {
+      "id": "tag-store",
+      "title": "Tag store",
+      "job": "implement",
+      "paths": ["src/tags/**", "test/tags.test.js"],
+      "evidence": "node --test test/tags.test.js",
+      "order": ".orq/orders/tag-store.md"
+    },
+    {
+      "id": "tag-editor",
+      "title": "Tag editor on the note page",
+      "job": "implement",
+      "deps": ["tag-store"],
+      "paths": ["src/editor/**", "test/editor-tags.test.js"],
+      "forbidden": ["src/tags/**", "test/tags.test.js"],
+      "evidence": "node --test test/editor-tags.test.js",
+      "order": ".orq/orders/tag-editor.md"
+    },
+    {
+      "id": "tag-search",
+      "title": "Search notes by tag",
+      "job": "implement",
+      "deps": ["tag-store"],
+      "paths": ["src/search/**", "test/search-tags.test.js"],
+      "forbidden": ["src/tags/**", "test/tags.test.js"],
+      "evidence": "node --test test/search-tags.test.js",
+      "order": ".orq/orders/tag-search.md"
+    }
+  ]
+}
