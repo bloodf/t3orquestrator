@@ -1,0 +1,14 @@
+{
+  "updated": "2026-11-12",
+  "note": "Suggestions only. Add your own in ~/.t3orq/tools.json; those are tried first.",
+  "tools": [
+    { "slot": "judge", "name": "laya", "detect": { "command": "laya-code" }, "use": "Run laya-code check|classify|score|rank --input <json-file> for a typed decision with a probability. Advisory only." },
+    { "slot": "judge", "name": "jev", "detect": { "mcpTool": "jev_(classify|check)" }, "use": "Call the jev classify/check tool with raw evidence as state. Advisory only." },
+    { "slot": "memory", "name": "hindsight", "detect": { "mcpTool": "hindsight.*(recall|retain)" }, "use": "Call recall once at intake and retain decisions and outcomes at integration." },
+    { "slot": "code-index", "name": "graphify", "detect": { "command": "graphify" }, "use": "Run graphify query before broad file reads." },
+    { "slot": "code-index", "name": "codegraph", "detect": { "command": "codegraph" }, "use": "Run codegraph query or explore before broad file reads." },
+    { "slot": "code-index", "name": "semble", "detect": { "command": "semble" }, "use": "Run semble search \"<what the code does>\" before broad file reads." },
+    { "slot": "git-host", "name": "gh", "detect": { "command": "gh" }, "use": "Use gh for pull requests and checks." },
+    { "slot": "git-host", "name": "glab", "detect": { "command": "glab" }, "use": "Use glab for merge requests and pipelines." }
+  ]
+}
