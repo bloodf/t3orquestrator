@@ -70,7 +70,7 @@ In every mode, read the final checks result on the `done` line first. `fail` is 
 
 | Mode | Action |
 |---|---|
-| `draft` | Run `orq summary`. Push the integration branch (`orq status` names it) and open a DRAFT pull request against `base` with the git-host slot, using `.orq/summary.md` as the body. On the built-in path, leave the branch local and give the user its name. |
+| `draft` | Run `orq summary`. Push the integration branch (`orq status` names it) and open a DRAFT pull request against `base` with the git-host slot, using `.orq/summary.md` as the body. On the built-in path, or when the repository has no remote, leave the branch local and give the user its name. Never create a remote or a repository. |
 | `review-fix` | Review before the pull request. Fill `~/.t3orq/kit/playbook/templates/review-order.md` into `.orq/orders/review.md`, run `orq review start`, then `orq review show` until it prints the report; it picks a model from another family and runs it on the integrated code. Accept only findings that come with a command and its output, and re-run that command to confirm. Append each accepted finding to `plan.json` as a unit with `job: "fix"`, then `orq wait`. At most two review rounds. Then finish as `draft`. |
 | `review-fix-merge` | As `review-fix`, then wait for the host's checks on the pull request, mark it ready, and merge it. |
 
