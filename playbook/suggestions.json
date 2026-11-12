@@ -1,0 +1,22 @@
+{
+  "updated": "2026-11-12",
+  "note": "Suggestions only. The framework works without this file. Tiers: 4 strongest, 1 smallest. Edit your local registry to override; your edits are never overwritten.",
+  "families": [
+    { "match": "claude", "family": "anthropic" },
+    { "match": "gpt|codex|(^|:)o[0-9]", "family": "openai" },
+    { "match": "gemini", "family": "google" },
+    { "match": "grok", "family": "xai" },
+    { "match": "kimi|moonshot", "family": "moonshot" },
+    { "match": "minimax", "family": "minimax" },
+    { "match": "glm", "family": "zhipu" },
+    { "match": "qwen", "family": "alibaba" },
+    { "match": "deepseek", "family": "deepseek" },
+    { "match": "llama", "family": "meta" },
+    { "match": "mistral|codestral|devstral", "family": "mistral" }
+  ],
+  "tiers": [
+    { "match": "(^|[^a-z])(mini|nano|flash|lite|small|haiku|free)([^a-z]|$)", "tier": 1 },
+    { "match": "(^|[^a-z])(opus|fable|mythos|ultra)([^a-z]|$)", "tier": 4 },
+    { "match": "(^|[^a-z])(sonnet|pro|max|large|thinking)([^a-z]|$)", "tier": 3 }
+  ]
+}

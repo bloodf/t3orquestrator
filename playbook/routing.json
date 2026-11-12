@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "jobs": {
+    "plan": { "minTier": 4 },
+    "architecture": { "minTier": 4 },
+    "debug-hard": { "minTier": 4 },
+    "implement-complex": { "minTier": 3 },
+    "implement": { "minTier": 2 },
+    "test": { "minTier": 2 },
+    "mechanical": { "minTier": 1 },
+    "docs": { "minTier": 1 },
+    "explore": { "minTier": 1 },
+    "summarize": { "minTier": 1 },
+    "review": { "minTier": "author", "differentFamily": true },
+    "fix": { "minTier": "author" }
+  }
+}

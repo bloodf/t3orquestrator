@@ -97,3 +97,12 @@ One JSON object: `{threadId, runId, status, reply, error}`.
 - `status` in `list`/`show` never says "waiting"; use `pendingRequestCount` or the `--wait` result.
 - One claude-driver thread returned a context-compressed `orchestrator_capabilities` payload (rows replaced by a placeholder marker). This comes from a compression layer in the local setup, not T3, but it means a captured capabilities result should be validated for completeness.
 - The failed and usage-limit information lives only in `t3_thread_read` items, not in the CLI.
+
+## CLI flags relied on
+
+Confirmed from the CLI's `--help` output. These are the exact invocations `lib/t3.mjs` builds.
+
+- `thread start [flags] <project> <message>`: `<message>` may be `-` to read it from stdin. Flags: `--title`, `--provider` (pass together with `--model`), `--model`, `--worktree <branch|tag|commit>`, `--branch <name>`, `--wait`, `--json`.
+- `thread send [flags] <thread> <message>`: `<message>` may be `-` for stdin. Flags: `--wait`, `--json`.
+- `thread show [flags] <thread>`: flags `--messages <integer>`, `--json`.
+- `thread list [flags]`: flags `--project <id|path>` (defaults to the current directory), `--json`.
