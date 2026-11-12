@@ -24,6 +24,8 @@ After `orq sync`:
 - `inferred: <keys>` lists tiers `orq` guessed (4 strongest, 1 smallest). Run `orq tier set <key> <1-4>` for each one you know is wrong. `unchanged: ... set by user` means the user chose it; leave it.
 - A provider with `models: []` in the capabilities lists no models. Run `orq model add <instance> <model> --tier N` for each model the user runs there; ask the user once if you do not know them.
 
+- When the user wants no automated threads on a provider, run `orq instance disable <id>` (`orq instance list` shows every instance). `orq sync` never undoes it.
+
 The `slots:` line names the tool for each role: `judge`, `memory`, `code-index` (code search), `git-host`. `orq config get` lists each slot's fallbacks in order with how to use each. If a tool errors, use the next one down, ending at the built-in path. A missing or failing tool is never a reason to stop.
 
 ## Intake
