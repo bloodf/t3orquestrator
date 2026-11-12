@@ -174,3 +174,10 @@ test('instance limit null uses defaultLimit; a number is an explicit override', 
   assert.deepEqual(keys(go(r, { running: { a: 2 } })), ['b::m']);
   assert.equal(go(r, { running: { a: 1, b: 3 }, defaultLimit: 1 }).blocked, 'limit');
 });
+
+test('atLeast raises the minimum tier and never lowers it', () => {
+  const r = reg({ a: inst() }, [mod('a', 'm2', 2), mod('a', 'm3', 3), mod('a', 'm4', 4)]);
+  assert.deepEqual(keys(go(r, { atLeast: 3 })), ['a::m3', 'a::m4']);
+  assert.deepEqual(keys(go(r, { atLeast: 1 })), ['a::m2', 'a::m3', 'a::m4']);
+  assert.equal(go(reg({ a: inst() }, [mod('a', 'm2', 2)]), { atLeast: 4 }).candidates[0].belowTier, true);
+});

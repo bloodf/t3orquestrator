@@ -38,3 +38,12 @@ test('project-level helpers live under .orq', () => {
   assert.equal(projectConfigPath('/p'), path.join('/p', '.orq', 'config.json'));
   assert.equal(ledgerPath('/p'), path.join('/p', '.orq', 'ledger.jsonl'));
 });
+
+test('scheduler helpers live under .orq', async () => {
+  const p = await import('../lib/paths.mjs');
+  assert.equal(p.projectLockPath('/p'), path.join('/p', '.orq', 'lock'));
+  assert.equal(p.runnerLockPath('/p'), path.join('/p', '.orq', 'runner.lock'));
+  assert.equal(p.integrationDir('/p'), path.join('/p', '.orq', 'integration'));
+  assert.equal(p.gateWorkDir('/p', 'u'), path.join('/p', '.orq', 'gate', 'u'));
+  assert.equal(p.gateFile('/p', 'u', 2, 'json'), path.join('/p', '.orq', 'units', 'u', 'gate-2.json'));
+});

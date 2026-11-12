@@ -1,0 +1,355 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { tick } from '../lib/tick.mjs';
+import { reduce, FINAL } from '../lib/ledger.mjs';
+
+const rules = JSON.parse(readFileSync(new URL('../playbook/routing.json', import.meta.url), 'utf8'));
+const NOW = Date.parse('2026-11-12T12:00:00Z');
+const MIN = 60_000;
+const A = 'a'.repeat(40);
+const B = 'b'.repeat(40);
+const C = 'c'.repeat(40);
+
+function deepFreeze(o) {
+  if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); Object.values(o).forEach(deepFreeze); }
+  return o;
+}
+const inst = { enabled: true, constraints: [], limit: 4, failures: 0, cooldownUntil: null };
+const model = (instance, name, tier) => [`${instance}::${name}`, {
+  instance, model: name, family: 'f', tier, tierSource: 'user', available: true, confirmedAt: null,
+  failures: 0, cooldownUntil: null, lastUsedAt: null,
+}];
+const registry = {
+  version: 1,
+  instances: { a: inst, b: inst },
+  models: Object.fromEntries([model('a', 'm2', 2), model('b', 'm2', 2), model('a', 'm3', 3), model('b', 'm4', 4)]),
+};
+const unit = (id, over = {}) => ({
+  id, title: id, job: 'implement', deps: [], paths: [`${id}/**`], forbidden: [], evidence: 'true', order: `.orq/${id}.md`, ...over,
+});
+const plan = { goal: 'g', units: [unit('a'), unit('b', { deps: ['a'] }), unit('c')] };
+
+const started = { type: 'plan-started', at: 1, planId: 'p', baseSha: A, integrationBranch: 'orq/p/integration' };
+const launched = (u, over = {}) => ({
+  type: 'launched', unit: u, at: 2, attempt: 1, threadId: `t-${u}`, key: 'a::m2', instance: 'a', model: 'm2',
+  branch: `orq/p/${u}-a1`, baseSha: A, tier: 2, ...over,
+});
+const ended = (u, status = 'completed') => ({ type: 'thread-ended', unit: u, at: 3, status });
+const gateStarted = (u, attempt = 1) => ({ type: 'gate-started', unit: u, at: 4, attempt, headSha: B, pid: 7 });
+const gatedEv = (u, verdict, attempt = 1) => ({
+  type: 'gated', unit: u, at: 5, attempt, verdict, failures: verdict === 'fail' ? ['bad'] : [], flags: [], headSha: B,
+});
+const integratedEv = (u) => ({ type: 'integrated', unit: u, at: 6, sha: B, head: C });
+const thread = (id, over = {}) => ({ id, status: 'running', pending: 0, updatedAt: NOW - MIN, ...over });
+const lease = (threadId, over = {}) => ({
+  threadId, project: '/other', unit: 'x', instance: 'b', model: 'm2', startedAt: 1, heartbeatAt: NOW, blocked: false, ...over,
+});
+
+const doneA = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'pass'), integratedEv('a')];
+
+function go(events, over = {}) {
+  return tick(deepFreeze({
+    plan, state: reduce([started, ...events]), threads: {}, registry, rules, leases: [], cap: 4, gates: {}, config: {}, now: NOW, ...over,
+  }));
+}
+const types = (r) => r.actions.map((a) => a.type);
+const evTypes = (r) => r.events.map((e) => `${e.type}:${e.unit}`);
+const launches = (r) => r.actions.filter((a) => a.type === 'launch');
+
+test('rule 1: pending > 0 blocks once; back to 0 unblocks', () => {
+  const r = go([launched('a')], { threads: { 't-a': thread('t-a', { pending: 1 }) } });
+  assert.deepEqual(evTypes(r), ['blocked:a']);
+  assert.deepEqual(r.actions, [{ type: 'lease-block', unit: 'a', threadId: 't-a' }]);
+  assert.deepEqual(r.report.newlyBlocked, [{ unit: 'a', threadId: 't-a' }]);
+  const again = go([launched('a'), { type: 'blocked', unit: 'a', at: 3 }], { threads: { 't-a': thread('t-a', { pending: 1 }) } });
+  assert.deepEqual(again.events, []);
+  assert.deepEqual(again.report.newlyBlocked, []);
+  const back = go([launched('a'), { type: 'blocked', unit: 'a', at: 3 }], { threads: { 't-a': thread('t-a') } });
+  assert.deepEqual(evTypes(back), ['unblocked:a']);
+  assert.deepEqual(back.actions, [{ type: 'lease-unblock', unit: 'a', threadId: 't-a' }]);
+});
+
+test('rule 1: completed thread moves to gating, removes the lease and starts a gate', () => {
+  const r = go([launched('a')], { threads: { 't-a': thread('t-a', { status: 'completed' }) } });
+  assert.deepEqual(evTypes(r), ['thread-ended:a']);
+  assert.equal(r.events[0].status, 'completed');
+  assert.deepEqual(r.actions, [
+    { type: 'lease-remove', unit: 'a', threadId: 't-a' },
+    { type: 'gate-start', unit: 'a', attempt: 1 },
+  ]);
+});
+
+test('rule 1: a completed thread older than the feedback is not taken as the new run', () => {
+  const events = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail'),
+    { type: 'feedback-sent', unit: 'a', at: NOW, attempt: 2, threadId: 't-a' }];
+  const stale = go(events, { threads: { 't-a': thread('t-a', { status: 'completed', updatedAt: NOW - 1 }) } });
+  assert.deepEqual(stale.events, []);
+  const fresh = go(events, { threads: { 't-a': thread('t-a', { status: 'completed', updatedAt: NOW + 1 }) } });
+  assert.deepEqual(evTypes(fresh), ['thread-ended:a']);
+});
+
+test('rule 2: pass records success (first pass) and integrates', () => {
+  const r = go([launched('a'), ended('a'), gateStarted('a')], {
+    gates: { a: { running: false, result: { verdict: 'pass', failures: [], flags: [], headSha: B } } },
+  });
+  assert.deepEqual(evTypes(r), ['gated:a']);
+  assert.deepEqual(r.actions, [
+    { type: 'record-success', unit: 'a', key: 'a::m2', job: 'implement', firstPass: true },
+    { type: 'integrate', unit: 'a' },
+    { type: 'launch', unit: 'c', attempt: 1, key: 'a::m2', instance: 'a', model: 'm2', tier: 2, family: 'f', job: 'implement', failures: null },
+  ]);
+});
+
+test('rule 2: no-evidence passes with a flag', () => {
+  const r = go([launched('a'), ended('a'), gateStarted('a')], {
+    gates: { a: { running: false, result: { verdict: 'no-evidence', failures: [], flags: [], headSha: B } } },
+  });
+  assert.equal(r.events[0].verdict, 'no-evidence');
+  assert.deepEqual(r.events[0].flags.map((f) => f.kind), ['no-evidence']);
+  assert.deepEqual(types(r), ['record-success', 'integrate', 'launch']);
+});
+
+test('rule 2: a lost gate is restarted once, then needs judgment; concurrency limits starts', () => {
+  const lost = { a: { running: false, result: null } };
+  assert.deepEqual(types(go([launched('a'), ended('a'), gateStarted('a')], { gates: lost })), ['gate-start']);
+  const twice = go([launched('a'), ended('a'), gateStarted('a'), gateStarted('a')], { gates: lost });
+  assert.deepEqual(evTypes(twice), ['needs-judgment:a']);
+  assert.equal(twice.events[0].reason, 'gate could not complete');
+  assert.deepEqual(twice.report.judgment, [{ unit: 'a', reason: 'gate could not complete' }]);
+  const two = go([...doneA, launched('b'), ended('b'), launched('c'), ended('c')]);
+  assert.deepEqual(r2(two), ['gate-start:b']);
+  const busy = go([...doneA, launched('b'), ended('b'), gateStarted('b'), launched('c'), ended('c')], {
+    gates: { b: { running: true, result: null } },
+  });
+  assert.deepEqual(r2(busy), []);
+  assert.deepEqual(r2(go([...doneA, launched('b'), ended('b'), launched('c'), ended('c')], { config: { gateConcurrency: 2 } })), ['gate-start:b', 'gate-start:c']);
+});
+function r2(r) { return r.actions.filter((a) => a.type === 'gate-start').map((a) => `${a.type}:${a.unit}`); }
+
+test('rule 3: provider failure removes the lease, records failure, and relaunches excluding the tried key', () => {
+  const r = go([launched('a')], { threads: { 't-a': thread('t-a', { status: 'failed' }) } });
+  assert.deepEqual(evTypes(r), ['thread-ended:a']);
+  assert.deepEqual(r.actions.slice(0, 2), [
+    { type: 'lease-remove', unit: 'a', threadId: 't-a' },
+    { type: 'record-failure', unit: 'a', key: 'a::m2', job: 'implement', kind: 'unknown' },
+  ]);
+  const [l] = launches(r);
+  assert.equal(l.unit, 'a');
+  assert.notEqual(l.key, 'a::m2');
+  assert.equal(l.attempt, 1);
+  const missing = go([launched('a')]);
+  assert.equal(missing.events[0].status, 'missing');
+});
+
+test('rule 3: three provider failures need judgment', () => {
+  const fail = (n) => [launched('a', { key: `k${n}` }), ended('a', 'cancelled')];
+  const r = go([...fail(1), ...fail(2), launched('a')], { threads: { 't-a': thread('t-a', { status: 'interrupted' }) } });
+  assert.deepEqual(evTypes(r), ['thread-ended:a', 'needs-judgment:a']);
+  assert.equal(r.events[1].reason, '3 provider failures');
+  assert.deepEqual(launches(r).map((a) => a.unit), ['c']);
+});
+
+test('rule 4: the full quality ladder across three attempts', () => {
+  const failGate = (attempt) => ({ a: { running: false, result: { verdict: 'fail', failures: [`f${attempt}`], flags: [], headSha: B } } });
+  const one = go([launched('a'), ended('a'), gateStarted('a')], { gates: failGate(1) });
+  assert.deepEqual(evTypes(one), ['gated:a']);
+  assert.deepEqual(one.actions, [
+    { type: 'send-feedback', unit: 'a', attempt: 2, threadId: 't-a', failures: ['f1'], key: 'a::m2', instance: 'a', model: 'm2' },
+  ]);
+  const at2 = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail'),
+    { type: 'feedback-sent', unit: 'a', at: 6, attempt: 2, threadId: 't-a' }, ended('a'), gateStarted('a', 2)];
+  const two = go(at2, { gates: failGate(2) });
+  assert.deepEqual(evTypes(two), ['gated:a']);
+  assert.ok(!types(two).includes('record-failure'));
+  const [l] = launches(two);
+  assert.equal(l.attempt, 3);
+  assert.equal(l.key, 'a::m3');
+  assert.deepEqual(l.failures, ['f2']);
+  const at3 = [...at2, gatedEv('a', 'fail', 2), launched('a', { attempt: 3, key: 'a::m3', model: 'm3', tier: 3 }), ended('a'), gateStarted('a', 3)];
+  const three = go(at3, { gates: failGate(3) });
+  assert.deepEqual(evTypes(three), ['gated:a', 'needs-judgment:a']);
+  assert.equal(three.events[1].reason, 'gate failed 3 times: f3');
+});
+
+test('rule 4: feedback waits for a free slot and is retried on later polls until sent', () => {
+  const r = go([launched('a'), ended('a'), gateStarted('a')], {
+    cap: 1, leases: [lease('other')],
+    gates: { a: { running: false, result: { verdict: 'fail', failures: ['x'], flags: [], headSha: B } } },
+  });
+  assert.deepEqual(evTypes(r), ['gated:a']);
+  assert.deepEqual(r.actions, []);
+  const awaiting = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail')];
+  const retry = go(awaiting);
+  assert.deepEqual(retry.events, []);
+  assert.deepEqual(retry.actions.map((a) => `${a.type}:${a.unit}`), ['send-feedback:a']);
+  assert.deepEqual(retry.actions[0].failures, ['bad']);
+  assert.deepEqual(go(awaiting, { cap: 1, leases: [lease('other')] }).actions, []);
+});
+
+test('item 2: a feedback run that never starts is reported, then treated as a provider failure', () => {
+  const sentAt = (ago) => [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail'),
+    { type: 'feedback-sent', unit: 'a', at: NOW - ago, attempt: 2, threadId: 't-a' }];
+  const th = { threads: { 't-a': thread('t-a', { status: 'completed', updatedAt: NOW - 30 * MIN }) } };
+  assert.deepEqual(go(sentAt(MIN), th).report.stalled, []);
+  const visible = go(sentAt(3 * MIN), th);
+  assert.deepEqual(visible.events, []);
+  assert.deepEqual(visible.report.stalled, [{ unit: 'a', threadId: 't-a', minutes: 3 }]);
+  const lost = go(sentAt(21 * MIN), th);
+  assert.deepEqual(evTypes(lost).slice(0, 1), ['thread-ended:a']);
+  assert.equal(lost.events[0].status, 'feedback-lost');
+  assert.deepEqual(types(lost).slice(0, 2), ['lease-remove', 'record-failure']);
+});
+
+test('rule 5: start one unit first, then fill the slots', () => {
+  const first = go([]);
+  assert.deepEqual(launches(first).map((a) => a.unit), ['a']);
+  assert.equal(launches(first)[0].attempt, 1);
+  const inFlight = go([launched('a')], { threads: { 't-a': thread('t-a') } });
+  assert.deepEqual(launches(inFlight), []);
+  const after = go(doneA);
+  assert.deepEqual(launches(after).map((a) => a.unit), ['b', 'c']);
+});
+
+test('rule 5: cap counts leases from other projects', () => {
+  assert.deepEqual(launches(go(doneA, { cap: 1, leases: [lease('x1')] })), []);
+  assert.deepEqual(launches(go(doneA, { cap: 2, leases: [lease('x1')] })).map((a) => a.unit), ['b']);
+  assert.equal(go(doneA, { cap: 1, leases: [lease('x1')] }).report.noSlots, true);
+});
+
+test('rule 5: a blocked lease frees its slot', () => {
+  const r = go(doneA, { cap: 1, leases: [lease('x1', { blocked: true })] });
+  assert.deepEqual(launches(r).map((a) => a.unit), ['b']);
+});
+
+test('rule 5: a dependant launches only after its dependency is integrated', () => {
+  const passed = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'pass')];
+  assert.ok(!launches(go(passed)).some((a) => a.unit === 'b'));
+  assert.ok(launches(go(doneA)).some((a) => a.unit === 'b'));
+});
+
+test('rule 5: no candidate is reported, not launched', () => {
+  const empty = { version: 1, instances: {}, models: {} };
+  const r = go([], { registry: empty });
+  assert.deepEqual(r.actions, []);
+  assert.deepEqual(r.report.unroutable[0], { unit: 'a', blocked: 'empty', reason: 'no usable model in registry; run sync', retryAt: null });
+  assert.deepEqual(r.report.unroutable.map((x) => x.unit), ['a', 'c']);
+});
+
+test('rule 5: instance limits count launches made in the same tick', () => {
+  const one = { ...registry, instances: { a: { ...inst, limit: 1 } }, models: Object.fromEntries([model('a', 'm2', 2)]) };
+  const r = go(doneA, { registry: one });
+  assert.deepEqual(launches(r).map((a) => a.unit), ['b']);
+  assert.equal(r.report.unroutable[0].unit, 'c');
+});
+
+test('rule 6: final gate when everything is integrated or dropped, then done', () => {
+  const all = [...doneA, launched('b'), { type: 'dropped', unit: 'b', at: 7 }, { type: 'dropped', unit: 'c', at: 8 }];
+  const r = go(all);
+  assert.deepEqual(r.actions, [{ type: 'final-gate' }]);
+  assert.equal(r.report.done, false);
+  const withResult = go([...all, { type: 'gate-started', unit: FINAL, at: 9, attempt: 1, headSha: C, pid: 1 }], {
+    gates: { [FINAL]: { running: false, result: { verdict: 'pass', failures: [], flags: [], headSha: C } } },
+  });
+  assert.deepEqual(evTypes(withResult), ['final-gated:null']);
+  assert.equal(withResult.report.done, true);
+  const nothing = go(['a', 'b', 'c'].map((u, i) => ({ type: 'dropped', unit: u, at: 10 + i })));
+  assert.deepEqual(nothing.actions, []);
+  assert.equal(nothing.report.done, true);
+});
+
+test('rule 7: a stalled thread is reported, never acted on', () => {
+  const r = go([launched('a')], { threads: { 't-a': thread('t-a', { updatedAt: NOW - 25 * MIN }) } });
+  assert.deepEqual(r.events, []);
+  assert.deepEqual(r.actions, []);
+  assert.deepEqual(r.report.stalled, [{ unit: 'a', threadId: 't-a', minutes: 25 }]);
+  assert.deepEqual(go([launched('a')], { threads: { 't-a': thread('t-a', { updatedAt: NOW - 25 * MIN }) }, config: { stallMinutes: 30 } }).report.stalled, []);
+});
+
+test('report counts in-flight and queued units', () => {
+  const r = go(doneA);
+  assert.equal(r.report.inFlight, 2);
+  assert.equal(r.report.queued, 0);
+  assert.equal(go([]).report.queued, 2);
+});
+
+test('deterministic and does not mutate inputs', () => {
+  const events = [...doneA, launched('c')];
+  const opts = { threads: { 't-c': thread('t-c', { pending: 2 }) } };
+  assert.deepEqual(go(events, opts), go(events, opts));
+});
+
+test('plan growth: a final gate for an older head does not count; appended units fan out at once', () => {
+  const finalAt = (head) => ({ type: 'final-gated', unit: null, at: 9, verdict: 'pass', failures: [], head });
+  const grown = { goal: 'g', units: [unit('a'), unit('d'), unit('e')] };
+  const old = go([...doneA, finalAt(A)], { plan: { goal: 'g', units: [unit('a')] } });
+  assert.deepEqual(old.actions, [{ type: 'final-gate' }]);
+  assert.equal(old.report.done, false);
+  const current = go([...doneA, finalAt(C)], { plan: { goal: 'g', units: [unit('a')] } });
+  assert.equal(current.report.done, true);
+  assert.deepEqual(current.actions, []);
+  const fan = go([...doneA, finalAt(C)], { plan: grown });
+  assert.deepEqual(launches(fan).map((x) => x.unit), ['d', 'e']);
+  assert.equal(fan.report.done, false);
+});
+
+test('a final gate result for another head is ignored and the gate restarts', () => {
+  const r = go([...doneA, { type: 'gate-started', unit: FINAL, at: 9, attempt: 1, headSha: C, pid: 1 }], {
+    plan: { goal: 'g', units: [unit('a')] },
+    gates: { [FINAL]: { running: false, result: { verdict: 'pass', failures: [], flags: [], headSha: A } } },
+  });
+  assert.deepEqual(r.events, []);
+  assert.deepEqual(r.actions, [{ type: 'final-gate' }]);
+});
+
+test('rule 5: a lease whose heartbeat is older than the TTL stops counting', () => {
+  const stale = lease('x1', { heartbeatAt: NOW - 31 * MIN });
+  assert.deepEqual(launches(go(doneA, { cap: 1, leases: [stale] })).map((a) => a.unit), ['b']);
+  assert.deepEqual(launches(go(doneA, { cap: 1, leases: [stale], config: { leaseTtlMinutes: 60 } })), []);
+});
+
+test('review and fix units route on the authors of integrated work', () => {
+  const fixOnly = go([], { plan: { goal: 'g', units: [unit('f', { job: 'fix' })] } });
+  assert.equal(launches(fixOnly)[0].tier, 2);
+  const byTier3 = [launched('a', { key: 'a::m3', model: 'm3', tier: 3, family: 'g' }), ended('a'), gateStarted('a'), gatedEv('a', 'pass'), integratedEv('a')];
+  const r = go(byTier3, { plan: { goal: 'g', units: [unit('a'), unit('r', { job: 'review', deps: ['a'] })] } });
+  assert.deepEqual(launches(r).map((x) => [x.unit, x.key]), [['r', 'a::m3']]);
+});
+
+test('item 1: every passed unit gets an integrate action on every poll', () => {
+  const passed = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'pass')];
+  const r = go(passed);
+  assert.deepEqual(r.actions.filter((a) => a.type !== 'launch'), [{ type: 'integrate', unit: 'a' }]);
+});
+
+test('item 3: attempt 3 excludes the model that failed twice, even with no higher tier', () => {
+  const flat = { ...registry, models: Object.fromEntries([model('a', 'm2', 2), model('b', 'm2', 2)]) };
+  const at2 = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail'),
+    { type: 'feedback-sent', unit: 'a', at: 6, attempt: 2, threadId: 't-a' }, ended('a'), gateStarted('a', 2), gatedEv('a', 'fail', 2)];
+  const [l] = launches(go(at2, { registry: flat }));
+  assert.equal(l.attempt, 3);
+  assert.equal(l.key, 'b::m2');
+});
+
+test('item 4: routing blocked by exclusion needs judgment instead of idling forever', () => {
+  const one = { ...registry, models: Object.fromEntries([model('a', 'm2', 2)]) };
+  const r = go([launched('a'), ended('a', 'failed')], { registry: one, plan: { goal: 'g', units: [unit('a')] } });
+  assert.deepEqual(evTypes(r), ['needs-judgment:a']);
+  assert.equal(r.events[0].reason, 'no model available: all excluded');
+  assert.deepEqual(r.report.judgment, [{ unit: 'a', reason: 'no model available: all excluded' }]);
+});
+
+test('item 8: a gate result for a commit other than the one gated is ignored', () => {
+  const r = go([launched('a'), ended('a'), gateStarted('a')], {
+    gates: { a: { running: false, result: { verdict: 'pass', failures: [], flags: [], headSha: C } } },
+  });
+  assert.deepEqual(r.events, []);
+  assert.deepEqual(r.actions, [{ type: 'gate-start', unit: 'a', attempt: 1 }]);
+});
+
+test('second review item 2: feedback deferred for a slot keeps the unit in flight and the poll slot-limited', () => {
+  const awaiting = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail')];
+  const r = go(awaiting, { cap: 1, leases: [lease('other')] });
+  assert.equal(r.report.noSlots, true);
+  assert.equal(r.report.inFlight, 1);
+});

@@ -134,7 +134,7 @@ test('route: below-tier flag, machine perInstanceLimit and leases', async () => 
   const below = await orq(['route', '--job', 'plan'], s);
   assert.match(below.out, /^1 a x-mini tier=1 family=unknown unconfirmed below-tier\n$/);
   await fs.mkdir(path.join(s.home, 'leases'), { recursive: true });
-  await fs.writeFile(path.join(s.home, 'leases/t1.json'), JSON.stringify({ threadId: 't1', project: 'p', unit: 'u', instance: 'a', model: 'm', startedAt: 1 }));
+  await fs.writeFile(path.join(s.home, 'leases/t1.json'), JSON.stringify({ threadId: 't1', project: 'p', unit: 'u', instance: 'a', model: 'm', startedAt: NOW }));
   assert.equal((await orq(['route', '--job', 'docs'], s)).code, 0);
   await fs.writeFile(path.join(s.home, 'config.json'), '{"perInstanceLimit":1}');
   const full = await orq(['route', '--job', 'docs'], s);

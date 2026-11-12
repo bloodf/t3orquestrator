@@ -64,3 +64,16 @@ test('setConfigValue: machine keys and unknown keys', () => {
   assert.throws(() => setConfigValue({}, 'nope', '1', 'machine'), /valid keys: cap, perInstanceLimit/);
   assert.throws(() => setConfigValue({}, 'cap', '1', 'project'), /valid keys: autonomy, base, checks\.setup, checks\.unit, checks\.full/);
 });
+
+test('project config: scheduler keys are positive integers, settable and validated', async () => {
+  const c = await loadProjectConfig(await tmpFile('{"pollSeconds":5,"leaseTtlMinutes":10}'));
+  assert.equal(c.pollSeconds, 5);
+  assert.equal(c.leaseTtlMinutes, 10);
+  await assert.rejects(loadProjectConfig(await tmpFile('{"gateConcurrency":0}')), /gateConcurrency must be a positive integer/);
+  await assert.rejects(loadProjectConfig(await tmpFile('{"stallMinutes":"x"}')), /stallMinutes must be a positive integer/);
+  const base = { autonomy: null, base: 'main', checks: { setup: null, unit: null, full: null }, slots: {}, t3: null };
+  for (const k of ['pollSeconds', 'stallMinutes', 'gateConcurrency', 'leaseTtlMinutes']) {
+    assert.equal(setConfigValue(base, k, '7', 'project')[k], 7);
+  }
+  assert.throws(() => setConfigValue(base, 'pollSeconds', '0', 'project'), /positive integer/);
+});
