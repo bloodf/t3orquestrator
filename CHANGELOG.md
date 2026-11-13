@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `orq stats [--all] [--json]`: per-model launches, provider failures, gate results, first passes and stops from the ledger, plus tier, instance and time totals.
 - A `note:` in `orq status` and `orq wait` when the `cap` override is above what the machine computes.
 
 ### Fixed
