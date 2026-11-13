@@ -386,3 +386,9 @@ test('defaultRun sweeps children left behind by a command that exited', async (t
   while (alive(pid) && Date.now() < deadline) await new Promise((res) => setTimeout(res, 50));
   assert.equal(alive(pid), false);
 });
+
+test('a unit without a forbidden list is gated as if the list were empty', async () => {
+  const { forbidden, ...bare } = unit();
+  const r = await gate({ unit: bare });
+  assert.equal(r.verdict, 'pass');
+});

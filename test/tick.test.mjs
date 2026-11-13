@@ -421,3 +421,9 @@ test('worker status: BLOCKED after feedback goes to judgment; DONE and unknown r
     assert.ok(types(ok).includes('gate-start'), JSON.stringify(report));
   }
 });
+
+test('rule 2: a gate that could not complete reports why when the gate process left an error', () => {
+  const lost = { a: { running: false, result: null, error: 'orq: globs must be an array' } };
+  const twice = go([launched('a'), ended('a'), gateStarted('a'), gateStarted('a')], { gates: lost });
+  assert.equal(twice.events[0].reason, 'gate could not complete: orq: globs must be an array');
+});

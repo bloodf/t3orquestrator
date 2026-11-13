@@ -507,3 +507,16 @@ test('a new commit after feedback is gated', async (t) => {
   assert.equal(spawned.length, 1);
   assert.equal(unitOf(await readState(s.p.repo), 'a').gateStarts, 1);
 });
+
+test('collectGate: a dead gate with no result reports the last line of its log', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await fs.mkdir(path.dirname(gateFile(s.p.repo, 'a', 1, 'log')), { recursive: true });
+  await fs.writeFile(gateFile(s.p.repo, 'a', 1, 'log'), `first\n\u001b[31morq: globs must be an array\u001b[0m\n\n${''}`);
+  const g = await collectGate(s.fx, 'a', 1);
+  assert.equal(g.running, false);
+  assert.equal(g.result, null);
+  assert.match(g.error, /^.?\[?3?1?m?orq: globs must be an array/);
+  assert.equal(/[\u0000-\u001f]/.test(g.error), false);
+  await fs.writeFile(gateFile(s.p.repo, 'a', 1, 'log'), 'x'.repeat(500));
+  assert.equal((await collectGate(s.fx, 'a', 1)).error.length, 160);
+});
