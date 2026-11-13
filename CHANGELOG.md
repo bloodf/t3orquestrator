@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-13
+
 ### Added
 
 - `orq ask`: a worker's question, or a product decision the request does not settle, is answered by the strongest enabled model instead of waiting for the user. On by default (`questions=auto`); `orq config set questions user` turns it off. What that model must not decide (destructive actions, spending, anything beyond the autonomy mode) is asked of the user in the orchestrator's thread, never in a worker's.
