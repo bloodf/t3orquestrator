@@ -44,6 +44,7 @@ Read [How it works](docs/how-it-works.md) for the full sequence.
 - A global agent instruction file that mandates another dispatch or routing procedure conflicts with the playbook. Exempt projects that use this kit from it.
 - There is no token-usage accounting, because T3's CLI does not expose token usage.
 - The machine-wide thread cap counts only threads `orq` started. Threads you start by hand are not counted.
+- `orq` does not remove the worktrees T3 Code creates for worker threads. They accumulate until you remove them with `git worktree remove`.
 
 ## Models and providers
 
