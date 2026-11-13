@@ -13,6 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Plan field `setup: false` on a unit skips `checks.setup` in that unit's gate.
 - `orq plan check` warns when a unit's evidence runs a file outside the repository or under `.orq/`.
 - A `note:` in `orq status` and `orq wait` when the `cap` override is above what the machine computes.
+- `orq stats [--all] [--json]`: per-model launches, provider failures, gate results, first passes and stops from the ledger, plus tier, instance and time totals.
 
 ### Changed
 

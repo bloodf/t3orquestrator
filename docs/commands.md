@@ -18,6 +18,7 @@ Run `orq` as `node ~/.t3orq/kit/bin/orq.mjs`. Project commands act on the curren
 | [`unit`](#unit) | Retry or drop a unit after judgment |
 | [`review`](#review) | Start or read a review of the integrated result |
 | [`ask`](#ask) | Get a decision from the strongest enabled model instead of the user |
+| [`stats`](#stats) | Which model did well: launches, gates, first passes |
 | [`summary`](#summary) | Write the pull request body |
 | [`settle`](#settle) | List finished threads to settle in T3 |
 | [`probe`](#probe) | Print the machine cap and why |
@@ -211,6 +212,12 @@ Lists the threads `orq` started that are done for good and that T3 reports as no
 Writes the pull request body to `.orq/summary.md`, or to another `.md` file directly under `.orq/`. The body has these sections: goal, decisions, decisions taken without you (answered `orq ask` decisions: question → answer and the model; omitted when there are none), a unit table, evidence results, final checks, reviews, and units not done. It prints `summary: <file> (<n> lines)`. Exit 4 when the plan has not started.
 
 `orq summary --plan <planId>` prints the summary of an archived plan and writes nothing.
+
+## stats
+
+`orq stats [--all] [--json]`
+
+Counts, per model, how the runs went, read from the ledger. Events count for the model the unit was last launched on. Columns: `launched`; `done` (thread ended completed); `prov-fail` (thread ended any other way, a failed start included); `gate-pass` and `gate-fail`; `first-pass` (the unit's first gate result was a pass or no-evidence on attempt 1); `no-commit` (a gate failure because the worker committed nothing); `stopped` (the worker reported it could not continue). The `--json` object also has `integrated` per model. Above the table: plans, units, integrated, dropped and failed units, wall-clock minutes (first to last event per plan, summed), worker minutes (launch or feedback to thread end), launches per tier and per instance. Rows are most-launched first, at most 40. `--all` adds every archived plan of this project. Prints `no runs recorded` when the ledger is empty.
 
 ## probe
 
