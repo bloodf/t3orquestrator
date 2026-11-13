@@ -225,6 +225,7 @@ test('ask: runtime failures after the arguments are checked end in escalate:, ex
     const r = await orq(['ask'], p);
     assert.equal(r.code, 0, `${file}: ${r.err}`);
     assert.match(r.out, /^escalate: no decision \([^\n]{1,160}\)\n$/, file);
+    assert.match(r.err, /invalid JSON/, `${file}: the full error goes to stderr, where it cannot be read as a result line`);
   }
   const reg = await makeProject(t, [unitSpec('a')]);
   await fs.writeFile(path.join(reg.home, 'registry.json'), '[');
