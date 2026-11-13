@@ -7,6 +7,7 @@ import { run } from '../lib/cli.mjs';
 import { defaultExec as gitExecReal } from '../lib/git.mjs';
 import fsSync from 'node:fs';
 import { commit, readState, unitOf } from '../lib/ledger.mjs';
+import { readLines } from '../lib/store.mjs';
 import { listLeases, countActive, writeLease } from '../lib/leases.mjs';
 import {
   makeProject, unitSpec, commitOn, sh, REGISTRY,
@@ -17,7 +18,7 @@ const GIB = 1024 ** 3;
 const quiet = { write: () => {} };
 const row = (t) => ({
   threadId: t.id, projectId: 'p', status: t.status, itemCount: 1, updatedAt: new Date(t.updatedAt).toISOString(),
-  title: t.title, providerInstanceId: t.instance, model: t.model,
+  title: t.title, providerInstanceId: t.instance, model: t.model, ...(t.settled !== undefined ? { settled: t.settled } : {}),
 });
 
 // A scripted t3: each thread of a unit follows the next script; every sleep advances live threads one step.
@@ -45,7 +46,7 @@ function simulator(p, scripts) {
     sim.n += 1;
     const nth = (sim.byUnit[unit] ?? []).length;
     const t = {
-      id: `th${sim.n}`, unit, title: opt(args, '--title'), status: 'running', pending: 0, updatedAt: sim.now, message: input,
+      id: `th${sim.n}`, unit, settled: sim.settled, title: opt(args, '--title'), status: 'running', pending: 0, updatedAt: sim.now, message: input,
       instance: opt(args, '--provider'), model: opt(args, '--model'), branch: opt(args, '--branch'),
       base: opt(args, '--worktree'), script: sim.dead?.has(opt(args, '--provider')) ? ['fail'] : sim.scripts[unit]?.[nth] ?? ['idle'], step: 0,
     };
@@ -66,6 +67,12 @@ function simulator(p, scripts) {
       if (step === 'unblock') t.pending = 0;
       if (step === 'fail') t.status = 'failed';
       if (step === 'needs-context') Object.assign(t, { status: 'completed', reply: 'NEEDS_CONTEXT\nThe work order says 41 but the test wants 42.' });
+      if (step === 'commit-fail') { // committed its work, then its provider died
+        await commitOn(p.repo, t.branch, { [`${t.unit}.txt`]: `${t.unit}\n` }, t.unit);
+        t.status = 'failed';
+      }
+      if (step === 'complete') t.status = 'completed'; // finished without a new commit
+      if (step === 'throttle') t.status = 'throttled'; // a status orq does not know; T3 never moves it again
       if (step === 'commit-complete') {
         await commitOn(p.repo, t.branch, { [`${t.unit}.txt`]: `${t.unit}\n` }, t.unit);
         t.status = 'completed';
@@ -467,4 +474,89 @@ test('wait and status name a machine cap override above what the machine compute
   assert.ok((await orq(['status'], p, sim)).out.split('\n').includes(note));
   const fine = await makeProject(t, [unitSpec('a')], { cap: 3 });
   assert.doesNotMatch((await orq(['status'], fine, simulator(fine, {}))).out, /is an override/);
+});
+
+test('wait: a worker whose provider failed after committing is continued on another model; the gate judges the inherited work', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['commit-fail'], ['complete']] });
+  const r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  const [first, ...notes] = r.out.trim().split('\n');
+  assert.match(first, /^done: 1 units integrated at /);
+  const [a1, a2] = sim.byUnit.a;
+  assert.deepEqual(notes, [`note: unit a continues on ${a2.instance}::${a2.model} from 1 commits left by ${a1.instance}::${a1.model}`]);
+  assert.notEqual(`${a1.instance}::${a1.model}`, `${a2.instance}::${a2.model}`);
+  assert.equal(a2.base, sh(p.repo, 'rev-parse', a1.branch)); // started at the failed branch head
+  assert.match(a2.message, /^## Hand-over\n/);
+  const u = unitOf(await readState(p.repo), 'a');
+  assert.deepEqual([u.state, u.baseSha], ['integrated', p.baseSha]);
+  await fs.stat(path.join(p.repo, '.orq', 'integration', 'a.txt'));
+  assert.match((await orq(['status'], p, sim)).out, /^a integrated attempt=1 model=\S+ tier=2 continued thread=/m);
+});
+
+test('wait: a unit with setup: false skips checks.setup; others still run it; the warning for outside evidence is a note', async (t) => {
+  const p = await makeProject(t, [unitSpec('docs', { setup: false }), unitSpec('code', { evidence: 'test -f code.txt && test -f /etc/hosts' })],
+    { cap: 2, checks: { setup: 'exit 7' } });
+  const sim = simulator(p, { docs: [['commit-complete']], code: [['commit-complete']] });
+  const r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  const st = await readState(p.repo);
+  assert.equal(unitOf(st, 'docs').state, 'integrated');
+  assert.equal(unitOf(st, 'code').state, 'failed');
+  assert.match(unitOf(st, 'code').reason, /^setup failed \(exit 7\)/);
+  assert.doesNotMatch(r.out, /warning:/); // /etc is a system location, not a check of the orchestrator's
+  const q = await makeProject(t, [unitSpec('a', { evidence: 'node /srv/checks/a.mjs' })]);
+  const w = await orq(['wait', '--max-seconds', '20'], q, simulator(q, { a: [['idle']] }));
+  assert.ok(w.out.split('\n').includes('warning: a: evidence runs a file outside the repository (/srv/checks/a.mjs); a check belongs in the repository, written by a unit'), w.out);
+});
+
+test('wait: a thread with an unknown status is read as running, noted once, and given up when it stays quiet', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const cfgFile = path.join(p.repo, '.orq', 'config.json');
+  await fs.writeFile(cfgFile, JSON.stringify({ ...JSON.parse(await fs.readFile(cfgFile, 'utf8')), stallMinutes: 1 }));
+  const sim = simulator(p, { a: [['throttle'], ['commit-complete']] });
+  const r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  const [first, ...notes] = r.out.trim().split('\n');
+  assert.match(first, /^done: 1 units integrated at /);
+  const [a1] = sim.byUnit.a;
+  assert.equal(notes.filter((n) => n.includes('does not know')).length, 1);
+  assert.ok(notes.includes(`note: thread ${a1.id} has status "throttled" that this version does not know; treated as running`), notes.join('\n'));
+  assert.ok(notes.some((n) => /^note: unit a gave up on thread \S+ \(quiet for 2 min\); continuing on another model$/.test(n)), notes.join('\n'));
+  assert.equal(sim.byUnit.a.length, 2);
+  assert.equal((await readLines(path.join(p.repo, '.orq', 'ledger.jsonl'))).filter((e) => e.type === 'thread-ended' && e.status === 'stalled').length, 1);
+});
+
+test('wait: a settle line names finished unsettled threads, after the decision line and before the notes', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')], { cap: 18 }); // the cap override adds a note
+  const sim = simulator(p, { a: [['commit-fail'], ['complete']] });
+  sim.settled = false;
+  const r = await orq(['wait'], p, sim);
+  const lines = r.out.trim().split('\n');
+  const [a1, a2] = sim.byUnit.a;
+  assert.match(lines[0], /^done: /);
+  assert.equal(lines[1], `settle: ${a1.id} ${a2.id}`);
+  assert.match(lines[2], /^note: cap 18 is an override/);
+  assert.ok(lines.slice(3).every((l) => l.startsWith('note: ')));
+  const s = await orq(['settle'], p, sim);
+  assert.deepEqual([s.code, s.out], [0, `${a1.id} unit a replaced\n${a2.id} unit a integrated\n`]);
+  for (const th of sim.threads.values()) th.settled = true;
+  assert.equal((await orq(['settle'], p, sim)).out, 'nothing to settle\n');
+});
+
+test('settle --all also covers archived plans; archive points at it when finished threads are left unsettled', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['commit-complete']], b: [['commit-complete']] });
+  sim.settled = false;
+  await orq(['wait'], p, sim);
+  sim.now += 60_000;
+  const archived = await orq(['plan', 'archive'], p, sim);
+  assert.equal(archived.code, 0, archived.err);
+  assert.ok(archived.out.split('\n').includes('settle: run "orq settle --all"'), archived.out);
+  const a1 = sim.byUnit.a[0].id;
+  assert.equal((await orq(['settle'], p, sim)).out, 'nothing to settle\n'); // no current plan
+  assert.equal((await orq(['settle', '--all'], p, sim)).out, `${a1} unit a integrated\n`);
+  sim.threads.get(a1).settled = true;
+  assert.equal((await orq(['settle', '--all'], p, sim)).out, 'nothing to settle\n');
+  assert.equal((await orq(['settle', 'x'], p, sim)).code, 2);
 });

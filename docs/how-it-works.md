@@ -82,9 +82,11 @@ The gate judges the committed bytes between the unit's base and the worker's bra
 
 1. There must be at least one commit on top of the base.
 2. Every changed file must match the unit's `paths` and none of its `forbidden` globs.
-3. A fresh detached checkout of the head runs `checks.setup`, then the unit's `evidence` command, then `checks.unit` if it is set. Each step has 20 minutes. A failed step is run once more. If it passes the second time, the gate passes with a `flaky` flag. A setup step that fails twice is not held against the unit: it goes to the orchestrator as `setup failed`, because the worker cannot fix the project's install step.
+3. A fresh detached checkout of the head runs `checks.setup` (skipped for a unit whose plan entry has `"setup": false`), then the unit's `evidence` command, then `checks.unit` if it is set. Each step has 20 minutes. A failed step is run once more. If it passes the second time, the gate passes with a `flaky` flag. A setup step that fails twice is not held against the unit: it goes to the orchestrator as `setup failed`, because the worker cannot fix the project's install step.
 
-The verdict is `pass` or `fail`. The final gate on the integration head runs `checks.setup` and then `checks.full`. Its verdict is `no-evidence` when `checks.full` is not set.
+The evidence belongs in the repository: `orq plan check` warns (never fails) when a unit's evidence runs a file outside the project or under `.orq/`, since such a check is not in the worker's commit or the pull request.
+
+The verdict is `pass` or `fail`. The final gate on the integration head runs `checks.setup` and then `checks.full`; a unit's `setup` field does not affect it. Its verdict is `no-evidence` when `checks.full` is not set.
 
 Flags never fail the gate. They tell the orchestrator what to read before it accepts the work. `orq status` lists them per unit.
 

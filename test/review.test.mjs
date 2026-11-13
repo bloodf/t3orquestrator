@@ -6,7 +6,7 @@ import path from 'node:path';
 import { run } from '../lib/cli.mjs';
 import { commit } from '../lib/ledger.mjs';
 import { listLeases, writeLease } from '../lib/leases.mjs';
-import { makeProject, unitSpec } from './support/project.mjs';
+import { makeProject, unitSpec, REGISTRY } from './support/project.mjs';
 
 const NOW = Date.parse('2026-11-12T12:00:00Z');
 
@@ -15,10 +15,13 @@ function fakeT3(world) {
   const ok = (o) => ({ code: 0, stdout: JSON.stringify(o), stderr: '' });
   const exec = (_bin, args, opts) => {
     calls.push({ args, input: opts?.input });
-    if (args[1] === 'start') return world.startFail ? { code: 1, stdout: '', stderr: 'boom' } : ok({ threadId: 'rv1', projectId: 'pr', runId: 'r1' });
+    if (args[1] === 'start') {
+      world.started = (world.started ?? 0) + 1;
+      return world.startFail ? { code: 1, stdout: '', stderr: 'boom' } : ok({ threadId: `rv${world.started + (world.offset ?? 0)}`, projectId: 'pr', runId: 'r1' });
+    }
     return ok({
       thread: {
-        threadId: 'rv1', projectId: 'pr', status: world.status, itemCount: 2, updatedAt: '2026-11-12T10:00:00.000Z',
+        threadId: args[2], projectId: 'pr', status: world.statusOf?.[args[2]] ?? world.status, itemCount: 2, updatedAt: '2026-11-12T10:00:00.000Z',
         providerInstanceId: 'pa', model: 'm2', pendingRequestCount: 0,
       },
       messages: [{ role: 'user', runId: 'r', text: 'order' }, { role: 'assistant', runId: 'r', text: world.text }],
@@ -171,7 +174,8 @@ test('show: running, completed (recorded once), failed', async (t) => {
   const m = (await registry(p)).models['pa::m2'];
   assert.equal(m.outcomes.review.attempts, 1);
   assert.equal(m.confirmedAt, NOW);
-  const p2 = await integratedProject(t);
+  // one model only: nothing to replace a failed review with
+  const p2 = await integratedProject(t, { registry: { ...REGISTRY, models: { 'pa::m2': REGISTRY.models['pa::m2'] } } });
   await orq(['review', 'start'], p2);
   const failed = await orq(['review', 'show'], p2, { status: 'failed' });
   assert.equal(failed.code, 4);
@@ -225,4 +229,31 @@ test('start: an order that is a directory or a symlink out of .orq is refused', 
   const l = await orq(['review', 'start', '--order', '.orq/orders/link.md'], p);
   assert.equal(l.code, 2);
   assert.equal(l.calls.length, 0);
+});
+
+test('show: a failed review is replaced on another model (same order, same head), at most twice', async (t) => {
+  const p = await integratedProject(t);
+  await orq(['review', 'start'], p);
+  const r = await orq(['review', 'show'], p, { status: 'failed', offset: 1 });
+  assert.equal(r.code, 0, r.err);
+  const doc = await reviews(p);
+  const [one, two] = doc.reviews;
+  assert.equal(r.out, `review 1: failed on ${one.key}; replaced by review 2 on ${two.key} (thread rv2)\n`);
+  assert.notEqual(one.key, two.key);
+  assert.deepEqual([one.status, one.replacedBy, two.status, two.replaces, two.head], ['failed', 2, 'running', 1, one.head]);
+  const start = r.calls.find((c) => c.args[1] === 'start');
+  assert.equal(start.input, 'Review the integrated diff.\n');
+  assert.ok(start.args.includes('orq/p1/review-2'));
+  assert.deepEqual((await listLeases(path.join(p.home, 'leases'))).map((l) => l.threadId), ['rv2']);
+  // asking again about review 1 does not start another
+  const again = await orq(['review', 'show', '1'], p, { status: 'failed' });
+  assert.deepEqual([again.out, again.calls.filter((c) => c.args[1] === 'start').length], [r.out, 0]);
+  const second = await orq(['review', 'show'], p, { status: 'failed', offset: 2 });
+  const third = (await reviews(p)).reviews[2];
+  assert.equal(second.out, `review 2: failed on ${two.key}; replaced by review 3 on ${third.key} (thread rv3)\n`);
+  assert.equal(new Set([one.key, two.key, third.key]).size, 3);
+  const last = await orq(['review', 'show'], p, { status: 'failed' });
+  assert.deepEqual([last.code, last.out], [4, 'review 3: failed; run "orq review start" again\n']);
+  assert.equal(last.calls.filter((c) => c.args[1] === 'start').length, 0);
+  assert.deepEqual(await listLeases(path.join(p.home, 'leases')), []);
 });

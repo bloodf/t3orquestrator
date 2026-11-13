@@ -227,3 +227,19 @@ test('provider failures record the instance; quality failures do not; retry clea
   s = apply(s, ev('needs-judgment', 'u', { reason: 'x' }));
   assert.deepEqual(unitOf(apply(s, ev('retried', 'u')), 'u').triedInstances, []);
 });
+
+test('continuation: a provider failure remembers the failed launch; launched records what it continues; old ledgers replay', () => {
+  const failed = run(launched('u', { family: 'f' }), ev('thread-ended', 'u', { status: 'failed' }));
+  assert.deepEqual(unitOf(failed, 'u').failedLaunch, {
+    threadId: 't1', branch: 'orq/p/u-a1', baseSha: A, key: 'i::m', attempt: 1, continues: null, status: 'failed',
+  });
+  const cont = apply(failed, launched('u', { threadId: 't2', key: 'j::m', instance: 'j', baseSha: A, continues: B }));
+  assert.deepEqual([unitOf(cont, 'u').continues, unitOf(cont, 'u').failedLaunch], [B, null]);
+  // after three provider failures and a retry by the user, the work is still handed on
+  const judged = apply(failed, ev('needs-judgment', 'u', { reason: '3 provider failures' }));
+  assert.equal(unitOf(apply(judged, ev('retried', 'u')), 'u').failedLaunch.branch, 'orq/p/u-a1');
+  // an old ledger (no continues field) replays with continues null
+  const old = run(launched('u'), ev('thread-ended', 'u', { status: 'failed' }), launched('u', { threadId: 't2' }));
+  assert.equal(unitOf(old, 'u').continues, null);
+  assert.equal(unitOf(old, 'u').state, 'running');
+});

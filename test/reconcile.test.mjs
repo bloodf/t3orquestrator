@@ -24,13 +24,14 @@ async function setup(t) {
 
 test('adoptLaunches: a lease with a live thread and no launched event is adopted once', async (t) => {
   const s = await setup(t);
-  await writeLease(s.dir, s.ahead('a', { wantedTier: 3 }));
+  await writeLease(s.dir, s.ahead('a', { wantedTier: 3, continues: 'c'.repeat(40) }));
   await writeLease(s.dir, s.ahead('b', { launch: 2 }));
   assert.deepEqual(await adoptLaunches(s.fx, []), []);
   assert.deepEqual(await adoptLaunches(s.fx, [{ id: 'th-a' }, { id: 'th-b' }]), ['a']);
   const a = unitOf(await readState(s.p.repo), 'a');
   assert.deepEqual([a.state, a.threadId, a.launches, a.branch, a.key, a.tier, a.family], ['running', 'th-a', 1, 'orq/p1/a-a1', 'pa::m2', 2, 'f']);
   assert.equal(a.wantedTier, 3); // launched below its tier: status still says so after a crash
+  assert.equal(a.continues, 'c'.repeat(40));
   assert.equal(unitOf(await readState(s.p.repo), 'b').state, 'queued');
   assert.deepEqual(await adoptLaunches(s.fx, [{ id: 'th-a' }]), []);
 });

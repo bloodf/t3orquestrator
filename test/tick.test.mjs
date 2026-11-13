@@ -513,3 +513,26 @@ test('a unit blocked only by a provider instance limit waits for a slot instead 
   assert.equal(r.report.noSlots, true);
   assert.deepEqual(r.report.unroutable, []);
 });
+
+test('K7: a quiet running thread is reported at stallMinutes and given up at twice that; blocked is never given up', () => {
+  const quiet = (min, over = {}) => go([launched('a')], {
+    threads: { 't-a': thread('t-a', { updatedAt: NOW - min * MIN, ...over.thread }) }, leases: [lease('t-a', { project: '/p', unit: 'a', instance: 'a' })], cap: 1, ...over.tick,
+  });
+  const calm = quiet(19);
+  assert.deepEqual([calm.events, calm.report.stalled, calm.report.notes], [[], [], []]);
+  const reported = quiet(39);
+  assert.deepEqual([reported.events, reported.report.stalled.map((s) => s.minutes)], [[], [39]]);
+  const given = quiet(40); // default stallMinutes 20: twice is 40
+  assert.deepEqual(evTypes(given), ['thread-ended:a']);
+  assert.equal(given.events[0].status, 'stalled');
+  assert.deepEqual(given.report.notes, ['note: unit a gave up on thread t-a (quiet for 40 min); continuing on another model']);
+  assert.deepEqual(given.report.stalled, []);
+  assert.deepEqual(types(given).slice(0, 2), ['lease-remove', 'record-failure']);
+  const [relaunch] = launches(given); // the freed slot (cap 1) takes the continuation in the same tick
+  assert.equal(relaunch.unit, 'a');
+  assert.notEqual(relaunch.key, 'a::m2');
+  const custom = quiet(40, { tick: { config: { stallMinutes: 30 } } });
+  assert.deepEqual([custom.events, custom.report.stalled.map((s) => s.minutes)], [[], [40]]);
+  const blocked = go([launched('a'), { type: 'blocked', unit: 'a', at: 3 }], { threads: { 't-a': thread('t-a', { pending: 1, updatedAt: NOW - 600 * MIN }) } });
+  assert.deepEqual([blocked.events, blocked.report.notes], [[], []]);
+});

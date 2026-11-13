@@ -308,3 +308,15 @@ test('sync records the orchestrator\'s own model in the project config; absent f
   assert.equal(Object.hasOwn(cfg, 'orchestrator'), false);
   assert.equal(cfg.questions, 'auto');
 });
+
+test('plan check prints a warning per unit whose evidence runs a file outside the repository; still ok', async () => {
+  const s = await setup();
+  await fs.mkdir(path.join(s.cwd, '.orq/units/a'), { recursive: true });
+  await fs.writeFile(path.join(s.cwd, '.orq/units/a/order.md'), 'x\n');
+  await fs.writeFile(path.join(s.cwd, '.orq/plan.json'), JSON.stringify({
+    goal: 'g', units: [{ id: 'a', title: 'a', job: 'implement', paths: ['a/**'], evidence: 'node .orq/verify.mjs a', order: '.orq/units/a/order.md' }],
+  }));
+  const r = await orq(['plan', 'check'], s);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out, 'warning: a: evidence runs a file outside the repository (.orq/verify.mjs); a check belongs in the repository, written by a unit\nplan ok: 1 units, order: a\n');
+});

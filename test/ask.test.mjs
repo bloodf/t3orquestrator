@@ -6,7 +6,7 @@ import path from 'node:path';
 import { run } from '../lib/cli.mjs';
 import { commit } from '../lib/ledger.mjs';
 import { listLeases, writeLease } from '../lib/leases.mjs';
-import { makeProject, unitSpec } from './support/project.mjs';
+import { makeProject, unitSpec, REGISTRY } from './support/project.mjs';
 
 const NOW = Date.parse('2026-11-12T12:00:00Z');
 const TEMPLATE_FIRST = '# Decision order';
@@ -18,10 +18,15 @@ function fakeT3(p, world) {
   const exec = (_bin, args, opts) => {
     calls.push({ args, input: opts?.input });
     if (args[1] === 'start') world.onStart?.(args);
-    if (args[1] === 'start') return world.startFail ? { code: 1, stdout: '', stderr: 'boom' } : ok({ threadId: world.threadId ?? 'ask-th', projectId: 'pr', runId: 'r1' });
+    if (args[1] === 'start') {
+      world.started = (world.started ?? 0) + 1;
+      const fail = world.startFail === true || world.started <= (world.startFails ?? 0);
+      return fail ? { code: 1, stdout: '', stderr: 'boom' } : ok({ threadId: world.threadId ?? (world.started === 1 ? 'ask-th' : `ask-th${world.started}`), projectId: 'pr', runId: 'r1' });
+    }
     if (args[1] === 'show') {
       world.leasesAtShow = fsSync.readdirSync(path.join(p.home, 'leases')).filter((f) => f.endsWith('.json'));
-      const status = world.statuses.length > 1 ? world.statuses.shift() : world.statuses[0];
+      const q = world.threadStatuses?.[args[2]] ?? world.statuses;
+      const status = q.length > 1 ? q.shift() : q[0];
       return ok({
         thread: {
           threadId: 'ask-th', projectId: 'pr', status, itemCount: 2, updatedAt: '2026-11-12T12:00:00.000Z', providerInstanceId: 'pb', model: 'm4', pendingRequestCount: 0,
@@ -91,19 +96,23 @@ test('ask: every failure ends in escalate: no decision, exit 0', async (t) => {
   const p = await makeProject(t, [unitSpec('a')]);
   const bad = await orq(['ask'], p, { reply: 'I would use 8080.' });
   assert.deepEqual([bad.code, bad.out], [0, 'escalate: no decision (the reply had no ANSWER or ESCALATE line)\n']);
+  // every thread fails: three models are tried, then the user is asked
   const failed = await orq(['ask'], p, { statuses: ['running', 'failed'] });
-  assert.deepEqual([failed.code, failed.out], [0, 'escalate: no decision (the decision thread failed)\n']);
+  const tried = (await asks(p)).asks.slice(1).map((a) => a.key);
+  assert.deepEqual([failed.code, failed.out], [0, `escalate: no decision (the decision thread failed; tried ${tried.join(', ')})\n`]);
+  assert.deepEqual([tried.length, new Set(tried).size, tried[0], starts(failed).length], [3, 3, 'pb::m4', 3]);
   assert.equal((await readJson(path.join(p.home, 'registry.json'))).models['pb::m4'].failures, 1);
   // the only tier-4 model now cools down: the strongest free model decides instead, and the record says which
   const weaker = await orq(['ask'], p);
   assert.equal(weaker.out, 'answer: use 8080\n  The config sets it.\n');
-  assert.deepEqual(starts(weaker)[0].args.slice(4, 8), ['--provider', 'pa', '--model', 'm3']);
-  assert.deepEqual((await asks(p)).asks.map((a) => [a.status, a.key, a.tier]), [['failed', 'pb::m4', 4], ['failed', 'pb::m4', 4], ['answered', 'pa::m3', 3]]);
+  assert.equal((await asks(p)).asks.at(-1).status, 'answered');
+  assert.ok((await asks(p)).asks.at(-1).tier < 4);
   const fresh = await makeProject(t, [unitSpec('a')]);
   const start = await orq(['ask'], fresh, { startFail: true });
-  assert.deepEqual([start.code, start.out], [0, 'escalate: no decision (start failed on pb::m4)\n']);
+  assert.equal(start.code, 0);
+  assert.match(start.out, /^escalate: no decision \(start failed on \S+; tried pb::m4, \S+, \S+\)\n$/);
   assert.deepEqual(await leases(fresh), []);
-  assert.deepEqual((await asks(fresh)).asks.map((a) => [a.n, a.status, a.threadId]), [[1, 'failed', null]]); // its number stays taken
+  assert.deepEqual((await asks(fresh)).asks.map((a) => [a.n, a.status, a.threadId]), [[1, 'failed', null], [2, 'failed', null], [3, 'failed', null]]); // each try recorded
 
   const cooled = await makeProject(t, [unitSpec('a')]);
   const reg = await readJson(path.join(cooled.home, 'registry.json'));
@@ -300,4 +309,25 @@ test('ask: --show twice on an ended decision counts the model once; a long decis
   await orq(['ask', '--show'], p, {}, { stdin: '' });
   const m = (await readJson(path.join(p.home, 'registry.json'))).models['pb::m4'];
   assert.equal(m.outcomes.decide.attempts, 1);
+});
+
+test('ask: a decision thread that fails, or does not start, is retried on the next model before escalating', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const r = await orq(['ask'], p, { threadStatuses: { 'ask-th': ['running', 'failed'] } });
+  assert.equal(r.out, 'answer: use 8080\n  The config sets it.\n');
+  assert.deepEqual(starts(r).map((c) => c.args[c.args.indexOf('--model') + 1]), ['m4', 'm3']);
+  assert.deepEqual((await asks(p)).asks.map((a) => [a.n, a.status, a.key, a.tier]), [[1, 'failed', 'pb::m4', 4], [2, 'answered', 'pa::m3', 3]]);
+  assert.deepEqual(await leases(p), []);
+
+  const q = await makeProject(t, [unitSpec('a')]);
+  const s = await orq(['ask'], q, { startFails: 1 });
+  assert.equal(s.out, 'answer: use 8080\n  The config sets it.\n');
+  assert.deepEqual((await asks(q)).asks.map((a) => [a.status, a.key]), [['failed', 'pb::m4'], ['answered', 'pa::m3']]);
+
+  const one = await makeProject(t, [unitSpec('a')], {
+    registry: { version: 1, syncedAt: 1, instances: { pb: { enabled: true, constraints: [], limit: null, failures: 0, cooldownUntil: null } }, models: { 'pb::m4': REGISTRY.models['pb::m4'] } },
+  });
+  const solo = await orq(['ask'], one, { statuses: ['failed'] });
+  assert.equal(solo.out, 'escalate: no decision (the decision thread failed; tried pb::m4)\n');
+  assert.equal(starts(solo).length, 1);
 });

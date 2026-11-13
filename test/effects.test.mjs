@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createGit, defaultExec } from '../lib/git.mjs';
 import { perform } from '../lib/effects.mjs';
@@ -22,7 +23,7 @@ const git = createGit({ exec: defaultExec });
 const leasesOf = (p) => listLeases(path.join(p.home, 'leases'));
 const registryOf = async (p) => JSON.parse(await fs.readFile(path.join(p.home, 'registry.json'), 'utf8'));
 
-function fakeT3(repo, { fail = false } = {}) {
+function fakeT3(repo, { fail = false, world = {} } = {}) {
   const calls = [];
   let n = 0;
   return {
@@ -33,6 +34,11 @@ function fakeT3(repo, { fail = false } = {}) {
       sh(repo, 'branch', o.branch, o.worktree);
       n += 1;
       return { threadId: `th${n}`, projectId: 'p', runId: 'r' };
+    },
+    showThread(id) {
+      calls.push(['show', id]);
+      if (!world.worktrees?.[id]) throw new Error('thread show failed');
+      return { thread: { id, status: 'failed', worktreePath: world.worktrees[id] }, messages: [] };
     },
     sendThread(id, message) {
       calls.push(['send', id, message]);
@@ -119,7 +125,8 @@ test('launch: a relaunch gets a fresh branch; attempt 3 prepends the previous fa
   await s.act(launchA());
   await append(s, { type: 'thread-ended', unit: 'a', status: 'failed' });
   await s.act(launchA());
-  assert.match(s.t3.calls[1][1].branch, /\/a-a1-l2$/);
+  const startsOf = () => s.t3.calls.filter((c) => c[0] === 'start');
+  assert.match(startsOf()[1][1].branch, /\/a-a1-l2$/);
   const h = s.p.baseSha;
   const failures = ['evidence failed (exit 1)', 'outside writable paths: x'];
   await append(s, { type: 'thread-ended', unit: 'a', status: 'completed' }, { type: 'gate-started', unit: 'a', attempt: 1, headSha: h, pid: 1 },
@@ -128,7 +135,7 @@ test('launch: a relaunch gets a fresh branch; attempt 3 prepends the previous fa
     { type: 'gate-started', unit: 'a', attempt: 2, headSha: h, pid: 1 },
     { type: 'gated', unit: 'a', attempt: 2, verdict: 'fail', failures, flags: [], headSha: h });
   await s.act(launchA('a', { attempt: 3, key: 'pa::m3', model: 'm3', tier: 3, failures }));
-  const o = s.t3.calls[2][1];
+  const o = startsOf()[2][1];
   assert.equal(o.message, 'Previous attempt failed the gate:\n- evidence failed (exit 1)\n- outside writable paths: x\n\nWork order for a.\n');
   assert.match(o.branch, /\/a-a3-l3$/);
   assert.equal(o.model, 'm3');
@@ -554,4 +561,104 @@ test('feedback: a gate that found no commits tells the worker plainly to do the 
     'If something truly blocks you, reply with first line BLOCKED or NEEDS_CONTEXT and your question.',
   ].join('\n'));
   assert.ok(msg.split('\n').length <= 6);
+});
+
+// A launch that committed work, then died on its provider.
+async function failedWithWork(t, files = { 'a.txt': 'a\n' }, opts = {}) {
+  const s = await setup(t, (opts.units ?? ['a']).map((id) => unitSpec(id)), { cap: 3, ...opts });
+  await s.act(launchA());
+  const first = unitOf(await readState(s.p.repo), 'a');
+  const head = files ? await commitOn(s.p.repo, first.branch, files) : s.p.baseSha;
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'failed' });
+  return { s, first, head };
+}
+const otherModel = { key: 'pb::m2', instance: 'pb', model: 'm2' };
+
+test('continue: a relaunch after a provider failure starts at the failed branch head and keeps the first base', async (t) => {
+  const { s, first, head } = await failedWithWork(t, undefined, { units: ['a', 'b'] });
+  // the integration head moves on meanwhile (b integrated); the continued unit is still judged from its first base
+  await s.act(launchA('b'));
+  const bSha = await toPassed(s, 'b', { 'b.txt': 'B\n' });
+  await append(s, { type: 'integrated', unit: 'b', sha: bSha, head: bSha });
+  const r = await s.act(launchA('a', otherModel));
+  const o = s.t3.calls.filter((c) => c[0] === 'start').at(-1)[1];
+  assert.equal(o.worktree, head);
+  assert.match(o.branch, /\/a-a1-l2$/);
+  const b = s.p.baseSha.slice(0, 12);
+  assert.equal(o.message, [
+    '## Hand-over',
+    'A previous worker (pa::m2) stopped because its provider failed. Its committed work (1 commits, '
+      + `${b}..${head.slice(0, 12)}) is already in this branch.`,
+    `Read it first with \`git log ${b}..HEAD\` and \`git diff ${b}..HEAD\`: keep what is right, fix what is not, then finish the work order below.`,
+    'Do not start over.',
+    '',
+    'Work order for a.\n',
+  ].join('\n'));
+  const u = unitOf(await readState(s.p.repo), 'a');
+  assert.deepEqual([u.baseSha, u.continues, u.key], [first.baseSha, head, 'pb::m2']);
+  assert.deepEqual(r.notes, ['note: unit a continues on pb::m2 from 1 commits left by pa::m2']);
+  const lease = (await leasesOf(s.p)).find((l) => l.threadId === 'th3'); // th2 is b's
+  assert.equal(lease.continues, head); // an adopted launch keeps it too
+});
+
+test('continue: the old worktree is named only when T3 knows it and it exists; nothing committed starts fresh', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orq-old-wt-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const { s, head } = await failedWithWork(t, { 'a.txt': 'a\n' }, { world: { worktrees: { th1: dir } } });
+  await s.act(launchA('a', otherModel));
+  const msg = s.t3.calls.filter((c) => c[0] === 'start')[1][1].message;
+  assert.ok(msg.includes(`\nUncommitted files it left may still be in ${dir}: you may read them, never rely on them.\n`), msg);
+  assert.ok(head);
+
+  // nothing committed: fresh from the integration head, as before; the old worktree is named only if it has changes
+  const wt = path.join(path.dirname(dir), `${path.basename(dir)}-wt`);
+  t.after(() => fs.rm(wt, { recursive: true, force: true }));
+  const n = await failedWithWork(t, null, { world: { worktrees: { th1: wt, th2: wt } } });
+  const u = unitOf(await readState(n.s.p.repo), 'a');
+  sh(n.s.p.repo, 'worktree', 'add', '-q', wt, u.branch);
+  await n.s.act(launchA('a', otherModel));
+  const clean = n.s.t3.calls.filter((c) => c[0] === 'start')[1][1];
+  assert.deepEqual([clean.worktree, clean.message], [n.s.p.baseSha, 'Work order for a.\n']);
+  assert.equal(unitOf(await readState(n.s.p.repo), 'a').continues, null);
+  await fs.writeFile(path.join(wt, 'half.txt'), 'half\n');
+  await append(n.s, { type: 'thread-ended', unit: 'a', status: 'failed' });
+  await n.s.act(launchA('a', otherModel));
+  const dirty = n.s.t3.calls.filter((c) => c[0] === 'start')[2][1];
+  assert.equal(dirty.worktree, n.s.p.baseSha);
+  assert.equal(dirty.message, [
+    '## Hand-over',
+    'A previous worker (pb::m2) stopped because its provider failed and committed nothing; this branch starts fresh.',
+    `Uncommitted files it left may still be in ${wt}: you may read them, never rely on them.`,
+    '',
+    'Work order for a.\n',
+  ].join('\n'));
+});
+
+test('continue: the quality ladder never inherits work; attempt 3 starts fresh from the integration head', async (t) => {
+  const { s, head } = await failedWithWork(t);
+  await s.act(launchA('a', otherModel));
+  const u = unitOf(await readState(s.p.repo), 'a');
+  const h2 = await commitOn(s.p.repo, u.branch, { 'a.txt': 'b\n' });
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'completed' }, { type: 'gate-started', unit: 'a', attempt: 1, headSha: h2, pid: 1 },
+    { type: 'gated', unit: 'a', attempt: 1, verdict: 'fail', failures: ['f1'], flags: [], headSha: h2 },
+    { type: 'feedback-sent', unit: 'a', attempt: 2, threadId: 'th2' }, { type: 'thread-ended', unit: 'a', status: 'completed' },
+    { type: 'gate-started', unit: 'a', attempt: 2, headSha: h2, pid: 1 },
+    { type: 'gated', unit: 'a', attempt: 2, verdict: 'fail', failures: ['f2'], flags: [], headSha: h2 });
+  await s.act(launchA('a', { attempt: 3, key: 'pa::m3', model: 'm3', tier: 3, failures: ['f2'] }));
+  const o = s.t3.calls.filter((c) => c[0] === 'start')[2][1];
+  assert.equal(o.worktree, s.p.baseSha);
+  assert.ok(!o.message.includes('Hand-over'));
+  assert.notEqual(o.worktree, head);
+  assert.equal(unitOf(await readState(s.p.repo), 'a').continues, null);
+});
+
+test('continue: a thread given up as stalled is described as having stopped responding', async (t) => {
+  const s = await setup(t, [unitSpec('a')], { cap: 3 });
+  await s.act(launchA());
+  const u = unitOf(await readState(s.p.repo), 'a');
+  const head = await commitOn(s.p.repo, u.branch, { 'a.txt': 'a\n' });
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'stalled' });
+  await s.act(launchA('a', otherModel));
+  const msg = s.t3.calls.filter((c) => c[0] === 'start').at(-1)[1].message;
+  assert.ok(msg.startsWith(`## Hand-over\nA previous worker (pa::m2) stopped responding and was given up. Its committed work (1 commits, ${s.p.baseSha.slice(0, 12)}..${head.slice(0, 12)}) is already in this branch.\n`), msg);
 });

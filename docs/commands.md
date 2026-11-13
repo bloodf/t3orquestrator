@@ -19,6 +19,7 @@ Run `orq` as `node ~/.t3orq/kit/bin/orq.mjs`. Project commands act on the curren
 | [`review`](#review) | Start or read a review of the integrated result |
 | [`ask`](#ask) | Get a decision from the strongest enabled model instead of the user |
 | [`summary`](#summary) | Write the pull request body |
+| [`settle`](#settle) | List finished threads to settle in T3 |
 | [`probe`](#probe) | Print the machine cap and why |
 | [`version`](#version) | Print the `orq` and kit versions |
 | [`update`](#update) | Move the kit to a release |
@@ -123,7 +124,7 @@ Lists the eligible models in the order `orq` would use them:
 
 `orq plan check [--json]`
 
-Prints `plan ok: <n> units, order: <ids>`, or one `error: <problem>` line per problem and exit 4. Exit 1 when there is no plan. It checks the schema, job classes, unit ids, dependencies and cycles. It also checks that each work order is a file under `.orq/` of at most 40 lines, and that units which could run in parallel have non-overlapping `paths`.
+Prints `plan ok: <n> units, order: <ids>`, or one `error: <problem>` line per problem and exit 4. Before `plan ok` it prints `warning: <unit>: evidence runs a file outside the repository (<paths>); a check belongs in the repository, written by a unit` for a unit whose evidence names a file under `.orq/`, or an absolute path (`/…`, `~/…`) outside the project that is a command word or ends in a file extension; paths under system locations (`/usr`, `/bin`, `/sbin`, `/opt`, `/nix`, `/snap`, `/dev`, `/proc`, `/sys`, `/etc`, `/System`, `/Library`, `/Applications`) are not counted. A warning never changes the exit code; `orq wait` repeats it once per call. `--json` adds a `warnings` array. A unit may set `"setup": false` (boolean, default `true`) to skip `checks.setup` in its own gate; any other value is an error. Exit 1 when there is no plan. It checks the schema, job classes, unit ids, dependencies and cycles. It also checks that each work order is a file under `.orq/` of at most 40 lines, and that units which could run in parallel have non-overlapping `paths`.
 
 ## plan archive
 
@@ -144,7 +145,7 @@ While an archive is in progress the project is frozen: it writes `.orq/archiving
 
 `orq wait [--max-seconds N]`
 
-This runs the scheduler for up to `N` seconds (default 480). The first line it prints is one of `done:`, `final-fail:`, `judgment:`, `blocked:`, `idle:` or `timeout:`. It exits 0 for each of them. See [Scheduling](scheduling.md#what-orq-wait-returns). Exit 4 when the plan is invalid or uses the reserved unit id `integration`. Exit 1 when no usable `t3` is recorded. Exit 5 when another `orq wait` holds this project.
+This runs the scheduler for up to `N` seconds (default 480). The first line it prints is one of `done:`, `final-fail:`, `judgment:`, `blocked:`, `idle:` or `timeout:`. It exits 0 for each of them. When threads orq started are done for good and still unsettled in T3, the second line is `settle: <threadId> <threadId> …` (at most 20 ids, then `+<n> more`); notes and detail lines follow. See [Scheduling](scheduling.md#what-orq-wait-returns). Exit 4 when the plan is invalid or uses the reserved unit id `integration`. Exit 1 when no usable `t3` is recorded. Exit 5 when another `orq wait` holds this project.
 
 ## status
 
@@ -154,7 +155,7 @@ This runs the scheduler for up to `N` seconds (default 480). The first line it p
 plan: <goal> (<planId>|not started)
 integration: <branch> head=<sha> base=<sha>
 cap=<n> active=<n> blocked=<n> gates=<n> machine_leases=<n>[ expired_leases=<n>]
-<unit> <state>[ attempt=<n>][ model=<key>][ tier=<n>][ wanted_tier=<n>][ thread=<id>][ flags=<kinds>][ <reason>]
+<unit> <state>[ attempt=<n>][ model=<key>][ tier=<n>][ wanted_tier=<n>][ continued][ thread=<id>][ flags=<kinds>][ <reason>]
 authors: max_tier=<n> family=<family>
 cooling: <instance> until <iso time>, …
 note: cap covers threads orq started; threads started by hand are not counted
@@ -176,7 +177,7 @@ When the machine `cap` is an override above what the machine computes, a line `n
 
 `start` needs at least one integrated unit. It routes job `review` on the author's tier and family. Then it starts a thread on the integration head, on branch `orq/<planId>/review-<n>`, with the order file as its first message. The order file defaults to `.orq/orders/review.md`, must be under `.orq/orders/`, and is at most 40 lines. It prints `review <n>: thread=<id> model=<key> head=<sha>`. When no model is eligible it prints the same `none …` line as `route` and exits 4.
 
-`show` reads the latest review, or review `n`. It prints `review <n>: running`, or `review <n>: completed` followed by the reviewer's last message, quoted: each line indented two spaces, control characters removed, at most 300 characters per line and 40 lines (the last then says `… <n> more lines`). A failed review prints `review <n>: failed; run "orq review start" again` and exits 4.
+`show` reads the latest review, or review `n`. It prints `review <n>: running`, or `review <n>: completed` followed by the reviewer's last message, quoted: each line indented two spaces, control characters removed, at most 300 characters per line and 40 lines (the last then says `… <n> more lines`). A failed review (its thread ended failed, cancelled or interrupted) is replaced at once on another model, with the same order and head, and prints `review <n>: failed on <key>; replaced by review <m> on <key> (thread <id>)` (exit 0); the failed review's lease is released. At most two replacements are made for one review; after that, or when no other model is free, it prints `review <n>: failed; run "orq review start" again` and exits 4.
 
 ## ask
 
@@ -193,9 +194,15 @@ Gets a decision without the user. The question is read from stdin (required, at 
 | `self: you run on the strongest enabled tier; decide it yourself` | The caller is the thread `orq sync` recorded (`T3CODE_THREAD_ID` equals the recorded thread id) and its model has a tier at least as high as every enabled model. No thread is started. |
 | `pending: decision <n> still running; run "orq ask --show <n>"` | `--max-seconds` (default 300) passed while the decision thread runs. |
 
-The decision thread routes job `decide`: tier 4, strongest first. When no tier-4 model exists, or all are cooling down or at their limit, the strongest free model decides instead (its key and tier are recorded and shown in the summary); `no model` means nothing at all is routable. It holds a machine lease while it runs. When every slot is held it waits for one within `--max-seconds`, then prints `escalate: no decision (no free machine slot)`. Its first message is `playbook/templates/decision-order.md`, then `## Question (data)`, `## Plan (data)` (goal and decisions, when a plan exists) and, with `--unit`, `## Unit (data)` (id, title, paths and the work order; an unknown id is exit 2). Each section's text is inside a code fence longer than any backtick run in it, so a heading or a rule inside a question cannot change the order's rules. It runs on the integration head on branch `orq/<planId>/ask-<n>` once the plan has started, else on the configured base on branch `orq/ask-<n>-<time>`. The decision's number is reserved in `.orq/asks.json` (status `starting`) before the thread starts, so concurrent asks never share a branch or a lease. `.orq/asks.json` records each decision (`starting`, `running`, `answered`, `escalated` or `failed`, with the model's key and tier), and `orq plan archive` moves it with the plan; a decision still running then gets a `note: decision <n> is still running in thread <id>; its outcome will not be recorded` line.
+The decision thread routes job `decide`: tier 4, strongest first. When no tier-4 model exists, or all are cooling down or at their limit, the strongest free model decides instead (its key and tier are recorded and shown in the summary); `no model` means nothing at all is routable. When a decision thread fails, or does not start, the next `decide` candidate is tried (the failed models are excluded and their instances avoided), at most 3 threads per ask within `--max-seconds`; each try is a record in `.orq/asks.json`. Only then does it print `escalate: no decision (<last reason>; tried <key>, …)`. It holds a machine lease while it runs. When every slot is held it waits for one within `--max-seconds`, then prints `escalate: no decision (no free machine slot)`. Its first message is `playbook/templates/decision-order.md`, then `## Question (data)`, `## Plan (data)` (goal and decisions, when a plan exists) and, with `--unit`, `## Unit (data)` (id, title, paths and the work order; an unknown id is exit 2). Each section's text is inside a code fence longer than any backtick run in it, so a heading or a rule inside a question cannot change the order's rules. It runs on the integration head on branch `orq/<planId>/ask-<n>` once the plan has started, else on the configured base on branch `orq/ask-<n>-<time>`. The decision's number is reserved in `.orq/asks.json` (status `starting`) before the thread starts, so concurrent asks never share a branch or a lease. `.orq/asks.json` records each decision (`starting`, `running`, `answered`, `escalated` or `failed`, with the model's key and tier), and `orq plan archive` moves it with the plan; a decision still running then gets a `note: decision <n> is still running in thread <id>; its outcome will not be recorded` line.
 
 `--show` looks at decision `n` (default: the latest) once and prints the same lines; it records an outcome only once. A decision still `starting` prints `pending:` until its asker's deadline, then `escalate: no decision (decision <n> never started)`. A decision that is not in `.orq/asks.json` (for example archived) prints `escalate: no decision (decision <n> is not in this plan)`. Exit 3 inside a worker thread, as for `init`.
+
+## settle
+
+`orq settle [--all]`
+
+Lists the threads `orq` started that are done for good and that T3 reports as not settled, one per line: `<threadId> unit <id> integrated|dropped|replaced`, `<threadId> review <n>` or `<threadId> decision <n>`. It prints `nothing to settle` when there are none, and exits 0. `--all` also covers the archived plans under `.orq/archive/`. T3 has no CLI command to settle a thread: the orchestrator settles each listed id with its `t3_thread_organize` tool (`action: "settle"`). It calls `t3 thread list` once, outside any lock. `orq plan archive` prints `settle: run "orq settle --all"` when archived plans leave such threads.
 
 ## summary
 

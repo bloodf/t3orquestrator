@@ -9,6 +9,7 @@
 - Moving work between the user's enabled providers is `orq`'s job, and pasting the stub approved it. Never ask which provider to use. `orq instance disable` is how the user keeps one out.
 - The user answers questions in this thread only. Never send them to a worker or review thread: read it yourself and bring the question here.
 - Leave `cap`, `perInstanceLimit` and `pollSeconds` alone. `orq` sizes them to the machine; change one only when the user asks for it by name.
+- `orq` keeps the record. Write nothing under `.orq/` except `plan.json`, `orders/`, `capabilities.json` and `memory.md`, and nothing outside the repository. No status files, receipts, read-backs or logs of your own: `orq status`, the ledger and `orq summary` are the record, and every extra file costs tokens.
 - Keep your context small. Read gate result files and worker reports, not whole diffs, unless you are judging a failure.
 
 ## First run
@@ -34,9 +35,10 @@ The `slots:` line names the tool for each role: `judge`, `memory`, `code-index` 
 
 ## Intake
 
-1. Each request gets its own plan. Run `orq status`: if it shows a plan from an earlier request, run `orq plan archive` first. It refuses while work is in flight; finish or drop that work before starting the new request. If any command says an archive was interrupted, run `orq plan archive` again; if that keeps failing, show the user its message and stop.
-2. Recall from the memory slot once, with the request as the query.
-3. Size the work. Default to ONE unit. Fan out only for three or more independent, substantial units. One or two files, or tightly coupled work, is one unit: every extra unit costs a thread, a gate and a merge.
+1. If the user says to continue, or `orq status` shows work in flight for this same request, you are replacing an orchestrator that stopped: do not plan again, go to Run and call `orq wait`.
+2. Each request gets its own plan. Run `orq status`: if it shows a plan from an earlier request, run `orq plan archive` first. It refuses while work is in flight; finish or drop that work before starting the new request. If any command says an archive was interrupted, run `orq plan archive` again; if that keeps failing, show the user its message and stop.
+3. Recall from the memory slot once, with the request as the query.
+4. Size the work. Default to ONE unit. Fan out only for three or more independent, substantial units. One or two files, or tightly coupled work, is one unit: every extra unit costs a thread, a gate and a merge.
 
 ## Plan
 
@@ -48,6 +50,8 @@ Write `.orq/plan.json` (shape: `~/.t3orq/kit/playbook/templates/plan.example.jso
 - Cut vertical slices (one feature end to end), not layers.
 - Units with no dependency path between them run in parallel and must own disjoint `paths`.
 - Put the tests that `evidence` relies on in `forbidden`, unless writing them is the unit's job. A worker that can edit its own check can pass by weakening it.
+- `evidence` runs what is in the repository at the worker's commit: the project's test runner on files in the repository. Never write a check script yourself. A check that does not exist yet is a unit of its own (`job: "test"`) that later units depend on and list in `forbidden`.
+- A unit that needs no dependency install (documentation, plain text) sets `"setup": false`; its gate then skips `checks.setup`.
 - `evidence` is one deterministic command that exits 0 only when the unit is done. It runs in a clean checkout of the worker's commit, after `checks.setup`, with no services running. Make it as narrow and fast as possible.
 - Pick the lowest `job` class that can do the work. `orq` gives the unit the cheapest enabled model at or above that class's tier, and moves it up by itself when a gate fails, so start low: that is what spreads work across providers and saves the strongest models. Smallest: `mechanical`, `docs`, `explore`, `summarize` (reading, surveying and reporting are `explore`, however large). Then `implement`, `test` (the default for building). Then `implement-complex` (many files or subtle state). Strongest: `plan`, `architecture`, `debug-hard`, only for a design decision other units depend on or a failure two attempts did not find. If more than a third of a plan is in the strongest classes, reclass it. `fix` gets at least the author's tier. `review` is for the reviewer only.
 - A unit that adds or changes a dependency lists the manifest and the lockfile in `paths`. Two such units never run in parallel: make one depend on the other.
@@ -75,6 +79,8 @@ Call `orq wait`. It returns one line. Act on it, then call `orq wait` again, unt
 | `idle: … retry at <time>` | Models are cooling down. Tell the user why and the time, and call `orq wait` again at that time. |
 | any other `idle:` | Calling `orq wait` again changes nothing. Run `orq status`, then change the plan (`orq unit retry`, `orq unit drop`, or edit `plan.json`) or tell the user. |
 | `timeout: <counts>` | Normal for long work. Run `orq status`. Interrupt a thread only if it shows as stalled (`t3_thread_interrupt`). Units that are `gating` are running their checks, and a `waiting:` line means every slot is taken for now: leave both. Call `orq wait` again. |
+
+After any return, when the output has a `settle:` line, settle each thread id on it: call `t3_thread_organize` with `action: "settle"` and that `threadId`. Those threads are finished for good; settling keeps the thread list clean. Never settle a thread that is not on a `settle:` line, never use `archive`, and if the tool is missing or fails, skip it.
 
 Passed units merge on their own, so before Finish run `orq status` and act on every `flags=` it shows (details in the unit's last gate file):
 - `test-weakened`, `deleted-test`, `evidence-target-changed`: inspect that file's diff. If the check was made easier, append a `fix` unit that restores it.

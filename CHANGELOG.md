@@ -5,16 +5,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- A unit continues after a provider failure: the next worker starts from the commits the failed one left, with a hand-over note, and the gate judges all of it. A failed decision thread is retried on up to two other models, and a failed review is replaced on another model.
+- A thread T3 keeps as running but that stays quiet for twice `stallMinutes` is given up and the unit continues on another model.
+- `settle:` lines in `orq wait` and the command `orq settle [--all]` name the threads that are finished for good, so the orchestrator can settle them in T3.
+- Plan field `setup: false` on a unit skips `checks.setup` in that unit's gate.
+- `orq plan check` warns when a unit's evidence runs a file outside the repository or under `.orq/`.
+- A `note:` in `orq status` and `orq wait` when the `cap` override is above what the machine computes.
+
 ### Changed
 
+- A thread status from T3 that this version does not know is treated as running, with a note, instead of failing every poll.
+- Playbook: the orchestrator writes no record files of its own, a replacement orchestrator resumes with `orq wait`, and evidence must run what is in the repository.
 - Work orders state that the worker implements directly and that standing coordinator rules (delegate, wait for approval, hold) do not apply to it; a missing code search tool is never a reason to stop; the status word is one of the four, in English.
 - Playbook: pick the lowest job class that can do the work, with reading and surveying in the cheapest class; the orchestrator leaves `cap`, `perInstanceLimit` and `pollSeconds` alone.
 - Feedback after an attempt that committed nothing tells the worker to do the work itself and commit.
 - `pollSeconds` has a floor of 5.
-
-### Added
-
-- A `note:` in `orq status` and `orq wait` when the `cap` override is above what the machine computes.
 
 ### Fixed
 

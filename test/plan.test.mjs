@@ -16,7 +16,9 @@ const good = { goal: 'g', units: [unit('a'), unit('b', { deps: ['a'] }), unit('c
 
 test('valid plan: ok and topological order', () => {
   const r = check(good);
-  assert.deepEqual(r, { ok: true, errors: [], order: ['a', 'b', 'c'] });
+  assert.deepEqual(r, {
+    ok: true, errors: [], order: ['a', 'b', 'c'], warnings: [],
+  });
 });
 
 test('order respects deps regardless of listing order', () => {
@@ -137,4 +139,14 @@ test('a work order symlinked out of .orq/ is refused; cwd is required so no call
   assert.equal(r.ok, false);
   assert.ok(r.errors.some((e) => /unit a: order must be a file under \.orq\//.test(e)), r.errors.join('\n'));
   assert.throws(() => validatePlan({ goal: 'g', units: [unit('a')] }, { jobs, ...files() }), /cwd/);
+});
+
+test('evidence outside the repository is a warning, not an error; setup must be a boolean', () => {
+  const r = validatePlan({ goal: 'g', units: [unit('a', { evidence: 'python3 /elsewhere/verify.py a' }), unit('b', { evidence: 'npm test' })] },
+    { jobs, ...files(), cwd: '/nonexistent-orq-project', home: '/h' });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.warnings, ['a: evidence runs a file outside the repository (/elsewhere/verify.py); a check belongs in the repository, written by a unit']);
+  assert.deepEqual(check({ goal: 'g', units: [unit('a')] }).warnings, []);
+  const bad = check({ goal: 'g', units: [unit('a', { setup: 'no' }), unit('b', { setup: false, paths: ['b/**'] })] });
+  assert.deepEqual(bad.errors, ['unit a: setup must be true or false']);
 });

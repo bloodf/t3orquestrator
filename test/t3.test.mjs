@@ -40,7 +40,7 @@ test('listThreads: argv and normalization', () => {
   assert.deepEqual(rows[0], {
     id: 'thread-0001', projectId: 'project-0001', status: 'completed', instance: 'provider-c', model: 'model-large',
     itemCount: 128, updatedAt: Date.parse('2026-11-12T20:08:07.241Z'), pending: null, runCount: null,
-    activeRunId: null, worktreePath: null, branch: null, title: 'Placeholder thread title',
+    activeRunId: null, worktreePath: null, branch: null, title: 'Placeholder thread title', settled: false,
   });
 });
 
@@ -114,10 +114,22 @@ test('errors: missing fields name command and field', () => {
   assert.throws(() => fake('{}').t3.listThreads({ project: 'p' }), /thread list.*array/);
 });
 
-test('errors: unknown status names the status', () => {
+test('an unknown status from T3 is read as running and kept for a note; structural drift still throws', () => {
   const body = JSON.parse(fx('thread-show-completed.json'));
-  body.thread.status = 'weird';
-  assert.throws(() => fake(JSON.stringify(body)).t3.showThread('a'), /unknown thread status: weird/);
+  body.thread.status = 'throttled\u001b[2J';
+  const { thread } = fake(JSON.stringify(body)).t3.showThread('a');
+  assert.deepEqual([thread.status, thread.unknownStatus], ['running', 'throttled [2J']);
+  const rows = JSON.parse(fx('thread-list.json')).map((r, i) => (i === 0 ? { ...r, status: 'x'.repeat(200) } : r));
+  const listed = fake(JSON.stringify(rows)).t3.listThreads({ project: 'p' });
+  assert.deepEqual([listed[0].status, listed[0].unknownStatus.length, listed[1].unknownStatus], ['running', 40, undefined]);
+  assert.throws(() => fake(JSON.stringify([{ ...rows[1], status: 7 }])).t3.listThreads({ project: 'p' }), /thread list: missing or invalid field "status"/);
+  // settled: carried when T3 gives a boolean, otherwise unknown (null); never an error
+  const withSettled = JSON.parse(fx('thread-list.json')).slice(0, 3).map((r, i) => {
+    const { settled: _s, ...rest } = r;
+    return [{ ...rest, settled: true }, { ...rest, settled: 'yes' }, rest][i];
+  });
+  assert.deepEqual(fake(JSON.stringify(withSettled)).t3.listThreads({ project: 'p' }).map((x) => x.settled), [true, null, null]);
+  // the predicates still refuse a raw status they do not know: only parsed threads reach them
   assert.throws(() => isActive({ status: 'weird', pending: 0 }), /weird/);
   assert.throws(() => isBlocked({ status: 'weird', pending: 0 }), /weird/);
   assert.throws(() => isTerminal({ status: 'weird', pending: 0 }), /weird/);
