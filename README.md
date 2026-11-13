@@ -11,7 +11,7 @@ Paste the stub as the first message of a thread in your project:
 ```
 You are the orchestrator for this project.
 1. If ~/.t3orq/kit is missing: git clone https://github.com/bloodf/t3orquestrator.git ~/.t3orq/kit
-   then: git -C ~/.t3orq/kit checkout abb488c2a2f84016a4fe8ec8eaba272341351e15
+   then: git -C ~/.t3orq/kit checkout 0de35418de28777c819d0e128169ab59465d22ee
 2. In the project root, run: node ~/.t3orq/kit/bin/orq.mjs init
 3. Read ~/.t3orq/kit/playbook/ORCHESTRATOR.md and follow it for every request in this project.
 If step 1 or 2 fails, say why in one line and continue by hand: one worker thread at a time, and run the project's checks on its commit yourself before you accept it.
