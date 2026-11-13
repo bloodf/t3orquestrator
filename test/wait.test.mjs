@@ -28,7 +28,8 @@ function simulator(p, scripts) {
     if (args[1] === 'list') return ok([...sim.threads.values()].map(row));
     if (args[1] === 'show') {
       const t = sim.threads.get(args[2]);
-      return ok({ thread: { ...row(t), pendingRequestCount: t.pending, branch: t.branch }, messages: [] });
+      const messages = t.reply === undefined ? [] : [{ role: 'assistant', runId: 'r', text: t.reply }];
+      return ok({ thread: { ...row(t), pendingRequestCount: t.pending, branch: t.branch }, messages });
     }
     if (args[1] === 'send') {
       const t = sim.threads.get(args[2]);
@@ -62,6 +63,7 @@ function simulator(p, scripts) {
       if (step === 'block') t.pending = 1;
       if (step === 'unblock') t.pending = 0;
       if (step === 'fail') t.status = 'failed';
+      if (step === 'needs-context') Object.assign(t, { status: 'completed', reply: 'NEEDS_CONTEXT\nThe work order says 41 but the test wants 42.' });
       if (step === 'commit-complete') {
         await commitOn(p.repo, t.branch, { [`${t.unit}.txt`]: `${t.unit}\n` }, t.unit);
         t.status = 'completed';
@@ -294,4 +296,17 @@ test('wait: one dying instance cools down and waits instead of burning all three
   assert.equal(later.code, 0, later.err);
   assert.equal(sim.n, 3);
   assert.equal(later.out, 'judgment: a: 3 provider failures\n');
+});
+
+test('wait: a worker asking for context returns for judgment without a gate', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const gates = [];
+  const sim = simulator(p, { a: [['needs-context']] });
+  const r = await orq(['wait'], p, sim, { spawnGate: async () => { gates.push(1); return 1; } });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out, 'judgment: a: worker reported NEEDS_CONTEXT: The work order says 41 but the test wants 42.\n');
+  assert.equal(gates.length, 0);
+  assert.deepEqual(await listLeases(path.join(p.home, 'leases')), []);
+  const u = unitOf(await readState(p.repo), 'a');
+  assert.deepEqual([u.state, u.providerFailures], ['failed', 0]);
 });

@@ -399,3 +399,25 @@ test('a completed thread marks its instance alive', () => {
   const r = go([launched('a')], { threads: { 't-a': thread('t-a', { status: 'completed' }) } });
   assert.deepEqual(r.actions.filter((a) => a.type === 'mark-alive'), [{ type: 'mark-alive', unit: 'a', key: 'a::m2' }]);
 });
+
+const replied = (status, detail, over = {}) => ({ 't-a': thread('t-a', { status: 'completed', report: { status, detail }, ...over }) });
+
+test('worker status: NEEDS_CONTEXT after the first run goes to judgment without a gate', () => {
+  const r = go([launched('a')], { threads: replied('NEEDS_CONTEXT', 'which answer is right?') });
+  assert.deepEqual(evTypes(r), ['thread-ended:a', 'needs-judgment:a']);
+  assert.equal(r.events[1].reason, 'worker reported NEEDS_CONTEXT: which answer is right?');
+  assert.deepEqual(types(r).filter((x) => x !== 'launch'), ['lease-remove', 'mark-alive']);
+  assert.deepEqual(r.report.judgment, [{ unit: 'a', reason: 'worker reported NEEDS_CONTEXT: which answer is right?' }]);
+});
+
+test('worker status: BLOCKED after feedback goes to judgment; DONE and unknown replies are gated', () => {
+  const afterFeedback = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail'),
+    { type: 'feedback-sent', unit: 'a', at: NOW - MIN, attempt: 2, threadId: 't-a' }];
+  const r = go(afterFeedback, { threads: replied('BLOCKED', '', { updatedAt: NOW }) });
+  assert.deepEqual(evTypes(r), ['thread-ended:a', 'needs-judgment:a']);
+  assert.equal(r.events[1].reason, 'worker reported BLOCKED: ');
+  for (const report of [{ status: 'DONE', detail: '' }, { status: 'I FINISHED', detail: '' }, null]) {
+    const ok = go([launched('a')], { threads: { 't-a': thread('t-a', { status: 'completed', report }) } });
+    assert.ok(types(ok).includes('gate-start'), JSON.stringify(report));
+  }
+});
