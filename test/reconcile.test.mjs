@@ -118,3 +118,21 @@ test('tendLeases: a decision thread keeps its lease while .orq/asks.json lists i
   await tendLeases(s.fx, state, { 'th-ask': { id: 'th-ask', status: 'completed' } });
   assert.deepEqual(await s.leases(), []);
 });
+
+test('tendLeases: an abandoned lease holds its slot while T3 shows its thread active, unrefreshed; it goes when the thread ends, disappears or its TTL runs out', async (t) => {
+  const s = await setup(t);
+  const gone = { ...s.ahead('a'), threadId: 'th-old', abandoned: true, heartbeatAt: NOW - 5 * MIN };
+  await writeLease(s.dir, gone);
+  const state = await readState(s.p.repo);
+  await tendLeases(s.fx, state, { 'th-old': { id: 'th-old', status: 'running' } }, { ttlMs: 30 * MIN });
+  assert.deepEqual((await s.leases()).map((l) => [l.threadId, l.heartbeatAt]), [['th-old', NOW - 5 * MIN]]);
+  assert.deepEqual(await adoptLaunches(s.fx, [{ id: 'th-old' }]), []); // never taken back as the unit's thread
+  await tendLeases(s.fx, state, { 'th-old': { id: 'th-old', status: 'interrupted' } }, { ttlMs: 30 * MIN });
+  assert.deepEqual(await s.leases(), []);
+  await writeLease(s.dir, gone);
+  await tendLeases(s.fx, state, {}, { ttlMs: 30 * MIN });
+  assert.deepEqual(await s.leases(), []);
+  await writeLease(s.dir, { ...gone, heartbeatAt: NOW - 31 * MIN });
+  await tendLeases(s.fx, state, { 'th-old': { id: 'th-old', status: 'running' } }, { ttlMs: 30 * MIN });
+  assert.deepEqual(await s.leases(), []);
+});

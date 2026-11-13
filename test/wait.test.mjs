@@ -522,7 +522,7 @@ test('wait: a thread with an unknown status is read as running, noted once, and 
   const [a1] = sim.byUnit.a;
   assert.equal(notes.filter((n) => n.includes('does not know')).length, 1);
   assert.ok(notes.includes(`note: thread ${a1.id} has status "throttled" that this version does not know; treated as running`), notes.join('\n'));
-  assert.ok(notes.some((n) => /^note: unit a gave up on thread \S+ \(quiet for 2 min\); continuing on another model$/.test(n)), notes.join('\n'));
+  assert.ok(notes.some((n) => /^note: unit a gave up on thread \S+ \(quiet for 2 min\); it still holds a slot until it ends: interrupt it \(t3_thread_interrupt\)$/.test(n)), notes.join('\n'));
   assert.equal(sim.byUnit.a.length, 2);
   assert.equal((await readLines(path.join(p.repo, '.orq', 'ledger.jsonl'))).filter((e) => e.type === 'thread-ended' && e.status === 'stalled').length, 1);
 });
@@ -559,4 +559,22 @@ test('settle --all also covers archived plans; archive points at it when finishe
   sim.threads.get(a1).settled = true;
   assert.equal((await orq(['settle', '--all'], p, sim)).out, 'nothing to settle\n');
   assert.equal((await orq(['settle', 'x'], p, sim)).code, 2);
+});
+
+test('wait: with cap 1 a given-up thread still holds the slot; the continuation launches once T3 shows it ended', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')], { cap: 1 });
+  const cfgFile = path.join(p.repo, '.orq', 'config.json');
+  await fs.writeFile(cfgFile, JSON.stringify({ ...JSON.parse(await fs.readFile(cfgFile, 'utf8')), stallMinutes: 1 }));
+  const sim = simulator(p, { a: [['throttle'], ['commit-complete']] });
+  const first = await orq(['wait', '--max-seconds', '400'], p, sim);
+  assert.match(first.out, /^timeout: 0 running, 0 blocked, 0 gating, 1 queued, 0 passed\n/);
+  assert.equal(sim.byUnit.a.length, 1); // no second worker while the first may still run
+  assert.ok(sim.polls.every((n) => n <= 1), `cap exceeded: ${sim.polls}`);
+  const [lease] = await listLeases(path.join(p.home, 'leases'));
+  assert.deepEqual([lease.threadId, lease.abandoned], [sim.byUnit.a[0].id, true]);
+  assert.match((await orq(['status'], p, sim)).out, new RegExp(`^abandoned: thread ${sim.byUnit.a[0].id} of unit a holds a slot until it ends$`, 'm'));
+  sim.byUnit.a[0].status = 'interrupted'; // the orchestrator interrupted it
+  const second = await orq(['wait'], p, sim);
+  assert.match(second.out, /^done: 1 units integrated at /);
+  assert.equal(sim.byUnit.a.length, 2);
 });

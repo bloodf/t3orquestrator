@@ -30,7 +30,10 @@ function fakeT3(repo, { fail = false, world = {} } = {}) {
     calls,
     startThread(o) {
       calls.push(['start', o]);
-      if (fail) throw new Error('thread start failed (exit 1): provider down');
+      if (fail || (world.startFails ?? 0) > 0) {
+        world.startFails = Math.max(0, (world.startFails ?? 0) - 1);
+        throw new Error('thread start failed (exit 1): provider down');
+      }
       sh(repo, 'branch', o.branch, o.worktree);
       n += 1;
       return { threadId: `th${n}`, projectId: 'p', runId: 'r' };
@@ -661,4 +664,47 @@ test('continue: a thread given up as stalled is described as having stopped resp
   await s.act(launchA('a', otherModel));
   const msg = s.t3.calls.filter((c) => c[0] === 'start').at(-1)[1].message;
   assert.ok(msg.startsWith(`## Hand-over\nA previous worker (pa::m2) stopped responding and was given up. Its committed work (1 commits, ${s.p.baseSha.slice(0, 12)}..${head.slice(0, 12)}) is already in this branch.\n`), msg);
+});
+
+test('lease-abandon marks the lease abandoned and keeps it', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await s.act(launchA());
+  await s.act({ type: 'lease-abandon', unit: 'a', threadId: 'th1' });
+  assert.deepEqual((await leasesOf(s.p)).map((l) => [l.threadId, l.abandoned, l.blocked]), [['th1', true, false]]);
+});
+
+test('continue: a provider failure during the feedback run continues on the rejected commits and says so', async (t) => {
+  const s = await setup(t, [unitSpec('a')], { cap: 3 });
+  await s.act(launchA());
+  const u = unitOf(await readState(s.p.repo), 'a');
+  const head = await commitOn(s.p.repo, u.branch, { 'a.txt': 'wrong\n' });
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'completed' }, { type: 'gate-started', unit: 'a', attempt: 1, headSha: head, pid: 1 },
+    { type: 'gated', unit: 'a', attempt: 1, verdict: 'fail', failures: ['evidence failed (exit 1)'], flags: [], headSha: head },
+    { type: 'feedback-sent', unit: 'a', attempt: 2, threadId: 'th1' }, { type: 'thread-ended', unit: 'a', status: 'failed' });
+  await s.act(launchA('a', { ...otherModel, attempt: 2, failures: ['evidence failed (exit 1)'] }));
+  const o = s.t3.calls.filter((c) => c[0] === 'start').at(-1)[1];
+  assert.equal(o.worktree, head);
+  const b = s.p.baseSha.slice(0, 12);
+  assert.ok(o.message.startsWith([
+    '## Hand-over',
+    `A previous worker (pa::m2) stopped because its provider failed. Its committed work (1 commits, ${b}..${head.slice(0, 12)}) is already in this branch.`,
+    `The gate rejected this work; its failures follow. Read it with \`git log ${b}..HEAD\` and \`git diff ${b}..HEAD\`, fix the failures, then finish the work order below.`,
+    'Do not start over.',
+    '',
+    'Previous attempt failed the gate:\n- evidence failed (exit 1)',
+  ].join('\n')), o.message);
+});
+
+test('continue: through a failed start, the next launch still continues from the first worker\'s commits', async (t) => {
+  const world = {};
+  const { s, first, head } = await failedWithWork(t, { 'a.txt': 'a\n', 'b.txt': 'b\n' }, { world });
+  world.startFails = 1; // l2 never starts: its branch never exists
+  await s.act(launchA('a', otherModel));
+  assert.equal(unitOf(await readState(s.p.repo), 'a').state, 'queued');
+  const r = await s.act(launchA('a', { key: 'pa::m3', model: 'm3', tier: 3 }));
+  const o = s.t3.calls.filter((c) => c[0] === 'start').at(-1)[1];
+  assert.match(o.branch, /\/a-a1-l3$/);
+  assert.equal(o.worktree, head);
+  assert.ok(o.message.includes(`(1 commits, ${first.baseSha.slice(0, 12)}..${head.slice(0, 12)})`), o.message);
+  assert.deepEqual(r.notes, ['note: unit a continues on pa::m3 from 1 commits left by pa::m2']); // the author, not the start that failed
 });

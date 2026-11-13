@@ -239,3 +239,17 @@ test('unit retry after a setup failure gates the branch again and refuses --tier
   assert.equal(r.out, 'retried a: its branch will be gated again\n');
   assert.equal(unitOf(await readState(p.repo), 'a').state, 'gating');
 });
+
+test('unit retry says when the unit continues from work a failed provider left', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  await append(p, { type: 'plan-started', unit: null, planId: 'p1', baseSha: A, integrationBranch: 'orq/p1/integration' },
+    launched('a', 'th1'), { type: 'thread-ended', unit: 'a', status: 'failed' },
+    { type: 'needs-judgment', unit: 'a', reason: '3 provider failures', provider: true });
+  assert.equal((await orq(['unit', 'retry', 'a'], p)).out, 'retried a: queued, continues from the work left by pa::m2\n');
+  const q = await makeProject(t, [unitSpec('a')]);
+  await append(q, { type: 'plan-started', unit: null, planId: 'p1', baseSha: A, integrationBranch: 'orq/p1/integration' },
+    launched('a', 'th1'), { type: 'thread-ended', unit: 'a', status: 'failed' },
+    { type: 'needs-judgment', unit: 'a', reason: '3 provider failures', provider: true });
+  assert.equal((await orq(['unit', 'retry', 'a', '--tier', '3'], q)).out, 'retried a: queued, minimum tier 3\n');
+  assert.equal(unitOf(await readState(q.repo), 'a').failedLaunch, null);
+});

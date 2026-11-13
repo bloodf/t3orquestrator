@@ -33,14 +33,18 @@ test('settleList: finished orq threads that T3 reports unsettled, and nothing el
   const asks = { asks: [{ n: 1, threadId: 'q1', status: 'answered' }, { n: 2, threadId: 'q2', status: 'running' }, { n: 3, threadId: null, status: 'failed' }] };
   assert.deepEqual(settleList({ events, reviews, asks, threads }), [
     { threadId: 'ta', what: 'unit a integrated' },
-    { threadId: 'tb1', what: 'unit b replaced' },
+    // tb1 was replaced, but b still runs: its worker may still read tb1's worktree, so it is not listed yet
     { threadId: 'tc', what: 'unit c dropped' },
     { threadId: 'rv1', what: 'review 1' },
     { threadId: 'q1', what: 'decision 1' },
   ]);
   // settled or unknown never; once the given-up thread stops, it is listed
   const later = { ...threads, ta: row('completed', true), tc: row('interrupted', null), te1: row('failed') };
-  assert.deepEqual(settleList({ events, reviews, asks, threads: later }).map((x) => x.threadId), ['tb1', 'te1', 'rv1', 'q1']);
+  assert.deepEqual(settleList({ events, reviews, asks, threads: later }).map((x) => x.threadId), ['rv1', 'q1']);
+  // once b is integrated its replaced thread and its last one are listed
+  const bDone = [...events, ...pass('b'), ev('integrated', 'b', { head: B })];
+  assert.deepEqual(settleList({ events: bDone, reviews, asks, threads: { ...threads, tb2: row() } }).slice(1, 3),
+    [{ threadId: 'tb1', what: 'unit b replaced' }, { threadId: 'tb2', what: 'unit b integrated' }]);
   // a thread T3 does not list is never named
   assert.deepEqual(settleList({ events, reviews, asks, threads: {} }), []);
 });

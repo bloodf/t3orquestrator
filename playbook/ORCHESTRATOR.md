@@ -80,6 +80,8 @@ Call `orq wait`. It returns one line. Act on it, then call `orq wait` again, unt
 | any other `idle:` | Calling `orq wait` again changes nothing. Run `orq status`, then change the plan (`orq unit retry`, `orq unit drop`, or edit `plan.json`) or tell the user. |
 | `timeout: <counts>` | Normal for long work. Run `orq status`. Interrupt a thread only if it shows as stalled (`t3_thread_interrupt`). Units that are `gating` are running their checks, and a `waiting:` line means every slot is taken for now: leave both. Call `orq wait` again. |
 
+When a `note:` says `orq` gave up on a thread, interrupt that thread with `t3_thread_interrupt`: it stopped responding, the unit has moved to another model, and the thread holds a slot until it ends.
+
 After any return, when the output has a `settle:` line, settle each thread id on it: call `t3_thread_organize` with `action: "settle"` and that `threadId`. Those threads are finished for good; settling keeps the thread list clean. Never settle a thread that is not on a `settle:` line, never use `archive`, and if the tool is missing or fails, skip it.
 
 Passed units merge on their own, so before Finish run `orq status` and act on every `flags=` it shows (details in the unit's last gate file):

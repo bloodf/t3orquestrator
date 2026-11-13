@@ -122,7 +122,7 @@ test('command: empty ledger and text table', async (t) => {
   assert.equal(r.code, 0);
   assert.match(r.out, /^plans: 1 {2}units: 1 .*worker time: 3 min/);
   assert.match(r.out, /tiers: t1=0 t2=1 t3=0 t4=0/);
-  assert.match(r.out, /^pa::m2 +1 +1 +0 +1 +0 +1 +0 +0$/m);
+  assert.match(r.out, /^pa::m2 +1 +1 +0 +1 +0 +1 +0 +0 +0$/m);
 });
 
 test('command: --json shape and bad usage', async (t) => {
@@ -130,4 +130,14 @@ test('command: --json shape and bad usage', async (t) => {
   const j = JSON.parse((await orq(['stats', '--json'], cwd)).out);
   assert.deepEqual(Object.keys(j).sort(), ['dropped', 'failed', 'instances', 'integrated', 'models', 'plans', 'tiers', 'units', 'wallMinutes', 'workerMinutes']);
   assert.equal((await orq(['stats', '--bogus'], cwd)).code, 2);
+});
+
+test('a continued launch is counted as continued, never as a first pass', () => {
+  const s = computeStats([
+    start(), launch('u', 1, A), ended('u', 3, 'stalled'), launch('u', 4, B, { continues: 'c'.repeat(40) }), ended('u', 9), gated('u', 10, 'pass'),
+  ]);
+  assert.deepEqual([s.models[B].continued, s.models[B].first_pass, s.models[B].gate_pass, s.models[A].continued], [1, 0, 1, 0]);
+  const text = renderStats(s);
+  assert.match(text.split('\n')[3], / continued$/);
+  assert.match(text, new RegExp(`^${B.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} .* 1$`, 'm'));
 });

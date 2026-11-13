@@ -525,14 +525,37 @@ test('K7: a quiet running thread is reported at stallMinutes and given up at twi
   const given = quiet(40); // default stallMinutes 20: twice is 40
   assert.deepEqual(evTypes(given), ['thread-ended:a']);
   assert.equal(given.events[0].status, 'stalled');
-  assert.deepEqual(given.report.notes, ['note: unit a gave up on thread t-a (quiet for 40 min); continuing on another model']);
+  assert.deepEqual(given.report.notes, ['note: unit a gave up on thread t-a (quiet for 40 min); it still holds a slot until it ends: interrupt it (t3_thread_interrupt)']);
   assert.deepEqual(given.report.stalled, []);
-  assert.deepEqual(types(given).slice(0, 2), ['lease-remove', 'record-failure']);
-  const [relaunch] = launches(given); // the freed slot (cap 1) takes the continuation in the same tick
+  // the thread still runs in T3: its lease is kept (abandoned) and still counts, so with cap 1 nothing launches
+  assert.deepEqual(types(given), ['lease-abandon', 'record-failure']);
+  assert.deepEqual(given.actions[0], { type: 'lease-abandon', unit: 'a', threadId: 't-a' });
+  assert.equal(given.report.noSlots, true);
+  const roomy = quiet(40, { tick: { cap: 2 } }); // a free slot: the continuation launches in the same tick
+  const [relaunch] = launches(roomy);
   assert.equal(relaunch.unit, 'a');
   assert.notEqual(relaunch.key, 'a::m2');
+  // once the abandoned lease is gone (thread ended, or its TTL ran out) the next tick launches with cap 1
+  const freed = go([launched('a'), { type: 'thread-ended', unit: 'a', at: 3, status: 'stalled' }], { cap: 1 });
+  assert.equal(launches(freed)[0].unit, 'a');
+  const expired = go([launched('a'), { type: 'thread-ended', unit: 'a', at: 3, status: 'stalled' }], {
+    cap: 1, leases: [lease('t-a', { project: '/p', unit: 'a', abandoned: true, heartbeatAt: NOW - 31 * MIN })],
+  });
+  assert.equal(launches(expired)[0].unit, 'a');
+  const held = go([launched('a'), { type: 'thread-ended', unit: 'a', at: 3, status: 'stalled' }], {
+    cap: 1, leases: [lease('t-a', { project: '/p', unit: 'a', abandoned: true, heartbeatAt: NOW - 5 * MIN })],
+  });
+  assert.deepEqual(launches(held), []);
   const custom = quiet(40, { tick: { config: { stallMinutes: 30 } } });
   assert.deepEqual([custom.events, custom.report.stalled.map((s) => s.minutes)], [[], [40]]);
   const blocked = go([launched('a'), { type: 'blocked', unit: 'a', at: 3 }], { threads: { 't-a': thread('t-a', { pending: 1, updatedAt: NOW - 600 * MIN }) } });
   assert.deepEqual([blocked.events, blocked.report.notes], [[], []]);
+});
+
+test('F4: judgments for provider reasons are marked as such; others are not', () => {
+  const fail = (n) => [launched('a', { key: `k${n}` }), ended('a', 'cancelled')];
+  const three = go([...fail(1), ...fail(2), launched('a')], { threads: { 't-a': thread('t-a', { status: 'interrupted' }) } });
+  assert.equal(three.events.find((e) => e.type === 'needs-judgment').provider, true);
+  const dropped = go([{ type: 'dropped', unit: 'a', at: 7 }]);
+  assert.equal(dropped.events.find((e) => e.type === 'needs-judgment').provider, undefined);
 });
