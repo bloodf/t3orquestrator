@@ -32,8 +32,9 @@ The `slots:` line names the tool for each role: `judge`, `memory`, `code-index` 
 
 ## Intake
 
-1. Recall from the memory slot once, with the request as the query.
-2. Size the work. Default to ONE unit. Fan out only for three or more independent, substantial units. One or two files, or tightly coupled work, is one unit: every extra unit costs a thread, a gate and a merge.
+1. Each request gets its own plan. Run `orq status`: if it shows a plan from an earlier request, run `orq plan archive` first. It refuses while work is in flight; finish or drop that work before starting the new request. If any command says an archive was interrupted, run `orq plan archive` again; if that keeps failing, show the user its message and stop.
+2. Recall from the memory slot once, with the request as the query.
+3. Size the work. Default to ONE unit. Fan out only for three or more independent, substantial units. One or two files, or tightly coupled work, is one unit: every extra unit costs a thread, a gate and a merge.
 
 ## Plan
 

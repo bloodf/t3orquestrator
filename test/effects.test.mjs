@@ -79,6 +79,15 @@ test('plan start resolves the base commit once', async (t) => {
   assert.equal(plan.integrationBranch, `orq/${planId}/integration`);
   assert.equal(plan.integrationHead, s.p.baseSha);
   await ensurePlanStarted({ ...s.fx, now: () => NOW + 5000 }, s.run);
+});
+
+test('plan start skips a planId already used by an archived plan', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  const taken = Math.floor(NOW / 1000);
+  await fs.mkdir(path.join(s.p.repo, '.orq', 'archive', taken.toString(36)), { recursive: true });
+  await fs.mkdir(path.join(s.p.repo, '.orq', 'archive', (taken + 1).toString(36)), { recursive: true });
+  const plan = await ensurePlanStarted(s.fx, s.run);
+  assert.equal(plan.planId, (taken + 2).toString(36));
   const events = await readLines(path.join(s.p.repo, '.orq', 'ledger.jsonl'));
   assert.deepEqual(events.map((e) => e.type), ['plan-started']);
 });

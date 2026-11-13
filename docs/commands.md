@@ -12,6 +12,7 @@ Run `orq` as `node ~/.t3orq/kit/bin/orq.mjs`. Project commands act on the curren
 | [`route`](#route) | Show which models a job class routes to |
 | [`config`](#config) | Read or change project or machine settings |
 | [`plan check`](#plan-check) | Validate `.orq/plan.json` |
+| [`plan archive`](#plan-archive) | Put a finished plan away so the next request starts a fresh one |
 | [`wait`](#wait) | Run the plan until something needs the orchestrator |
 | [`status`](#status) | The plan, slots and one line per unit |
 | [`unit`](#unit) | Retry or drop a unit after judgment |
@@ -123,6 +124,21 @@ Lists the eligible models in the order `orq` would use them:
 
 Prints `plan ok: <n> units, order: <ids>`, or one `error: <problem>` line per problem and exit 4. Exit 1 when there is no plan. It checks the schema, job classes, unit ids, dependencies and cycles. It also checks that each work order is a file under `.orq/` of at most 40 lines, and that units which could run in parallel have non-overlapping `paths`.
 
+## plan archive
+
+`orq plan archive`
+
+Each request gets its own plan, ledger and integration branch. This moves the current plan's state (`plan.json`, `ledger.jsonl`, `units/`, `orders/`, `reviews.json`, `summary.md`) into `.orq/archive/<planId>/`, removes the integration worktree when it is clean, and keeps the integration branch. Config, memory and capabilities stay. The next `plan.json` starts a new plan cut from the configured base.
+
+It refuses, with exit 4, while anything is in flight: a unit that is running, blocked, gating or passed but not merged, a running gate or review, a running `orq wait`, or an integration worktree with uncommitted changes. Units that were never integrated do not block it; it lists them in a note.
+
+```
+archived: plan <planId> (<n> integrated, <m> not) -> .orq/archive/<planId>/
+integration branch kept: <branch>
+```
+
+While an archive is in progress the project is frozen: it writes `.orq/archiving.json` first, and every other command that touches plan state refuses until the archive finishes. If it was interrupted, run it again; nothing is deleted until the archived ledger matches the live one. If it can never finish, its error says how to unfreeze: deleting `.orq/archiving.json` keeps whatever plan state is still under `.orq/` in use.
+
 ## wait
 
 `orq wait [--max-seconds N]`
@@ -166,6 +182,8 @@ The `integration:`, `authors:` and `cooling:` lines appear only when they apply.
 `orq summary [--out <file>]`
 
 Writes the pull request body to `.orq/summary.md`, or to another `.md` file directly under `.orq/`. The body has these sections: goal, decisions, a unit table, evidence results, final checks, reviews, and units not done. It prints `summary: <file> (<n> lines)`. Exit 4 when the plan has not started.
+
+`orq summary --plan <planId>` prints the summary of an archived plan and writes nothing.
 
 ## probe
 

@@ -45,6 +45,8 @@ Set `T3ORQ_HOME` to an absolute path to move the machine state.
 
 `orq` adds `.orq/` to the repository's local exclude file (`info/exclude` in the git directory), not to `.gitignore`. Nothing in your tracked files changes. Workers run in their own worktrees and never see `.orq/`.
 
+Each request gets its own plan. When a request is finished, `orq plan archive` moves that plan's state into `.orq/archive/<planId>/` and keeps its integration branch, so the next request starts a fresh plan from the base branch.
+
 ## Capability slots
 
 The orchestrator uses four roles. Each one resolves to an ordered chain of tools that ends in a built-in path, which needs nothing installed.
