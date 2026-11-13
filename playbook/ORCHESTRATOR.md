@@ -41,6 +41,7 @@ The `slots:` line names the tool for each role: `judge`, `memory`, `code-index` 
 
 Write `.orq/plan.json` (shape: `~/.t3orq/kit/playbook/templates/plan.example.json`) and one work order per unit from `~/.t3orq/kit/playbook/templates/work-order.md`, saved under `.orq/orders/`.
 
+- First list what the request leaves open that would change behaviour (formats, limits, error cases, naming the user will see). Settle all of it with one `orq ask` (see "Questions") before you write `decisions`. Do not guess, and do not ask the user.
 - Settle every question two units would both face in `decisions`, and copy the ones that apply into each work order, before fan-out. Two workers deciding the same question differently is what breaks merges.
 - When other units build on shared code, make that a foundational unit and list it in their `deps`.
 - Cut vertical slices (one feature end to end), not layers.
@@ -98,7 +99,7 @@ In every mode: never force-push, never delete a branch, never bypass a required 
 
 ## Questions
 
-Workers do not ask the user. Their questions reach you as a `blocked:` or a `worker reported …` line. For each one that `decisions` does not settle, and for a product decision of your own that the request does not settle, run `orq ask [--unit <unit>]` with the question on stdin. Act on its first line:
+Workers do not ask the user. Their questions reach you as a `blocked:` or a `worker reported …` line. For each one that `decisions` does not settle, and for a product decision of your own that the request does not settle, run `orq ask [--unit <unit>]` with the question on stdin. Several open points go into one call. Act on its first line:
 
 | First line | Action |
 |---|---|

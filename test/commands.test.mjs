@@ -301,12 +301,10 @@ test('sync records the orchestrator\'s own model in the project config; absent f
   const s = await setup();
   await orq(['init'], s);
   assert.equal((await orq(['sync'], s, { stdin: capsFixture })).code, 0);
-  assert.deepEqual((await read(path.join(s.cwd, '.orq/config.json'))).orchestrator, { instance: 'provider-a', model: 'model-small' });
-  const other = await setup();
-  await orq(['init'], other);
+  assert.deepEqual((await read(path.join(s.cwd, '.orq/config.json'))).orchestrator, { instance: 'provider-a', model: 'model-small', threadId: 'mcp:thread-0003' });
   const { inheritedProviderInstanceId, inheritedModel, ...rest } = JSON.parse(capsFixture);
-  assert.equal((await orq(['sync'], other, { stdin: JSON.stringify(rest) })).code, 0);
-  const cfg = await read(path.join(other.cwd, '.orq/config.json'));
+  assert.equal((await orq(['sync'], s, { stdin: JSON.stringify(rest) })).code, 0); // a later sync without them clears the stale record
+  const cfg = await read(path.join(s.cwd, '.orq/config.json'));
   assert.equal(Object.hasOwn(cfg, 'orchestrator'), false);
   assert.equal(cfg.questions, 'auto');
 });

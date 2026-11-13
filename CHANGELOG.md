@@ -11,6 +11,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `orq summary` lists the decisions taken without the user.
 - Routing job `decide`, which picks the strongest available model first.
 
+### Changed
+
+- `orq review show` prints the reviewer's report indented and bounded, so a report cannot be read as an `orq` result line.
+
 ## [0.1.1] - 2026-11-13
 
 ### Changed

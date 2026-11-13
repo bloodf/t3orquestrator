@@ -37,7 +37,7 @@ test('project config: validation', async () => {
   for (const [json, what] of [
     ['{"autonomy":"yolo"}', /autonomy/], ['{"base":""}', /base/], ['{"checks":{"unit":3}}', /checks\.unit/],
     ['{"slots":[]}', /slots/], ['{"t3":{"bin":"x"}}', /t3/], ['{"checks":[]}', /checks/],
-    ['{"questions":"maybe"}', /questions/], ['{"orchestrator":{"instance":"a"}}', /orchestrator/],
+    ['{"questions":"maybe"}', /questions/], ['{"orchestrator":{"instance":"a"}}', /orchestrator/], ['{"orchestrator":{"instance":"a","model":"m","threadId":3}}', /orchestrator/],
   ]) {
     await assert.rejects(loadProjectConfig(await tmpFile(json)), (e) => /^invalid config /.test(e.message) && what.test(e.message));
   }
