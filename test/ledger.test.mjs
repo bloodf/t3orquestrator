@@ -61,18 +61,21 @@ test('blocked marks the unit reported; unblocked clears it', () => {
   assert.equal(unitOf(apply(s, ev('unblocked', 'u')), 'u').blockedReported, false);
 });
 
-test('provider failure returns the unit to queued, counts it and remembers the key', () => {
+test('provider failure returns the unit to queued, counts it and remembers the key as one to avoid, not exclude', () => {
   const s = run(launched('u'), ev('thread-ended', 'u', { status: 'failed' }));
   const u = unitOf(s, 'u');
   assert.equal(u.state, 'queued');
   assert.equal(u.attempt, 1);
   assert.equal(u.providerFailures, 1);
-  assert.deepEqual(u.tried, ['i::m']);
+  assert.deepEqual(u.tried, []);
+  assert.deepEqual(u.failedKeys, ['i::m']);
   assert.equal(u.threadId, null);
   const again = unitOf(apply(apply(s, launched('u', { threadId: 't2' })), ev('thread-ended', 'u', { status: 'missing' })), 'u');
   assert.equal(again.providerFailures, 2);
-  assert.deepEqual(again.tried, ['i::m']);
+  assert.deepEqual(again.failedKeys, ['i::m']);
   assert.equal(again.launches, 2);
+  const judged = apply(s, ev('needs-judgment', 'u', { reason: 'x' }));
+  assert.deepEqual(unitOf(apply(judged, ev('retried', 'u')), 'u').failedKeys, []);
 });
 
 test('blocked thread that ends is a provider failure too', () => {
@@ -168,7 +171,7 @@ test('reduce on a realistic sequence of two units', () => {
   assert.equal(state(s, 'a'), 'integrated');
   assert.deepEqual({ ...unitOf(s, 'b'), since: null }, {
     ...unitOf(emptyState(), 'b'),
-    state: 'blocked', attempt: 1, launches: 2, providerFailures: 1, tried: ['i::m'], triedInstances: ['i'], threadId: 't3', key: 'j::m', instance: 'j',
+    state: 'blocked', attempt: 1, launches: 2, providerFailures: 1, failedKeys: ['i::m'], triedInstances: ['i'], threadId: 't3', key: 'j::m', instance: 'j',
     model: 'm', branch: 'orq/p/b-a1', baseSha: C, tier: 2, blockedReported: true, since: null,
   });
   assert.equal(s.plan.integrationHead, C);

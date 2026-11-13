@@ -5,8 +5,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- `orq wait` returns `final-fail:` when the final checks fail. `done:` now always means the checks passed or none were configured.
+- A provider failure no longer excludes the model for that unit. Other models are tried first; a lone model is retried after its cooldown, up to three provider failures.
+- A `checks.setup` step is retried once. If it still fails the unit goes to the orchestrator as `setup failed` and is not sent back to the worker; `orq unit retry` gates the same commit again.
+- `orq unit drop` refuses a unit that others depend on, and a queued unit whose dependency was dropped goes to the orchestrator.
+- The paste stub runs `orq init` in the project root and says what to do when the kit or Node is unavailable.
+- Playbook: one row per `judgment:` reason, separate rows for the `idle:` forms, a bound on fix units after a failed final check, tiers of unknown models are settled once, and an open accepted finding blocks an automatic merge.
+
+### Fixed
+
+- The gate kills a step's process group when the step succeeds too, so a step cannot leave a background process running.
+- Replies from `t3` larger than 1 MiB no longer fail the poll.
+- A symlinked work order is rejected by `orq plan check`.
+- `note:` lines can no longer push a decision line out of the `orq wait` output.
+- When other projects hold every machine slot, `orq wait` keeps waiting for one. It used to return `idle` at once, sometimes with the wrong reason, so an orchestrator calling it again would spin.
+
 ### Added
 
+- A `note:` and `wanted_tier=` in `orq status` when a unit runs on a lower tier than its job asked for.
 - `orq plan archive` removes worker and review worktrees (`orq/*` branches) with plain `git worktree remove`; worktrees with uncommitted or untracked files are kept and reported, and no branch is deleted.
 
 ## [0.1.0] - 2026-11-13

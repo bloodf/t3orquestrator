@@ -198,3 +198,40 @@ test('status: cooling instances are listed after the units', async (t) => {
   const json = JSON.parse((await orq(['status', '--json'], p)).out);
   assert.deepEqual(json.cooling, [{ instance: 'pb', until: NOW + 600_000 }]);
 });
+
+test('unit drop refuses while a unit that is not dropped depends on it, naming the way out', async (t) => {
+  const p = await makeProject(t, [unitSpec('a'), unitSpec('b', { deps: ['a'] }), unitSpec('c', { deps: ['a'] })], { cap: 3 });
+  await append(p, { type: 'plan-started', unit: null, planId: 'p1', baseSha: A, integrationBranch: 'orq/p1/integration' });
+  const refused = await orq(['unit', 'drop', 'a'], p);
+  assert.equal(refused.code, 4);
+  assert.equal(refused.err, 'orq: cannot drop a: b, c depend on it; drop them first, or remove "a" from their deps in .orq/plan.json\n');
+  assert.equal(unitOf(await readState(p.repo), 'a').state, 'queued');
+  assert.equal((await orq(['unit', 'drop', 'b'], p)).code, 0);
+  assert.match((await orq(['unit', 'drop', 'a'], p)).err, /cannot drop a: c depend/);
+  assert.equal((await orq(['unit', 'drop', 'c'], p)).code, 0);
+  assert.equal((await orq(['unit', 'drop', 'a'], p)).out, 'dropped a\n');
+});
+
+test('unit retry integration restarts a final gate whose setup failed', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  await append(p, { type: 'plan-started', unit: null, planId: 'p1', baseSha: A, integrationBranch: 'orq/p1/integration' },
+    launched('a', 'th1'), { type: 'thread-ended', unit: 'a', status: 'completed' }, { type: 'gate-started', unit: 'a', attempt: 1, headSha: B, pid: 1 },
+    { type: 'gated', unit: 'a', attempt: 1, verdict: 'pass', failures: [], flags: [], headSha: B }, { type: 'integrated', unit: 'a', sha: B, head: C },
+    { type: 'gate-started', unit: 'integration', attempt: 1, headSha: C, pid: 1 });
+  const file = path.join(p.repo, '.orq', 'units', 'integration', 'gate-1.json');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify({ verdict: 'fail', failures: ['setup failed (exit 1)'], flags: [], steps: [], headSha: C, setupFailed: true }));
+  const r = await orq(['unit', 'retry', 'integration'], p);
+  assert.equal(r.code, 0, r.err);
+  assert.equal((await readState(p.repo)).plan.finalGateStarts, 0);
+});
+
+test('unit retry after a setup failure says the commit is gated again', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  await append(p, { type: 'plan-started', unit: null, planId: 'p1', baseSha: A, integrationBranch: 'orq/p1/integration' },
+    launched('a', 'th1'), { type: 'thread-ended', unit: 'a', status: 'completed' }, { type: 'gate-started', unit: 'a', attempt: 1, headSha: B, pid: 1 },
+    { type: 'needs-judgment', unit: 'a', reason: 'setup failed (exit 1)', setup: true });
+  const r = await orq(['unit', 'retry', 'a'], p);
+  assert.equal(r.out, 'retried a: its commit will be gated again\n');
+  assert.equal(unitOf(await readState(p.repo), 'a').state, 'gating');
+});

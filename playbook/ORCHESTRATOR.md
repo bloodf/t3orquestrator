@@ -16,13 +16,13 @@ Act on the `orq init` output:
 | Output | Action |
 |---|---|
 | exit 3 | You are a worker. Ignore this file and follow your work order. |
-| `t3=missing` | Go to "Without orq". |
-| `autonomy=unset` | Ask the user once which mode they want, then `orq config set autonomy <mode>`. `draft`: you open a draft pull request, they review and merge. `review-fix`: a second model also reviews it and workers fix accepted findings; they merge. `review-fix-merge`: as `review-fix`, and you merge once the host's checks pass. |
+| `t3=missing`, or the command does not start (no Node, no kit) | Go to "Without orq". |
+| `autonomy=unset` | Ask the user once which mode they want, giving these three meanings, then `orq config set autonomy <mode>`. `draft`: you open a draft pull request, they review and merge. `review-fix`: a second model also reviews it and workers fix accepted findings; they merge. `review-fix-merge`: as `review-fix`, and you merge once the host's checks pass. |
 | `next: pipe orchestrator_capabilities JSON to "orq sync"` | Call `orchestrator_capabilities`. Write `{"capabilities": <its result>, "tools": [<the name of every tool you can call>]}` to `.orq/capabilities.json`, then run `orq sync < .orq/capabilities.json`. |
 | `checks: ... full=none` | Find the project's lint, typecheck and test commands and run `orq config set checks.full "<cmd>"`. Without it final checks report `no-evidence`. Set `checks.setup` the same way if a clean checkout needs an install step. |
 
 After `orq sync`:
-- `inferred: <keys>` lists tiers `orq` guessed (4 strongest, 1 smallest). Run `orq tier set <key> <1-4>` for each one you know is wrong. `unchanged: ... set by user` means the user chose it; leave it.
+- `inferred: <keys>` lists tiers `orq` guessed (4 strongest, 1 smallest). Settle each one once: judge its tier from what you know of the model (within a family, the larger or newer model is higher) and run `orq tier set <key> <1-4>`. Ask the user, once and for all of them together, only about models you know nothing of. A tier you set is never listed again. `unchanged: ... set by user` means the user chose it; leave it.
 - A provider with `models: []` in the capabilities lists no models. Run `orq model add <instance> <model> --tier N` for each model the user runs there; ask the user once if you do not know them.
 
 - When the user asks to update the kit, run `orq update`; it moves to the latest tagged release and prints what changed.
@@ -46,7 +46,8 @@ Write `.orq/plan.json` (shape: `~/.t3orq/kit/playbook/templates/plan.example.jso
 - Units with no dependency path between them run in parallel and must own disjoint `paths`.
 - Put the tests that `evidence` relies on in `forbidden`, unless writing them is the unit's job. A worker that can edit its own check can pass by weakening it.
 - `evidence` is one deterministic command that exits 0 only when the unit is done. It runs in a clean checkout of the worker's commit, after `checks.setup`, with no services running. Make it as narrow and fast as possible.
-- Pick `job` by what the work needs; `orq` maps it to a tier. Strongest: `plan`, `architecture`, `debug-hard`. Then `implement-complex`. Then `implement`, `test`. Smallest: `mechanical`, `docs`, `explore`, `summarize`. `fix` gets at least the author's tier. `review` is for the reviewer only.
+- Pick `job` by what the work needs. `orq` gives the unit the cheapest enabled model at or above the tier that job needs, so the job class is how you ask for strength: class hard work as hard. Strongest: `plan`, `architecture`, `debug-hard`. Then `implement-complex`. Then `implement`, `test`. Smallest: `mechanical`, `docs`, `explore`, `summarize`. `fix` gets at least the author's tier. `review` is for the reviewer only.
+- A unit that adds or changes a dependency lists the manifest and the lockfile in `paths`. Two such units never run in parallel: make one depend on the other.
 - For units on the smallest tiers, write the Do section as numbered steps with explicit "Do not" lines. Small models follow steps, not intent.
 - A work order is at most 40 lines: paths and decisions, never pasted file contents.
 
@@ -58,13 +59,19 @@ Call `orq wait`. It returns one line. Act on it, then call `orq wait` again, unt
 
 | Return | Action |
 |---|---|
-| `done: <n> units integrated at <sha>; final checks <result>` | Go to Finish. |
-| `judgment: <unit>: <reason>` | Read the highest-numbered `.orq/units/<unit>/gate-<n>.json` and the worker's report (`t3_thread_read`). Find the cause, then do one: rewrite the work order and run `orq unit retry <unit>`, adding `--tier N` when the model was the problem; split the unit into smaller ones in `plan.json`; or `orq unit drop <unit>` and tell the user what is lost. Never retry unchanged: the same order on the same tier fails the same way. |
+| `done: <n> units integrated at <sha>; final checks <pass\|no-evidence>` | Go to Finish. |
+| `final-fail: <n> units integrated at <sha>; <failures>` | Not done. Read `.orq/units/integration/gate-1.json`. Run the failing command on `base` in a clean worktree: if it fails there too, the failure is older than this request, so tell the user and narrow `checks.full` with `orq config set`; send no fix unit after it. Otherwise append a `fix` unit for it and call `orq wait`. If the same check still fails after two fix units, stop and show the user. |
+| `judgment: <unit>: gate failed 3 times: …` | Read the highest-numbered `.orq/units/<unit>/gate-<n>.json` and the worker's report (`t3_thread_read`). Find the cause, then do one: rewrite the work order and run `orq unit retry <unit>`, adding `--tier N` when the model was the problem; split the unit into smaller ones in `plan.json`; or `orq unit drop <unit>` and tell the user what is lost. Never retry unchanged: the same order on the same tier fails the same way. |
 | `judgment: <unit>: worker reported <STATUS>: …` | The worker stopped and said why. Read its reply (`t3_thread_read`), put the missing decision or context into the work order, and run `orq unit retry <unit>`. If only the user can settle it, ask them. |
-| `judgment: <unit>: <n> provider failures` | The providers failed, not the work. Run `orq unit retry <unit>` and call `orq wait`; `orq` steers away from the instances that failed. If it returns the same judgment again, tell the user which instances `orq status` shows as cooling and stop. |
+| `judgment: <unit>: <n> provider failures` or `no model available: …` | The providers failed, not the work. Run `orq unit retry <unit>` and call `orq wait`; `orq` steers away from the instances that failed. If it returns the same judgment again, tell the user which instances `orq status` shows as cooling or disabled and stop. |
+| `judgment: <unit>: setup failed …` | `checks.setup` fails in a clean checkout. That is the project, not the worker: correct it with `orq config set checks.setup "<cmd>"` or tell the user, then `orq unit retry <unit>`. |
+| `judgment: <unit>: merge conflict: <files>` or `integrate failed: …` | Another unit changed the same files first. Say so in the work order and run `orq unit retry <unit>`; the new worker starts from the merged code. Then fix the `paths` overlap in the plan. |
+| `judgment: <unit>: depends on dropped unit <id>` | Drop it too, or remove that entry from its `deps` in `plan.json` when it can stand alone. Then call `orq wait`. |
+| `judgment: <unit>: gate could not start: …` or `gate could not complete: …` | The gate process died; the text after the colon is why. Correct what it names, then `orq unit retry <unit>` (`orq unit retry integration` for the final gate). |
 | `blocked: <unit> waiting on a request in thread <id>` | Read the request with `t3_pending_request`. Answer it only if `decisions` already settles it; otherwise ask the user and pass on the answer. |
-| `idle: <why>[; retry at <time>]` | Tell the user why and the retry time. Call `orq wait` again at that time. |
-| `timeout: <counts>` | Run `orq status`. Interrupt any thread it shows as stalled with `t3_thread_interrupt`. Call `orq wait` again. |
+| `idle: … retry at <time>` | Models are cooling down. Tell the user why and the time, and call `orq wait` again at that time. |
+| any other `idle:` | Calling `orq wait` again changes nothing. Run `orq status`, then change the plan (`orq unit retry`, `orq unit drop`, or edit `plan.json`) or tell the user. |
+| `timeout: <counts>` | Normal for long work. Run `orq status`. Interrupt a thread only if it shows as stalled (`t3_thread_interrupt`). Units that are `gating` are running their checks, and a `waiting: … machine slot` line means other projects hold every slot: leave both. Call `orq wait` again. |
 
 Passed units merge on their own, so before Finish run `orq status` and act on every `flags=` it shows (details in the unit's last gate file):
 - `test-weakened`, `deleted-test`, `evidence-target-changed`: inspect that file's diff. If the check was made easier, append a `fix` unit that restores it.
@@ -73,13 +80,13 @@ Passed units merge on their own, so before Finish run `orq status` and act on ev
 
 ## Finish
 
-In every mode, read the final checks result on the `done` line first. `fail` is not done: append a `fix` unit for the failure and call `orq wait`. `no-evidence` means no full check ran; say so.
+Finish only after a `done` line. `final checks no-evidence` on it means no full check ran; say so.
 
 | Mode | Action |
 |---|---|
 | `draft` | Run `orq summary`. Push the integration branch (`orq status` names it) and open a DRAFT pull request against `base` with the git-host slot, using `.orq/summary.md` as the body. On the built-in path, or when the repository has no remote, leave the branch local and give the user its name. Never create a remote or a repository. |
-| `review-fix` | Review before the pull request. Fill `~/.t3orq/kit/playbook/templates/review-order.md` into `.orq/orders/review.md`, run `orq review start`, then `orq review show` until it prints the report; it picks a model from another family and runs it on the integrated code. Accept only findings that come with a command and its output, and re-run that command to confirm. Append each accepted finding to `plan.json` as a unit with `job: "fix"`, then `orq wait`. At most two review rounds. Then finish as `draft`. |
-| `review-fix-merge` | As `review-fix`, then wait for the host's checks on the pull request, mark it ready, and merge it. |
+| `review-fix` | Review before the pull request. Fill `~/.t3orq/kit/playbook/templates/review-order.md` into `.orq/orders/review.md`, run `orq review start`, then `orq review show` until it prints the report; it picks a model from another family and runs it on the integrated code. Accept only findings that come with a command and its output, and re-run that command to confirm. Append each accepted finding to `plan.json` as a unit with `job: "fix"`, then `orq wait`. At most two review rounds. A finding you accepted that is still open after round two goes into the pull request body. Then finish as `draft`. |
+| `review-fix-merge` | As `review-fix`. If an accepted finding is still open, stop there and tell the user: never merge over it. Otherwise wait for the host's checks on the pull request, mark it ready, and merge it. |
 
 In every mode: never force-push, never delete a branch, never bypass a required check or branch protection, never merge in `draft` or `review-fix`.
 

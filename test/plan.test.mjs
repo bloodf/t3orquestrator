@@ -10,7 +10,8 @@ const files = (over = {}) => ({
   exists: (f) => !(f in over) || over[f] !== null,
   readFile: (f) => over[f] ?? 'one line\n',
 });
-const check = (plan, over) => validatePlan(plan, { jobs, ...files(over) });
+const NOWHERE = '/nonexistent-orq-project'; // no symlinks to follow: the fake files decide
+const check = (plan, over) => validatePlan(plan, { jobs, ...files(over), cwd: NOWHERE });
 const good = { goal: 'g', units: [unit('a'), unit('b', { deps: ['a'] }), unit('c')] };
 
 test('valid plan: ok and topological order', () => {
@@ -121,4 +122,19 @@ test('malformed shapes report instead of throwing', () => {
   }
   const many = check({ goal: 'g', units: [{ ...unit('a'), title: 4, job: 5, evidence: 6, order: 7 }] });
   assert.ok(many.errors.length >= 4);
+});
+
+test('a work order symlinked out of .orq/ is refused; cwd is required so no caller skips the check', async (t) => {
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orq-plan-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, 'p', '.orq', 'units', 'a'), { recursive: true });
+  await fs.writeFile(path.join(root, 'secret.txt'), 'SECRET\n');
+  await fs.symlink(path.join(root, 'secret.txt'), path.join(root, 'p', '.orq', 'units', 'a', 'order.md'));
+  const r = validatePlan({ goal: 'g', units: [unit('a')] }, { jobs, ...files(), cwd: path.join(root, 'p') });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => /unit a: order must be a file under \.orq\//.test(e)), r.errors.join('\n'));
+  assert.throws(() => validatePlan({ goal: 'g', units: [unit('a')] }, { jobs, ...files() }), /cwd/);
 });

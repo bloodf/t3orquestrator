@@ -20,7 +20,7 @@ The agent follows `playbook/ORCHESTRATOR.md`. It never writes product code itsel
 4. **Launch.** Each ready unit is routed to a model and started as a T3 thread. The thread runs in a new worktree on branch `orq/<planId>/<unit>-a<attempt>` (plus `-l<n>` on a relaunch), based on the current integration head, so it sees the work its dependencies merged. The work order is the thread's first message.
 5. **Gate.** When the thread completes, a detached gate process checks the commits on the worker's branch. See [The gate](#the-gate).
 6. **Integrate.** A unit that passes is merged into the integration branch. A merge conflict returns the unit to the orchestrator.
-7. **Final checks.** When every unit is integrated or dropped, `checks.full` runs on the integration head. The `done` line reports `pass`, `fail` or `no-evidence`.
+7. **Final checks.** When every unit is integrated or dropped, `checks.full` runs on the integration head. `orq wait` then returns `done` with `pass` or `no-evidence`, or `final-fail` with the failures.
 8. **Finish.** The orchestrator runs `orq summary`, pushes the integration branch, and opens a draft pull request with the git-host slot. In the review modes it reviews first (see [Autonomy modes](#autonomy-modes)).
 
 A plan can grow. Append units to `plan.json` after `done` and call `orq wait` again. The new units run, and the final checks run again on the new head.
@@ -78,7 +78,7 @@ The gate judges the committed bytes between the unit's base and the worker's bra
 
 1. There must be at least one commit on top of the base.
 2. Every changed file must match the unit's `paths` and none of its `forbidden` globs.
-3. A fresh detached checkout of the head runs `checks.setup`, then the unit's `evidence` command, then `checks.unit` if it is set. Each step has 20 minutes. A failed evidence or `checks.unit` step is run once more. If it passes the second time, the gate passes with a `flaky` flag.
+3. A fresh detached checkout of the head runs `checks.setup`, then the unit's `evidence` command, then `checks.unit` if it is set. Each step has 20 minutes. A failed step is run once more. If it passes the second time, the gate passes with a `flaky` flag. A setup step that fails twice is not held against the unit: it goes to the orchestrator as `setup failed`, because the worker cannot fix the project's install step.
 
 The verdict is `pass` or `fail`. The final gate on the integration head runs `checks.setup` and then `checks.full`. Its verdict is `no-evidence` when `checks.full` is not set.
 
@@ -91,7 +91,7 @@ Flags never fail the gate. They tell the orchestrator what to read before it acc
 | `deleted-test` | A test file was deleted |
 | `test-weakened` | An existing test file lost lines |
 | `evidence-target-changed` | The evidence command names a file that the unit modified, deleted, renamed or replaced. A file the unit added itself is not flagged |
-| `flaky` | Evidence or checks failed once and passed on the retry |
+| `flaky` | Setup, evidence or checks failed once and passed on the retry |
 | `no-evidence` | The unit passed with no evidence command and no `checks.unit` |
 
 A test file is any path under `test/`, `tests/`, `__tests__/` or `spec/`, or a name ending in `.test.*`, `.spec.*` or `_test.*`.

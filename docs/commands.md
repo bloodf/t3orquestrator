@@ -143,7 +143,7 @@ While an archive is in progress the project is frozen: it writes `.orq/archiving
 
 `orq wait [--max-seconds N]`
 
-This runs the scheduler for up to `N` seconds (default 480). The first line it prints is one of `done:`, `judgment:`, `blocked:`, `idle:` or `timeout:`. See [Scheduling](scheduling.md#what-orq-wait-returns). Exit 4 when the plan is invalid or uses the reserved unit id `integration`. Exit 1 when no usable `t3` is recorded. Exit 5 when another `orq wait` holds this project.
+This runs the scheduler for up to `N` seconds (default 480). The first line it prints is one of `done:`, `final-fail:`, `judgment:`, `blocked:`, `idle:` or `timeout:`. It exits 0 for each of them. See [Scheduling](scheduling.md#what-orq-wait-returns). Exit 4 when the plan is invalid or uses the reserved unit id `integration`. Exit 1 when no usable `t3` is recorded. Exit 5 when another `orq wait` holds this project.
 
 ## status
 
@@ -153,21 +153,21 @@ This runs the scheduler for up to `N` seconds (default 480). The first line it p
 plan: <goal> (<planId>|not started)
 integration: <branch> head=<sha> base=<sha>
 cap=<n> active=<n> blocked=<n> gates=<n> machine_leases=<n>[ expired_leases=<n>]
-<unit> <state>[ attempt=<n>][ model=<key>][ tier=<n>][ thread=<id>][ flags=<kinds>][ <reason>]
+<unit> <state>[ attempt=<n>][ model=<key>][ tier=<n>][ wanted_tier=<n>][ thread=<id>][ flags=<kinds>][ <reason>]
 authors: max_tier=<n> family=<family>
 cooling: <instance> until <iso time>, …
 note: cap covers threads orq started; threads started by hand are not counted
 ```
 
-The `integration:`, `authors:` and `cooling:` lines appear only when they apply.
+The `integration:`, `authors:` and `cooling:` lines appear only when they apply. `wanted_tier` appears when the unit was launched below its minimum tier because no model at that tier was usable.
 
 ## unit
 
 `orq unit retry <id> [--tier N] | orq unit drop <id>`
 
-`retry` moves a `failed` unit back to `queued` and clears its attempts, its excluded models and its provider failure count. `--tier` sets a minimum tier (1-4). It prints `retried <id>: queued[, minimum tier <n>]`. `orq unit retry integration` restarts a final gate that could not complete.
+`retry` moves a `failed` unit back to `queued` and clears its attempts, its excluded models and its provider failure count. `--tier` sets a minimum tier (1-4). It prints `retried <id>: queued[, minimum tier <n>]`. A unit that failed because `checks.setup` failed goes back to `gating` instead, to gate the same commit again; it prints `retried <id>: its commit will be gated again`. `orq unit retry integration` restarts a final gate that could not complete or whose setup failed.
 
-`drop` removes a unit from the run and prints `dropped <id>`. If its thread was running, a note says it keeps running in T3. Dropping is refused, with exit 4, while the unit is being gated or merged.
+`drop` removes a unit from the run and prints `dropped <id>`. If its thread was running, a note says it keeps running in T3. Dropping is refused, with exit 4, while the unit is being gated or merged, and while a unit that is not dropped depends on it: `cannot drop <id>: <ids> depend on it; drop them first, or remove "<id>" from their deps in .orq/plan.json`.
 
 ## review
 

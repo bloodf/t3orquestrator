@@ -161,3 +161,9 @@ test('defaultExec passes cwd', () => {
   const r = defaultExec(process.execPath, ['-e', 'process.stdout.write(process.cwd())'], { cwd: '/' });
   assert.equal(r.stdout, '/');
 });
+
+test('defaultExec takes a reply over 1 MB (a worker pasting a diff must not wedge wait)', () => {
+  const r = defaultExec(process.execPath, ['-e', 'process.stdout.write("x".repeat(3 * 1024 * 1024))']);
+  assert.equal(r.code, 0);
+  assert.equal(r.stdout.length, 3 * 1024 * 1024);
+});

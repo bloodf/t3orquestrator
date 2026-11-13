@@ -193,3 +193,11 @@ test('avoidInstances outranks tier; avoided-only candidates are still returned a
   assert.ok(only.candidates.every((c) => c.avoided === true));
   assert.deepEqual(go(r, { avoidInstances: ['a'] }), go(r, { avoidInstances: ['a'] }));
 });
+
+test('avoidKeys: a model that failed this unit goes last, behind one only on a failed instance; never excluded', () => {
+  const r = reg({ a: inst(), b: inst() }, [mod('a', 'm2', 2), mod('a', 'm3', 3), mod('b', 'm4', 4)]);
+  assert.deepEqual(keys(go(r, { avoidKeys: ['a::m2'], avoidInstances: ['a'] })), ['b::m4', 'a::m3', 'a::m2']);
+  const one = reg({ a: inst() }, [mod('a', 'm2', 2)]);
+  const only = go(one, { avoidKeys: ['a::m2'] });
+  assert.deepEqual([keys(only), only.candidates[0].avoided], [['a::m2'], true]);
+});

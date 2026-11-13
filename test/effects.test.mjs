@@ -154,7 +154,7 @@ test('launch: a failed start is a provider failure and leaves no lease', async (
   const u = unitOf(await readState(s.p.repo), 'a');
   assert.equal(u.state, 'queued');
   assert.equal(u.providerFailures, 1);
-  assert.deepEqual(u.tried, ['pa::m2']);
+  assert.deepEqual(u.failedKeys, ['pa::m2']);
   assert.deepEqual(await leasesOf(s.p), []);
   assert.equal((await registryOf(s.p)).models['pa::m2'].failures, 1);
 });

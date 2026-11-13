@@ -30,7 +30,7 @@ test('README stub is byte-identical to BOOTSTRAP stub and points at an existing 
 test('plan.example.json is a valid plan', () => {
   const plan = JSON.parse(read('playbook/templates/plan.example.json'));
   const { jobs } = JSON.parse(read('playbook/routing.json'));
-  const result = validatePlan(plan, { jobs, exists: () => true, readFile: () => '# Work order: x — y\n' });
+  const result = validatePlan(plan, { cwd: '/nonexistent-orq-project', jobs, exists: () => true, readFile: () => '# Work order: x — y\n' });
   assert.deepEqual(result.errors, []);
   assert.equal(result.ok, true);
 });

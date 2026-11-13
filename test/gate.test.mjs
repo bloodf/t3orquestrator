@@ -127,11 +127,23 @@ test('scan flags (including weakened tests and evidence targets) never fail the 
   assert.deepEqual(r.flags.map((f) => f.kind).sort(), ['evidence-target-changed', 'placeholder', 'test-weakened']);
 });
 
-test('setup failure stops before evidence and still removes the worktree', async () => {
-  const r = await gate({ checks: { setup: 'setup', unit: 'chk' }, script: { setup: [{ code: 5, output: '' }] } });
-  assert.deepEqual(r.failures, ['setup failed (exit 5)']);
-  assert.deepEqual(r.calls.map((c) => c.command), ['setup']);
+test('setup failing twice stops before evidence, is marked as a setup failure, and still removes the worktree', async () => {
+  const r = await gate({ checks: { setup: 'setup', unit: 'chk' }, script: { setup: [{ code: 5, output: 'x' }, { code: 5, output: 'npm ERR! network\n\u001b[31mETIMEDOUT\n' }] } });
+  assert.equal(r.verdict, 'fail');
+  assert.equal(r.setupFailed, true);
+  assert.deepEqual(r.failures, ['setup failed (exit 5): [31mETIMEDOUT']); // the last line, control characters removed
+  assert.deepEqual(r.calls.map((c) => c.command), ['setup', 'setup']);
   assert.equal(r.gitCalls.at(-1)[0], 'remove');
+});
+
+test('setup passing on retry adds a flaky flag and continues; other failures are not setup failures', async () => {
+  const r = await gate({ checks: { setup: 'setup', unit: null }, script: { setup: [{ code: 1, output: '' }, { code: 0, output: '' }] } });
+  assert.equal(r.verdict, 'pass');
+  assert.equal(r.setupFailed, undefined);
+  assert.deepEqual(r.flags, [{ kind: 'flaky', path: '', detail: 'setup passed on retry' }]);
+  assert.deepEqual(r.calls.map((c) => c.command), ['setup', 'setup', 'ev']);
+  const ev = await gate({ checks: { setup: 'setup', unit: null }, script: { ev: [{ code: 1, output: '' }] } });
+  assert.deepEqual([ev.verdict, ev.setupFailed], ['fail', undefined]);
 });
 
 test('evidence passing on retry adds a flaky flag and continues', async () => {
@@ -256,6 +268,17 @@ test('defaultRun kills the whole process group on timeout', async (t) => {
   assert.ok(pid > 0, 'pid file was never written');
   const deadline = Date.now() + 5000;
   while (alive(pid) && Date.now() < deadline) await new Promise((res) => setTimeout(res, 50));
+  assert.equal(alive(pid), false);
+});
+
+test('defaultRun kills a background process left by a step that succeeded', { skip: process.platform === 'win32' }, async (t) => {
+  const r = await defaultRun('sleep 30 >/dev/null 2>&1 & echo $!', { cwd: os.tmpdir(), timeoutMs: 10000 });
+  const pid = Number(r.output.trim());
+  t.after(() => { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } });
+  assert.equal(r.code, 0);
+  assert.ok(pid > 0, `no pid in output: ${r.output}`);
+  const deadline = Date.now() + 1000; // reaping by init is not instant
+  while (alive(pid) && Date.now() < deadline) await new Promise((res) => setTimeout(res, 20));
   assert.equal(alive(pid), false);
 });
 

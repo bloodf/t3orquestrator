@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { run } from '../lib/cli.mjs';
+import { defaultExec as gitExecReal } from '../lib/git.mjs';
 import fsSync from 'node:fs';
 import { commit, readState, unitOf } from '../lib/ledger.mjs';
 import { listLeases, countActive, writeLease } from '../lib/leases.mjs';
@@ -250,7 +251,7 @@ test('wait: feedback deferred by a full machine times out instead of idling, the
   await writeLease(dir, { threadId: 'busy', project: '/other', unit: 'z', instance: 'pb', model: 'm2', startedAt: NOW, heartbeatAt: NOW, blocked: false });
   const full = await orq(['wait', '--max-seconds', '30'], p, sim);
   assert.equal(full.code, 0, full.err);
-  assert.equal(full.out, 'timeout: 0 running, 0 blocked, 0 gating, 1 queued, 0 passed\n');
+  assert.equal(full.out, 'timeout: 0 running, 0 blocked, 0 gating, 1 queued, 0 passed\nwaiting: 1 queued units wait for a machine slot (cap 1 is full)\n');
   assert.equal(sim.sends, undefined);
   await fs.rm(path.join(dir, 'busy.json'));
   const freed = await orq(['wait'], p, sim);
@@ -287,7 +288,7 @@ test('wait: one dying instance cools down and waits instead of burning all three
   assert.equal(first.code, 0, first.err);
   const reg = JSON.parse(await fs.readFile(path.join(p.home, 'registry.json'), 'utf8'));
   const until = reg.instances.pa.cooldownUntil;
-  assert.equal(first.out, `idle: no model for a: none eligible: excluded, cooling down; retry at ${new Date(until).toISOString()}\n`);
+  assert.equal(first.out, `idle: no model for a: all cooling down; retry at ${new Date(until).toISOString()}\n`);
   assert.equal(reg.instances.pa.failures, 2);
   const u = unitOf(await readState(p.repo), 'a');
   assert.deepEqual([u.state, u.providerFailures], ['queued', 2]);
@@ -338,4 +339,86 @@ test('wait: after archiving, the next request runs a fresh plan cut from the bas
   assert.equal(contains(p.baseSha, now.integrationHead), true);
   sh(p.repo, 'rev-parse', '--verify', `refs/heads/${old.integrationBranch}`);
   await fs.stat(path.join(p.repo, '.orq', 'archive', old.planId, 'ledger.jsonl'));
+});
+
+test('wait: an unreadable worker report is gated as usual, never wedges the unit', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['commit-complete']] });
+  const exec = (bin, args, o) => (args[1] === 'show' && sim.threads.get(args[2])?.status === 'completed'
+    ? { code: 1, stdout: '', stderr: 'spawnSync t3 ENOBUFS' }
+    : sim.exec(bin, args, o));
+  const r = await orq(['wait'], p, sim, { exec });
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^done: 1 units integrated at /);
+  assert.equal(unitOf(await readState(p.repo), 'a').state, 'integrated');
+});
+
+test('wait: failed final checks never print "done:"; they print final-fail with the failures', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')], { checks: { full: 'echo broken; exit 3' } });
+  const sim = simulator(p, { a: [['commit-complete']] });
+  const r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  const st = await readState(p.repo);
+  assert.equal(st.plan.final.verdict, 'fail');
+  assert.equal(r.out, `final-fail: 1 units integrated at ${st.plan.integrationHead.slice(0, 12)}; ${st.plan.final.failures.join('; ')}\n`);
+});
+
+test('wait: with one routable model a provider failure waits out the backoff and retries it, up to 3 failures', async (t) => {
+  const registry = { ...REGISTRY, instances: { pa: REGISTRY.instances.pa }, models: { 'pa::m2': REGISTRY.models['pa::m2'] } };
+  const p = await makeProject(t, [unitSpec('a')], { registry });
+  const sim = simulator(p, { a: [['fail'], ['fail'], ['fail']] });
+  const outs = [];
+  for (let i = 0; i < 5 && !outs.at(-1)?.startsWith('judgment:'); i += 1) {
+    const r = await orq(['wait'], p, sim);
+    assert.equal(r.code, 0, r.err);
+    outs.push(r.out);
+    const m = /retry at (\S+)\n$/.exec(r.out);
+    if (m) sim.now = Date.parse(m[1]) + 1;
+  }
+  assert.match(outs[0], /^idle: no model for a: all cooling down; retry at /);
+  assert.equal(outs.at(-1), 'judgment: a: 3 provider failures\n');
+  assert.equal(sim.byUnit.a.length, 3);
+  assert.ok(sim.byUnit.a.every((x) => x.model === 'm2'));
+});
+
+test('wait and status name a unit launched below its wanted tier, and the model used', async (t) => {
+  const registry = { ...REGISTRY, instances: { pa: REGISTRY.instances.pa }, models: { 'pa::m2': REGISTRY.models['pa::m2'] } };
+  const p = await makeProject(t, [unitSpec('a', { job: 'implement-complex' })], { registry });
+  const sim = simulator(p, { a: [['commit-complete']] });
+  const r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  const [first, ...rest] = r.out.trim().split('\n');
+  assert.match(first, /^done: 1 units integrated/);
+  assert.deepEqual(rest, ['note: unit a wanted tier 3; launched on pa::m2 (tier 2), the best available']);
+  const s = await orq(['status'], p, sim);
+  assert.match(s.out, /^a integrated attempt=1 model=pa::m2 tier=2 wanted_tier=3 thread=/m);
+});
+
+const foreign = { threadId: 'other-th', project: '/other-project', unit: 'z', instance: 'pb', model: 'm2', startedAt: NOW, heartbeatAt: NOW, blocked: false };
+
+test('wait: when another project holds the whole machine cap it keeps polling and times out naming the wait for a slot', async (t) => {
+  const p = await makeProject(t, [unitSpec('a'), unitSpec('b')], { cap: 1 });
+  await writeLease(path.join(p.home, 'leases'), foreign);
+  const sim = simulator(p, {});
+  const r = await orq(['wait', '--max-seconds', '60'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out, 'timeout: 0 running, 0 blocked, 0 gating, 2 queued, 0 passed\nwaiting: 2 queued units wait for a machine slot (cap 1 is full)\n');
+  assert.ok(sim.polls.length >= 3, `polled ${sim.polls.length} times`);
+  assert.equal(sim.n, 0);
+});
+
+test('wait: a launch refused at the machine lock (another project took the slot) is reported as the cap, not as dependencies', async (t) => {
+  const p = await makeProject(t, [unitSpec('a'), unitSpec('b')], { cap: 1 });
+  const dir = path.join(p.home, 'leases');
+  let raced = false;
+  const gitExec = (cmd, args, o) => {
+    // another project's launch lands between this tick and the reservation
+    if (!raced) { raced = true; fsSync.mkdirSync(dir, { recursive: true }); fsSync.writeFileSync(path.join(dir, `${foreign.threadId}.json`), JSON.stringify(foreign)); }
+    return gitExecReal(cmd, args, o);
+  };
+  const sim = simulator(p, {});
+  const r = await orq(['wait', '--max-seconds', '30'], p, sim, { gitExec });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(raced, true);
+  assert.equal(r.out, 'timeout: 0 running, 0 blocked, 0 gating, 2 queued, 0 passed\nwaiting: 2 queued units wait for a machine slot (cap 1 is full)\n');
 });

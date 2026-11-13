@@ -26,7 +26,7 @@
 | `gating` | No; gates are limited by `gateConcurrency` (default 1 per project) | The gate result: `pass` or `no-evidence` to `passed`, `fail` back to `queued` or to `failed` |
 | `passed` | No | The merge into the integration branch (to `integrated`), or a conflict (to `failed`) |
 | `integrated` | No | Final |
-| `failed` | No | `orq unit retry <id>` (to `queued`) or `orq unit drop <id>` |
+| `failed` | No | `orq unit retry <id>` (to `queued`, or to `gating` after a setup failure) or `orq unit drop <id>` |
 | `dropped` | No | Final |
 
 Every transition is an event in `.orq/ledger.jsonl`. The state is derived from the events, and an illegal transition is rejected before anything is written.
@@ -63,9 +63,9 @@ Among enabled, available models at or above the minimum tier, candidates are ord
 3. then least recently used;
 4. then key order.
 
-For `review`, models from the author's family, and models whose family is unknown, move to the end. If no model reaches the minimum tier, the best available tier is used and `orq route` marks it `below-tier`.
+For `review`, models from the author's family, and models whose family is unknown, move to the end. If no model reaches the minimum tier, the best available tier is used and `orq route` marks it `below-tier`. A unit launched that way, including a `fix` unit that cannot get the author's tier, gets a `note: unit <id> wanted tier <n>; launched on <key> (tier <m>), the best available` line from `orq wait`, and `wanted_tier=<n>` in `orq status`.
 
-A model is skipped while it or its instance is cooling down, or while its instance is at its limit. A model that already failed this unit is excluded for that unit. An instance that already failed this unit moves to the end of the order, but it is not excluded.
+A model is skipped while it or its instance is cooling down, or while its instance is at its limit. A model whose work failed the gate twice for this unit is excluded for that unit (the quality ladder's third attempt). A model or instance on which this unit hit a provider failure moves to the end of the order, a failed model behind a failed instance, but it is not excluded: when nothing else is eligible it is used again once its cooldown has passed.
 
 ## Failure ladders
 
@@ -73,11 +73,11 @@ There are two ladders: one for when the provider fails, one for when the work fa
 
 **Provider failure.** The thread ended `failed`, `cancelled` or `interrupted`, disappeared, or did not start. The work is not judged.
 
-1. The unit goes back to `queued` on the same attempt. The failed model is excluded for this unit, and its instance moves to the end of the order.
+1. The unit goes back to `queued` on the same attempt. The failed model and its instance move to the end of the order for this unit. With a single routable model the unit waits out that model's cooldown (`idle: … retry at <time>`) and runs on it again.
 2. The model cools down for 10 minutes, doubling with each consecutive failure, up to 5 hours.
 3. After two consecutive failures on the same instance, the whole instance cools down, starting at 10 minutes. Treating it as down covers quota limits and outages, because T3 does not report why a thread failed.
 4. A thread that completes on the instance clears its failure count. A gate pass clears the model's failure count.
-5. After 3 provider failures, or when every eligible model has been excluded, the unit goes to `failed`.
+5. After 3 provider failures the unit goes to `failed`. When the quality ladder has excluded every eligible model, it goes to `failed` with `no model available: all excluded`. When some eligible models are excluded and the rest are cooling down (`none eligible: excluded, cooling down`), the unit waits for the cooldown.
 
 Feedback can also go unseen. If the thread still shows its run from before the failures were sent, `orq wait` reports it as stalled after 2 minutes. It treats it as a provider failure after `stallMinutes`.
 
@@ -91,20 +91,22 @@ Feedback can also go unseen. If the thread still shows its run from before the f
 
 A gate that started twice without producing a result goes to `failed` with `gate could not complete`.
 
+**Setup failure.** `checks.setup` is retried once like the other steps; a pass on the retry adds a `flaky` flag. When it still fails, that is a fact about the project, not the unit: the unit goes straight to `failed` with `setup failed (exit <n>): <last output line>`. Nothing is sent to the worker, nothing is relaunched, and no attempt is counted. Fix the setup, then `orq unit retry <id>` gates the same commit again. The final gate works the same way: `judgment: integration: setup failed …`, then `orq unit retry integration`.
+
 ## What `orq wait` returns
 
-It prints at most 7 lines. The first line is one of the forms below. Notes and detail lines follow it. The exit code is 0 for all of them.
+It prints at most 7 lines. The first line is one of the forms below. Notes and detail lines follow it. Notes are cut first, replaced by `note: <n> more notes omitted`; a decision line is never cut, so many `judgment:` units can take more than 7 lines. The exit code is 0 for all of them.
 
 | First line | Meaning |
 |---|---|
-| `done: <n> units integrated at <sha>; final checks <pass\|fail\|no-evidence\|none>` | Every unit is integrated or dropped, and the final checks ran on the current integration head. `none` means nothing was integrated. |
-| `judgment: <unit>: <reason>` | A unit is `failed`. Each further failed unit is listed on its own line as `<unit>: <reason>`. Reasons: `gate failed 3 times: …`, `3 provider failures`, `no model available: …`, `merge conflict: <files>`, `integrate failed: …`, `gate could not start: …`, `gate could not complete`. The unit `integration` with `final gate could not complete` means the final gate; `orq unit retry integration` restarts it. |
+| `done: <n> units integrated at <sha>; final checks <pass\|no-evidence\|none>` | Every unit is integrated or dropped, and the final checks ran on the current integration head. `none` means nothing was integrated. |
+| `final-fail: <n> units integrated at <sha>; <failures>` | Every unit is integrated or dropped, but the final checks failed on the current integration head. The run is not done. |
+| `judgment: <unit>: <reason>` | A unit is `failed`. Each further failed unit is listed on its own line as `<unit>: <reason>`. Reasons: `gate failed 3 times: …`, `3 provider failures`, `no model available: …`, `merge conflict: <files>`, `integrate failed: …`, `gate could not start: …`, `gate could not complete`, `setup failed (exit <n>): <line>`, `depends on dropped unit <id>`. The unit `integration` with `final gate could not complete` or `setup failed …` means the final gate; `orq unit retry integration` restarts it. |
 | `blocked: <unit> waiting on a request in thread <id>` | A worker asked a question. Read it with the T3 pending-request tool. |
 | `idle: no model for <unit>: <reason>[; retry at <time>]` | No model can take the unit now (cooling down, at limit, or none in the registry). |
-| `idle: machine cap <n> is full` | Other projects hold every slot. |
-| `idle: <n> queued units wait on dependencies that will not finish` | A dependency was dropped or failed. |
+| `idle: <n> queued units wait on dependencies that will not finish` | A dependency failed. (A unit whose dependency was dropped goes to `judgment:` with `depends on dropped unit <id>` instead.) |
 | `idle: nothing left to launch` | Nothing is running and nothing can start. |
-| `timeout: <n> running, <n> blocked, <n> gating, <n> queued, <n> passed` | `--max-seconds` passed. Lines `stalled: <unit> thread <id> quiet for <n> min` name threads with no update for `stallMinutes` (default 20). |
+| `timeout: <n> running, <n> blocked, <n> gating, <n> queued, <n> passed` | `--max-seconds` passed. Lines `stalled: <unit> thread <id> quiet for <n> min` name threads with no update for `stallMinutes` (default 20). A line `waiting: <n> queued units wait for a machine slot (cap <n> is full)` means other projects hold every slot: `orq wait` keeps polling while the cap is full instead of returning, so call it again. |
 
 Exit code 4 with `no valid plan; run "orq plan check"` means the plan failed validation. Exit code 5 means another `orq wait` is running for this project.
 

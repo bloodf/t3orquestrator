@@ -129,7 +129,7 @@ test('rule 2: a lost gate is restarted once, then needs judgment; concurrency li
 });
 function r2(r) { return r.actions.filter((a) => a.type === 'gate-start').map((a) => `${a.type}:${a.unit}`); }
 
-test('rule 3: provider failure removes the lease, records failure, and relaunches excluding the tried key', () => {
+test('rule 3: provider failure removes the lease, records failure, and relaunches on another key (the failed one cools down)', () => {
   const r = go([launched('a')], { threads: { 't-a': thread('t-a', { status: 'failed' }) } });
   assert.deepEqual(evTypes(r), ['thread-ended:a']);
   assert.deepEqual(r.actions.slice(0, 2), [
@@ -333,12 +333,20 @@ test('item 3: attempt 3 excludes the model that failed twice, even with no highe
   assert.equal(l.key, 'b::m2');
 });
 
-test('item 4: routing blocked by exclusion needs judgment instead of idling forever', () => {
+test('item 4: routing blocked by the quality ladder\'s exclusion needs judgment instead of idling forever', () => {
   const one = { ...registry, models: Object.fromEntries([model('a', 'm2', 2)]) };
-  const r = go([launched('a'), ended('a', 'failed')], { registry: one, plan: { goal: 'g', units: [unit('a')] } });
+  const solo = { registry: one, plan: { goal: 'g', units: [unit('a')] } };
+  const twice = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail'),
+    { type: 'feedback-sent', unit: 'a', at: 6, attempt: 2, threadId: 't-a' }, { ...ended('a'), at: 7 }, gateStarted('a', 2), gatedEv('a', 'fail', 2)];
+  const r = go(twice, solo);
   assert.deepEqual(evTypes(r), ['needs-judgment:a']);
   assert.equal(r.events[0].reason, 'no model available: all excluded');
   assert.deepEqual(r.report.judgment, [{ unit: 'a', reason: 'no model available: all excluded' }]);
+  // a provider failure on the only model is not an exclusion: it cools down and is retried after the backoff
+  const provider = go([launched('a')], { ...solo, threads: { 't-a': thread('t-a', { status: 'failed' }) } });
+  assert.deepEqual(evTypes(provider), ['thread-ended:a']);
+  assert.deepEqual(provider.report.unroutable.map((u) => [u.unit, u.blocked]), [['a', 'cooling']]);
+  assert.ok(provider.report.unroutable[0].retryAt > NOW);
 });
 
 test('item 8: a gate result for a commit other than the one gated is ignored', () => {
@@ -435,4 +443,49 @@ test('rule 6: a final gate that could not complete reports why when the gate pro
   assert.deepEqual(r.report.judgment, [{ unit: FINAL, reason: 'final gate could not complete: orq: boom' }]);
   const silent = go([...doneA, started, started], { plan: { goal: 'g', units: [unit('a')] }, gates: { [FINAL]: { running: false, result: null } } });
   assert.deepEqual(silent.report.judgment, [{ unit: FINAL, reason: 'final gate could not complete' }]);
+});
+
+test('a queued unit whose dependency was dropped goes to judgment instead of idling', () => {
+  const r = go([{ type: 'dropped', unit: 'a', at: 7 }]);
+  assert.deepEqual(r.events.filter((e) => e.type === 'needs-judgment').map((e) => [e.unit, e.reason]), [['b', 'depends on dropped unit a']]);
+  assert.ok(!launches(r).some((a) => a.unit === 'b'));
+  assert.deepEqual(r.report.judgment, [{ unit: 'b', reason: 'depends on dropped unit a' }]);
+});
+
+test('a setup failure goes to judgment without feedback, relaunch or a quality rung; a retry gates again', () => {
+  const setupFail = { verdict: 'fail', failures: ['setup failed (exit 1): npm ERR! ETIMEDOUT'], flags: [], headSha: B, setupFailed: true };
+  const fb = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail'),
+    { type: 'feedback-sent', unit: 'a', at: 6, attempt: 2, threadId: 't-a' }, { ...ended('a'), at: 7 }, gateStarted('a', 2)];
+  const r = go(fb, { gates: { a: { running: false, result: setupFail } } });
+  assert.deepEqual(evTypes(r), ['needs-judgment:a']);
+  assert.equal(r.events[0].reason, 'setup failed (exit 1): npm ERR! ETIMEDOUT');
+  assert.deepEqual(types(r).filter((x) => x !== 'launch'), []);
+  assert.ok(!launches(r).some((a) => a.unit === 'a'));
+  const failed = reduce([started, ...fb, ...r.events]).units.a;
+  assert.deepEqual([failed.state, failed.attempt, failed.minTier], ['failed', 2, null]);
+  const retried = reduce([started, ...fb, ...r.events, { type: 'retried', unit: 'a', at: 9 }]);
+  const again = go([...fb, ...r.events, { type: 'retried', unit: 'a', at: 9 }]);
+  assert.deepEqual([retried.units.a.state, retried.units.a.attempt, retried.units.a.since], ['gating', 2, null]);
+  assert.deepEqual(r2(again), ['gate-start:a']);
+});
+
+test('a final gate whose setup failed asks for judgment with the setup reason, not done', () => {
+  const all = [...doneA, launched('b'), { type: 'dropped', unit: 'b', at: 7 }, { type: 'dropped', unit: 'c', at: 8 },
+    { type: 'gate-started', unit: FINAL, at: 9, attempt: 1, headSha: C, pid: 1 }];
+  const r = go(all, {
+    gates: { [FINAL]: { running: false, result: { verdict: 'fail', failures: ['setup failed (exit 2): boom'], flags: [], headSha: C, setupFailed: true } } },
+  });
+  assert.deepEqual(r.events, []);
+  assert.equal(r.report.done, false);
+  assert.deepEqual(r.report.judgment, [{ unit: FINAL, reason: 'setup failed (exit 2): boom' }]);
+});
+
+test('a fix unit that cannot get the author\'s tier launches on the best available, carrying the wanted tier', () => {
+  const noTop = { ...registry, models: Object.fromEntries([model('a', 'm2', 2), model('a', 'm3', 3)]) };
+  const fixPlan = { goal: 'g', units: [unit('a'), unit('f', { job: 'fix', deps: ['a'] })] };
+  const r = go([launched('a', { tier: 4, key: 'b::m4', instance: 'b', model: 'm4' }), ended('a'), gateStarted('a'), gatedEv('a', 'pass'), integratedEv('a')],
+    { registry: noTop, plan: fixPlan });
+  const [l] = launches(r);
+  assert.deepEqual([l.unit, l.key, l.tier, l.wantedTier], ['f', 'a::m3', 3, 4]);
+  assert.equal(launches(go([], { plan: { goal: 'g', units: [unit('a')] } }))[0].wantedTier, undefined);
 });
