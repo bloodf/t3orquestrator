@@ -406,3 +406,62 @@ test('item 1: starting a gate ignores a live pid whose attempt already has a res
   await s.act({ type: 'gate-start', unit: 'a', attempt: 1 });
   assert.equal(spawned.length, 1);
 });
+
+const writeResult = async (s, attempt, result) => {
+  const file = gateFile(s.p.repo, 'a', attempt, 'json');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, typeof result === 'string' ? result : JSON.stringify(result));
+};
+const longTail = Array.from({ length: 30 }, (_, i) => `line ${i} ${'x'.repeat(150)}`).join('\n');
+const failing = {
+  verdict: 'fail', headSha: 'e'.repeat(40), failures: ['evidence failed (exit 1)'],
+  steps: [{ name: 'setup', code: 0, tail: 'ok' }, { name: 'evidence', code: 1, tail: longTail }, { name: 'evidence (retry)', code: 1, tail: 'again' }],
+  flags: [{ kind: 'skipped-test', path: 'test/a.test.mjs', detail: '1 added line' }, { kind: 'flaky', path: '', detail: 'ignored' },
+    { kind: 'placeholder', path: 'a.txt', detail: '2 added lines' }],
+};
+
+test('feedback carries the failing step output, capped, and the flags to undo', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await awaitingFeedback(s);
+  await writeResult(s, 1, failing);
+  await s.act(feedback());
+  const msg = s.t3.calls[1][2];
+  const [head, out] = msg.split('Output of the failing step (evidence):\n');
+  assert.equal(head, 'The gate rejected this work:\n- evidence failed (exit 1)\n');
+  const block = out.slice(0, out.indexOf('\nFlag: '));
+  assert.ok(block.length <= 2000, `block length ${block.length}`);
+  assert.ok(block.endsWith(`line 29 ${'x'.repeat(150)}`));
+  assert.ok(!block.includes('line 14 '));
+  assert.ok(!msg.includes('again'));
+  assert.match(msg, /\nFlag: skipped-test test\/a\.test\.mjs — 1 added line\nFlag: placeholder a\.txt — 2 added lines\nFix it, commit, and report\.$/);
+  assert.ok(!msg.includes('flaky'));
+});
+
+test('feedback: no failing step adds no output; an unreadable result still sends', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await awaitingFeedback(s);
+  await writeResult(s, 1, { ...failing, steps: [], flags: [], failures: ['outside writable paths: x'] });
+  await s.act(feedback(['outside writable paths: x']));
+  assert.equal(s.t3.calls[1][2], 'The gate rejected this work:\n- outside writable paths: x\nFix it, commit, and report.');
+  const u = await setup(t, [unitSpec('a')]);
+  await awaitingFeedback(u);
+  await writeResult(u, 1, '{not json');
+  await u.act(feedback());
+  assert.equal(u.t3.calls[1][2], 'The gate rejected this work:\n- evidence failed (exit 1)\nFix it, commit, and report.');
+});
+
+test('the attempt-3 work order carries the failing output of the attempt-2 gate', async (t) => {
+  const s = await setup(t, [unitSpec('a')], { cap: 3 });
+  await s.act(launchA());
+  const h = s.p.baseSha;
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'completed' }, { type: 'gate-started', unit: 'a', attempt: 1, headSha: h, pid: 1 },
+    { type: 'gated', unit: 'a', attempt: 1, verdict: 'fail', failures: ['f1'], flags: [], headSha: h },
+    { type: 'feedback-sent', unit: 'a', attempt: 2, threadId: 'th1' }, { type: 'thread-ended', unit: 'a', status: 'completed' },
+    { type: 'gate-started', unit: 'a', attempt: 2, headSha: h, pid: 1 },
+    { type: 'gated', unit: 'a', attempt: 2, verdict: 'fail', failures: ['evidence failed (exit 1)'], flags: [], headSha: h });
+  await writeResult(s, 2, { ...failing, steps: [{ name: 'checks', code: 2, tail: 'assert broke\nat x.test.mjs:3' }] });
+  await s.act(launchA('a', { attempt: 3, key: 'pa::m3', model: 'm3', tier: 3, failures: ['evidence failed (exit 1)'] }));
+  assert.equal(s.t3.calls[1][1].message, 'Previous attempt failed the gate:\n- evidence failed (exit 1)\n'
+    + 'Output of the failing step (checks):\nassert broke\nat x.test.mjs:3\n'
+    + 'Flag: skipped-test test/a.test.mjs — 1 added line\nFlag: placeholder a.txt — 2 added lines\n\nWork order for a.\n');
+});
