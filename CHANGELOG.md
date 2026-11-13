@@ -22,6 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `note:` lines can no longer push a decision line out of the `orq wait` output.
 - `orq unit retry integration` runs the final checks again after a `final-fail`, so narrowing `checks.full` can finish a run.
 - A full machine cap no longer hides a unit that no model can take.
+- A unit held back only by a provider instance's concurrency limit waits for a slot; it used to end the wait as `idle`.
 - When other projects hold every machine slot, `orq wait` keeps waiting for one. It used to return `idle` at once, sometimes with the wrong reason, so an orchestrator calling it again would spin.
 
 ### Added

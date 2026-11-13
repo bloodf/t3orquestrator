@@ -251,7 +251,7 @@ test('wait: feedback deferred by a full machine times out instead of idling, the
   await writeLease(dir, { threadId: 'busy', project: '/other', unit: 'z', instance: 'pb', model: 'm2', startedAt: NOW, heartbeatAt: NOW, blocked: false });
   const full = await orq(['wait', '--max-seconds', '30'], p, sim);
   assert.equal(full.code, 0, full.err);
-  assert.equal(full.out, 'timeout: 0 running, 0 blocked, 0 gating, 1 queued, 0 passed\nwaiting: 1 ready units wait for a slot; every machine slot is held (cap 1)\n');
+  assert.equal(full.out, 'timeout: 0 running, 0 blocked, 0 gating, 1 queued, 0 passed\nwaiting: 1 ready units wait for a free slot (machine cap 1, or a provider instance limit)\n');
   assert.equal(sim.sends, undefined);
   await fs.rm(path.join(dir, 'busy.json'));
   const freed = await orq(['wait'], p, sim);
@@ -402,7 +402,7 @@ test('wait: when another project holds the whole machine cap it keeps polling an
   const sim = simulator(p, {});
   const r = await orq(['wait', '--max-seconds', '60'], p, sim);
   assert.equal(r.code, 0, r.err);
-  assert.equal(r.out, 'timeout: 0 running, 0 blocked, 0 gating, 2 queued, 0 passed\nwaiting: 2 ready units wait for a slot; every machine slot is held (cap 1)\n');
+  assert.equal(r.out, 'timeout: 0 running, 0 blocked, 0 gating, 2 queued, 0 passed\nwaiting: 2 ready units wait for a free slot (machine cap 1, or a provider instance limit)\n');
   assert.ok(sim.polls.length >= 3, `polled ${sim.polls.length} times`);
   assert.equal(sim.n, 0);
 });
@@ -420,7 +420,7 @@ test('wait: a launch refused at the machine lock (another project took the slot)
   const r = await orq(['wait', '--max-seconds', '30'], p, sim, { gitExec });
   assert.equal(r.code, 0, r.err);
   assert.equal(raced, true);
-  assert.equal(r.out, 'timeout: 0 running, 0 blocked, 0 gating, 2 queued, 0 passed\nwaiting: 2 ready units wait for a slot; every machine slot is held (cap 1)\n');
+  assert.equal(r.out, 'timeout: 0 running, 0 blocked, 0 gating, 2 queued, 0 passed\nwaiting: 2 ready units wait for a free slot (machine cap 1, or a provider instance limit)\n');
 });
 
 test('wait: after final-fail, narrowing checks.full and "orq unit retry integration" runs the final gate again', async (t) => {
@@ -454,5 +454,5 @@ test('wait: the slot line counts only ready units, not those waiting on dependen
   const p = await makeProject(t, [unitSpec('a'), unitSpec('b', { deps: ['a'] }), unitSpec('c')], { cap: 1 });
   await writeLease(path.join(p.home, 'leases'), foreign);
   const r = await orq(['wait', '--max-seconds', '30'], p, simulator(p, {}));
-  assert.equal(r.out, 'timeout: 0 running, 0 blocked, 0 gating, 3 queued, 0 passed\nwaiting: 2 ready units wait for a slot; every machine slot is held (cap 1)\n');
+  assert.equal(r.out, 'timeout: 0 running, 0 blocked, 0 gating, 3 queued, 0 passed\nwaiting: 2 ready units wait for a free slot (machine cap 1, or a provider instance limit)\n');
 });

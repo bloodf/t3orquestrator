@@ -242,7 +242,8 @@ test('rule 5: instance limits count launches made in the same tick', () => {
   const one = { ...registry, instances: { a: { ...inst, limit: 1 } }, models: Object.fromEntries([model('a', 'm2', 2)]) };
   const r = go(doneA, { registry: one });
   assert.deepEqual(launches(r).map((a) => a.unit), ['b']);
-  assert.equal(r.report.unroutable[0].unit, 'c');
+  assert.deepEqual(r.report.slotWaiting, ['c']); // held back by the instance limit only: it waits, it is not unroutable
+  assert.deepEqual(r.report.unroutable, []);
 });
 
 test('rule 6: final gate when everything is integrated or dropped, then done', () => {
@@ -502,4 +503,13 @@ test('a full machine cap does not hide a unit that cannot be routed', () => {
     { type: 'feedback-sent', unit: 'a', at: 6, attempt: 2, threadId: 't-a' }, { ...ended('a'), at: 7 }, gateStarted('a', 2), gatedEv('a', 'fail', 2)];
   const judged = go(twice, { ...full, registry: one, plan: { goal: 'g', units: [unit('a')] } });
   assert.deepEqual(evTypes(judged), ['needs-judgment:a']);
+});
+
+test('a unit blocked only by a provider instance limit waits for a slot instead of idling as unroutable', () => {
+  const one = { ...registry, instances: { a: { ...inst, limit: 1 } }, models: Object.fromEntries([model('a', 'm2', 2)]) };
+  const r = go([], { registry: one, plan: { goal: 'g', units: [unit('a')] }, leases: [lease('other', { instance: 'a' })] });
+  assert.deepEqual(launches(r), []);
+  assert.deepEqual(r.report.slotWaiting, ['a']);
+  assert.equal(r.report.noSlots, true);
+  assert.deepEqual(r.report.unroutable, []);
 });

@@ -71,7 +71,7 @@ Call `orq wait`. It returns one line. Act on it, then call `orq wait` again, unt
 | `blocked: <unit> waiting on a request in thread <id>` | Read the request with `t3_pending_request`. Answer it only if `decisions` already settles it; otherwise ask the user and pass on the answer. |
 | `idle: … retry at <time>` | Models are cooling down. Tell the user why and the time, and call `orq wait` again at that time. |
 | any other `idle:` | Calling `orq wait` again changes nothing. Run `orq status`, then change the plan (`orq unit retry`, `orq unit drop`, or edit `plan.json`) or tell the user. |
-| `timeout: <counts>` | Normal for long work. Run `orq status`. Interrupt a thread only if it shows as stalled (`t3_thread_interrupt`). Units that are `gating` are running their checks, and a `waiting:` line means every machine slot is held: leave both. Call `orq wait` again. |
+| `timeout: <counts>` | Normal for long work. Run `orq status`. Interrupt a thread only if it shows as stalled (`t3_thread_interrupt`). Units that are `gating` are running their checks, and a `waiting:` line means every slot is taken for now: leave both. Call `orq wait` again. |
 
 Passed units merge on their own, so before Finish run `orq status` and act on every `flags=` it shows (details in the unit's last gate file):
 - `test-weakened`, `deleted-test`, `evidence-target-changed`: inspect that file's diff. If the check was made easier, append a `fix` unit that restores it.
