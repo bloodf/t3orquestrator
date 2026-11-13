@@ -226,12 +226,16 @@ test('unit retry integration restarts a final gate whose setup failed', async (t
   assert.equal((await readState(p.repo)).plan.finalGateStarts, 0);
 });
 
-test('unit retry after a setup failure says the commit is gated again', async (t) => {
+test('unit retry after a setup failure gates the branch again and refuses --tier', async (t) => {
   const p = await makeProject(t, [unitSpec('a')]);
   await append(p, { type: 'plan-started', unit: null, planId: 'p1', baseSha: A, integrationBranch: 'orq/p1/integration' },
     launched('a', 'th1'), { type: 'thread-ended', unit: 'a', status: 'completed' }, { type: 'gate-started', unit: 'a', attempt: 1, headSha: B, pid: 1 },
     { type: 'needs-judgment', unit: 'a', reason: 'setup failed (exit 1)', setup: true });
+  const tiered = await orq(['unit', 'retry', 'a', '--tier', '3'], p);
+  assert.equal(tiered.code, 1);
+  assert.equal(tiered.err, 'orq: unit a failed its setup: no new worker runs, its branch is gated again; retry without --tier\n');
+  assert.equal(unitOf(await readState(p.repo), 'a').state, 'failed');
   const r = await orq(['unit', 'retry', 'a'], p);
-  assert.equal(r.out, 'retried a: its commit will be gated again\n');
+  assert.equal(r.out, 'retried a: its branch will be gated again\n');
   assert.equal(unitOf(await readState(p.repo), 'a').state, 'gating');
 });

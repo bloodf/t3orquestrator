@@ -165,7 +165,7 @@ The `integration:`, `authors:` and `cooling:` lines appear only when they apply.
 
 `orq unit retry <id> [--tier N] | orq unit drop <id>`
 
-`retry` moves a `failed` unit back to `queued` and clears its attempts, its excluded models and its provider failure count. `--tier` sets a minimum tier (1-4). It prints `retried <id>: queued[, minimum tier <n>]`. A unit that failed because `checks.setup` failed goes back to `gating` instead, to gate the same commit again; it prints `retried <id>: its commit will be gated again`. `orq unit retry integration` restarts a final gate that could not complete or whose setup failed.
+`retry` moves a `failed` unit back to `queued` and clears its attempts, its excluded models and its provider failure count. `--tier` sets a minimum tier (1-4). It prints `retried <id>: queued[, minimum tier <n>]`. A unit that failed because `checks.setup` failed goes back to `gating` instead, to gate its branch again; it prints `retried <id>: its branch will be gated again`. `--tier` is refused for such a unit (exit 1), since no new worker runs. `orq unit retry integration` runs the final gate again when it could not complete, when its setup failed, or when its checks failed (`final-fail:`); it uses the current `checks.full`.
 
 `drop` removes a unit from the run and prints `dropped <id>`. If its thread was running, a note says it keeps running in T3. Dropping is refused, with exit 4, while the unit is being gated or merged, and while a unit that is not dropped depends on it: `cannot drop <id>: <ids> depend on it; drop them first, or remove "<id>" from their deps in .orq/plan.json`.
 

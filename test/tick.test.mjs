@@ -489,3 +489,17 @@ test('a fix unit that cannot get the author\'s tier launches on the best availab
   assert.deepEqual([l.unit, l.key, l.tier, l.wantedTier], ['f', 'a::m3', 3, 4]);
   assert.equal(launches(go([], { plan: { goal: 'g', units: [unit('a')] } }))[0].wantedTier, undefined);
 });
+
+test('a full machine cap does not hide a unit that cannot be routed', () => {
+  const full = { cap: 1, leases: [lease('x')] };
+  const empty = go([], { ...full, registry: { version: 1, instances: {}, models: {} } });
+  assert.deepEqual(empty.report.unroutable.map((u) => u.unit), ['a', 'c']);
+  assert.equal(empty.report.noSlots, false);
+  const routable = go([], full);
+  assert.deepEqual([routable.report.unroutable, routable.report.noSlots], [[], true]);
+  const one = { ...registry, models: Object.fromEntries([model('a', 'm2', 2)]) };
+  const twice = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail'),
+    { type: 'feedback-sent', unit: 'a', at: 6, attempt: 2, threadId: 't-a' }, { ...ended('a'), at: 7 }, gateStarted('a', 2), gatedEv('a', 'fail', 2)];
+  const judged = go(twice, { ...full, registry: one, plan: { goal: 'g', units: [unit('a')] } });
+  assert.deepEqual(evTypes(judged), ['needs-judgment:a']);
+});

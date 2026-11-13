@@ -20,6 +20,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Replies from `t3` larger than 1 MiB no longer fail the poll.
 - A symlinked work order is rejected by `orq plan check`.
 - `note:` lines can no longer push a decision line out of the `orq wait` output.
+- `orq unit retry integration` runs the final checks again after a `final-fail`, so narrowing `checks.full` can finish a run.
+- A full machine cap no longer hides a unit that no model can take.
 - When other projects hold every machine slot, `orq wait` keeps waiting for one. It used to return `idle` at once, sometimes with the wrong reason, so an orchestrator calling it again would spin.
 
 ### Added
