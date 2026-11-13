@@ -7,7 +7,7 @@ import fsSync from 'node:fs';
 import { commit, readState, unitOf } from '../lib/ledger.mjs';
 import { listLeases, countActive, writeLease } from '../lib/leases.mjs';
 import {
-  makeProject, unitSpec, commitOn, sh,
+  makeProject, unitSpec, commitOn, sh, REGISTRY,
 } from './support/project.mjs';
 
 const NOW = Date.parse('2026-11-12T12:00:00Z');
@@ -44,7 +44,7 @@ function simulator(p, scripts) {
     const t = {
       id: `th${sim.n}`, unit, title: opt(args, '--title'), status: 'running', pending: 0, updatedAt: sim.now, message: input,
       instance: opt(args, '--provider'), model: opt(args, '--model'), branch: opt(args, '--branch'),
-      base: opt(args, '--worktree'), script: sim.scripts[unit]?.[nth] ?? ['idle'], step: 0,
+      base: opt(args, '--worktree'), script: sim.dead?.has(opt(args, '--provider')) ? ['fail'] : sim.scripts[unit]?.[nth] ?? ['idle'], step: 0,
     };
     sim.threads.set(t.id, t);
     sim.byUnit[unit] = [...(sim.byUnit[unit] ?? []), t];
@@ -254,4 +254,44 @@ test('wait: feedback deferred by a full machine times out instead of idling, the
   assert.equal(freed.code, 0, freed.err);
   assert.deepEqual(sim.sends, ['th1']);
   assert.match(freed.out, /^done: 1 units integrated at /);
+});
+
+test('wait: a dead instance is avoided and cooled down; every unit still integrates', async (t) => {
+  const registry = { ...REGISTRY, instances: { ...REGISTRY.instances, pb: { ...REGISTRY.instances.pb, limit: 1 } } };
+  const p = await makeProject(t, [unitSpec('a'), unitSpec('b'), unitSpec('c')], { cap: 3, registry });
+  const ok = [['commit-complete']];
+  const sim = simulator(p, { a: [...ok, ...ok, ...ok], b: [...ok, ...ok, ...ok], c: [...ok, ...ok, ...ok] });
+  sim.dead = new Set(['pa']);
+  const all = () => Object.values(sim.byUnit).flat();
+  let r = await orq(['wait'], p, sim);
+  for (let i = 0; i < 3 && !r.out.startsWith('done:'); i += 1) r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^done: 3 units integrated at /);
+  const st = await readState(p.repo);
+  assert.deepEqual(['a', 'b', 'c'].map((u) => unitOf(st, u).state), ['integrated', 'integrated', 'integrated']);
+  assert.ok(all().filter((x) => x.instance === 'pa').length <= 2, 'launches on the dead instance');
+  const reg = JSON.parse(await fs.readFile(path.join(p.home, 'registry.json'), 'utf8'));
+  assert.ok(reg.instances.pa.cooldownUntil > sim.now, 'dead instance cooled down');
+});
+
+test('wait: one dying instance cools down and waits instead of burning all three attempts', async (t) => {
+  const model = (name, tier) => [`pa::${name}`, { ...REGISTRY.models['pa::m2'], model: name, tier }];
+  const registry = { ...REGISTRY, instances: { pa: REGISTRY.instances.pa }, models: Object.fromEntries([model('m2', 2), model('m2x', 2), model('m3', 3)]) };
+  const p = await makeProject(t, [unitSpec('a')], { registry });
+  const sim = simulator(p, {});
+  sim.dead = new Set(['pa']);
+  const first = await orq(['wait'], p, sim);
+  assert.equal(first.code, 0, first.err);
+  const reg = JSON.parse(await fs.readFile(path.join(p.home, 'registry.json'), 'utf8'));
+  const until = reg.instances.pa.cooldownUntil;
+  assert.equal(first.out, `idle: no model for a: none eligible: excluded, cooling down; retry at ${new Date(until).toISOString()}\n`);
+  assert.equal(reg.instances.pa.failures, 2);
+  const u = unitOf(await readState(p.repo), 'a');
+  assert.deepEqual([u.state, u.providerFailures], ['queued', 2]);
+  assert.equal(sim.n, 2);
+  sim.now = until + 1;
+  const later = await orq(['wait'], p, sim);
+  assert.equal(later.code, 0, later.err);
+  assert.equal(sim.n, 3);
+  assert.equal(later.out, 'judgment: a: 3 provider failures\n');
 });

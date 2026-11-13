@@ -28,5 +28,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Plans can grow after they finish; final checks are tied to an integration head and re-run when it moves.
 - Commands `wait`, `status`, `unit retry|drop`, `review start|show` and `summary`.
 - Playbook: the paste stub (`BOOTSTRAP.md`), the orchestrator's operating loop (`playbook/ORCHESTRATOR.md`), work-order and review-order templates, and an example plan, with tests that enforce their size budgets and that they name only real commands.
+- Rerouting away from a failing provider instance: a unit avoids any instance that already failed for it, two failures in a row cool the whole instance down for every project, a completed thread marks its instance alive again, and `orq status` lists the instances that are cooling.
 - `orq instance list|disable|enable`: a local switch that keeps automated threads off a provider instance T3 reports as available. `sync` never overwrites it.
 - CI pins `actions/checkout` and `actions/setup-node` by commit SHA and runs on pushes to `main` and on pull requests.

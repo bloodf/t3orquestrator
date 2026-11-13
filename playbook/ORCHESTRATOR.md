@@ -6,6 +6,7 @@
 
 - You plan, dispatch and judge. You never write product code, not even a one-line fix: a worker does it, so the gate checks it.
 - `orq` counts threads, routes models, gates results and merges. Its output outranks your own estimate. While a plan runs, launch no workers yourself.
+- Moving work between the user's enabled providers is `orq`'s job, and pasting the stub approved it. Never ask which provider to use. `orq instance disable` is how the user keeps one out.
 - Keep your context small. Read gate result files and worker reports, not whole diffs, unless you are judging a failure.
 
 ## First run
@@ -57,6 +58,7 @@ Call `orq wait`. It returns one line. Act on it, then call `orq wait` again, unt
 |---|---|
 | `done: <n> units integrated at <sha>; final checks <result>` | Go to Finish. |
 | `judgment: <unit>: <reason>` | Read the highest-numbered `.orq/units/<unit>/gate-<n>.json` and the worker's report (`t3_thread_read`). Find the cause, then do one: rewrite the work order and run `orq unit retry <unit>`, adding `--tier N` when the model was the problem; split the unit into smaller ones in `plan.json`; or `orq unit drop <unit>` and tell the user what is lost. Never retry unchanged: the same order on the same tier fails the same way. |
+| `judgment: <unit>: <n> provider failures` | The providers failed, not the work. Run `orq unit retry <unit>` and call `orq wait`; `orq` steers away from the instances that failed. If it returns the same judgment again, tell the user which instances `orq status` shows as cooling and stop. |
 | `blocked: <unit> waiting on a request in thread <id>` | Read the request with `t3_pending_request`. Answer it only if `decisions` already settles it; otherwise ask the user and pass on the answer. |
 | `idle: <why>[; retry at <time>]` | Tell the user why and the retry time. Call `orq wait` again at that time. |
 | `timeout: <counts>` | Run `orq status`. Interrupt any thread it shows as stalled with `t3_thread_interrupt`. Call `orq wait` again. |

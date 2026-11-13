@@ -181,3 +181,15 @@ test('atLeast raises the minimum tier and never lowers it', () => {
   assert.deepEqual(keys(go(r, { atLeast: 1 })), ['a::m2', 'a::m3', 'a::m4']);
   assert.equal(go(reg({ a: inst() }, [mod('a', 'm2', 2)]), { atLeast: 4 }).candidates[0].belowTier, true);
 });
+
+test('avoidInstances outranks tier; avoided-only candidates are still returned and flagged', () => {
+  const r = reg({ a: inst(), b: inst() }, [mod('a', 'm2', 2), mod('a', 'm3', 3), mod('b', 'm4', 4), mod('b', 'm3', 3)]);
+  assert.deepEqual(keys(go(r, { avoidInstances: ['a'] })), ['b::m3', 'b::m4', 'a::m2', 'a::m3']);
+  assert.deepEqual(go(r, { avoidInstances: ['a'] }).candidates.map((c) => Boolean(c.avoided)), [false, false, true, true]);
+  assert.deepEqual(keys(go(r)), ['a::m2', 'a::m3', 'b::m3', 'b::m4']);
+  assert.deepEqual(keys(go(r, { avoidInstances: [] })), keys(go(r)));
+  const only = go(r, { avoidInstances: ['a', 'b'] });
+  assert.deepEqual(keys(only), keys(go(r)));
+  assert.ok(only.candidates.every((c) => c.avoided === true));
+  assert.deepEqual(go(r, { avoidInstances: ['a'] }), go(r, { avoidInstances: ['a'] }));
+});

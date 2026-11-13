@@ -168,7 +168,7 @@ test('reduce on a realistic sequence of two units', () => {
   assert.equal(state(s, 'a'), 'integrated');
   assert.deepEqual({ ...unitOf(s, 'b'), since: null }, {
     ...unitOf(emptyState(), 'b'),
-    state: 'blocked', attempt: 1, launches: 2, providerFailures: 1, tried: ['i::m'], threadId: 't3', key: 'j::m', instance: 'j',
+    state: 'blocked', attempt: 1, launches: 2, providerFailures: 1, tried: ['i::m'], triedInstances: ['i'], threadId: 't3', key: 'j::m', instance: 'j',
     model: 'm', branch: 'orq/p/b-a1', baseSha: C, tier: 2, blockedReported: true, since: null,
   });
   assert.equal(s.plan.integrationHead, C);
@@ -209,4 +209,18 @@ test('item 5: final-retried resets the final gate start counter', () => {
   assert.equal(s.plan.finalGateStarts, 2);
   s = apply(s, ev('final-retried', null));
   assert.equal(s.plan.finalGateStarts, 0);
+});
+
+test('provider failures record the instance; quality failures do not; retry clears it', () => {
+  let s = run(launched('u'), ev('thread-ended', 'u', { status: 'failed' }));
+  assert.deepEqual(unitOf(s, 'u').triedInstances, ['i']);
+  s = apply(s, launched('u', { key: 'j::m', instance: 'j', threadId: 't2' }));
+  s = apply(s, ev('thread-ended', 'u', { status: 'completed' }));
+  s = apply(s, gated('u', 'fail'));
+  s = apply(s, ev('feedback-sent', 'u', { attempt: 2, threadId: 't2' }));
+  s = apply(s, ev('thread-ended', 'u', { status: 'completed' }));
+  s = apply(s, gated('u', 'fail', { attempt: 2 }));
+  assert.deepEqual(unitOf(s, 'u').triedInstances, ['i']);
+  s = apply(s, ev('needs-judgment', 'u', { reason: 'x' }));
+  assert.deepEqual(unitOf(apply(s, ev('retried', 'u')), 'u').triedInstances, []);
 });

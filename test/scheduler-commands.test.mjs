@@ -184,3 +184,17 @@ test('item 5: unit retry integration restarts a final gate that was lost twice',
   assert.equal(r.out, 'retried integration: the final gate will run again\n');
   assert.equal((await readState(p.repo)).plan.finalGateStarts, 0);
 });
+
+test('status: cooling instances are listed after the units', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const regFile = path.join(p.home, 'registry.json');
+  const reg = JSON.parse(await fs.readFile(regFile, 'utf8'));
+  reg.instances.pb = { ...reg.instances.pb, cooldownUntil: NOW + 600_000 };
+  reg.instances.pa = { ...reg.instances.pa, cooldownUntil: NOW - 1 };
+  await fs.writeFile(regFile, JSON.stringify(reg));
+  const lines = (await orq(['status'], p)).out.split('\n');
+  assert.equal(lines.at(-3), `cooling: pb until ${new Date(NOW + 600_000).toISOString()}`);
+  assert.match(lines.at(-2), /^note: /);
+  const json = JSON.parse((await orq(['status', '--json'], p)).out);
+  assert.deepEqual(json.cooling, [{ instance: 'pb', until: NOW + 600_000 }]);
+});

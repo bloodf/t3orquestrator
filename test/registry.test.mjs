@@ -6,7 +6,7 @@ import {
   setTier, addModel,
 } from '../lib/registry.mjs';
 import {
-  recordSuccess, recordFailure, markUsed, backoff,
+  recordSuccess, recordFailure, markUsed, backoff, markAlive,
 } from '../lib/health.mjs';
 
 const read = (p) => JSON.parse(readFileSync(new URL(p, import.meta.url), 'utf8'));
@@ -166,7 +166,7 @@ test('backoff values and cap', () => {
   assert.equal(backoff(20), 300 * MIN);
 });
 
-test('recordFailure: model backoff, instance cooldown at third failure', () => {
+test('recordFailure: model backoff, instance cooldown from the second consecutive failure', () => {
   const key = 'provider-e::model-small';
   let reg = deepFreeze(synced());
   reg = recordFailure(reg, key, { now: 1000, jobClass: 'implement', kind: 'provider' });
@@ -176,12 +176,10 @@ test('recordFailure: model backoff, instance cooldown at third failure', () => {
   assert.deepEqual(reg.models[key].outcomes.implement, { attempts: 1, firstPass: 0 });
   reg = recordFailure(reg, key, { now: 2000, kind: 'provider' });
   assert.equal(reg.models[key].cooldownUntil, 2000 + 20 * MIN);
-  assert.equal(reg.instances['provider-e'].cooldownUntil, null);
+  assert.equal(reg.instances['provider-e'].cooldownUntil, 2000 + 10 * MIN);
   reg = recordFailure(reg, key, { now: 3000, kind: 'provider' });
   assert.equal(reg.instances['provider-e'].failures, 3);
-  assert.equal(reg.instances['provider-e'].cooldownUntil, 3000 + 10 * MIN);
-  reg = recordFailure(reg, key, { now: 4000, kind: 'provider' });
-  assert.equal(reg.instances['provider-e'].cooldownUntil, 4000 + 20 * MIN);
+  assert.equal(reg.instances['provider-e'].cooldownUntil, 3000 + 20 * MIN);
 });
 
 test('recordSuccess resets model and instance, counts outcomes', () => {
@@ -243,18 +241,24 @@ test('recordFailure kinds', () => {
   const p = recordFailure(base, key, { now: 1, kind: 'provider' });
   assert.deepEqual([p.models[key].cooldownUntil, p.instances['provider-e'].failures], [1 + 10 * MIN, 1]);
   const u = recordFailure(base, key, { now: 1 });
-  assert.deepEqual([u.models[key].cooldownUntil, u.instances['provider-e'].failures], [1 + 10 * MIN, 0]);
+  assert.deepEqual([u.models[key].cooldownUntil, u.instances['provider-e'].failures], [1 + 10 * MIN, 1]);
   const confirmed = harvestThreads(base, [{ status: 'completed', instance: 'provider-e', model: 'model-small', updatedAt: 5 }], { suggestions });
   assert.equal(recordFailure(confirmed, key, { now: 1 }).instances['provider-e'].failures, 1);
 });
 
-test('three unconfirmed unknown failures leave the instance routable', () => {
-  const c = { providers: [provider('a', ['m-1', 'm-2', 'm-3', 'm-4'])] };
-  let reg = merge(emptyRegistry(), c).registry;
-  for (const k of ['a::m-1', 'a::m-2', 'a::m-3']) reg = recordFailure(reg, k, { now: 10 });
-  assert.equal(reg.instances.a.failures, 0);
-  assert.equal(reg.instances.a.cooldownUntil, null);
-  assert.equal(reg.models['a::m-4'].cooldownUntil, null);
+test('two consecutive failures on an instance cool it down, confirmed or not', () => {
+  const c = { providers: [provider('a', ['m-1', 'm-2', 'm-3'])] };
+  const reg = deepFreeze(merge(emptyRegistry(), c).registry);
+  const one = recordFailure(reg, 'a::m-1', { now: 10 });
+  assert.deepEqual([one.instances.a.failures, one.instances.a.cooldownUntil], [1, null]);
+  const two = recordFailure(one, 'a::m-2', { now: 20, kind: 'provider' });
+  assert.deepEqual([two.instances.a.failures, two.instances.a.cooldownUntil], [2, 20 + 10 * MIN]);
+  const three = recordFailure(two, 'a::m-3', { now: 30 });
+  assert.equal(three.instances.a.cooldownUntil, 30 + 20 * MIN);
+  const healed = recordFailure(recordSuccess(one, 'a::m-3', { now: 15 }), 'a::m-2', { now: 20 });
+  assert.deepEqual([healed.instances.a.failures, healed.instances.a.cooldownUntil], [1, null]);
+  const rejected = recordFailure(recordFailure(reg, 'a::m-1', { now: 10, kind: 'model-rejected' }), 'a::m-2', { now: 20, kind: 'model-rejected' });
+  assert.deepEqual([rejected.instances.a.failures, rejected.instances.a.cooldownUntil], [0, null]);
 });
 
 test('addModel: validation, creation, existing entries', () => {
@@ -285,4 +289,14 @@ test('rejected models stay unavailable across merges until cleared', () => {
   const ok = recordSuccess(rejected, key, { now: 60 });
   assert.deepEqual([ok.models[key].available, ok.models[key].rejectedAt], [true, null]);
   assert.equal(merge(ok, caps, 70).registry.models[key].available, true);
+});
+
+test('markAlive resets the instance only; failure, alive, failure is not two in a row', () => {
+  const c = { providers: [provider('a', ['m-1', 'm-2'])] };
+  const one = recordFailure(merge(emptyRegistry(), c).registry, 'a::m-1', { now: 10 });
+  const alive = markAlive(deepFreeze(recordFailure(one, 'a::m-2', { now: 20 })), 'a::m-2', 30);
+  assert.deepEqual([alive.instances.a.failures, alive.instances.a.cooldownUntil], [0, null]);
+  assert.deepEqual([alive.models['a::m-2'].failures, alive.models['a::m-2'].cooldownUntil], [1, 20 + 10 * MIN]);
+  const again = recordFailure(markAlive(one, 'a::m-1', 15), 'a::m-2', { now: 40 });
+  assert.deepEqual([again.instances.a.failures, again.instances.a.cooldownUntil], [1, null]);
 });

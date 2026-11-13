@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { tick } from '../lib/tick.mjs';
 import { reduce, FINAL } from '../lib/ledger.mjs';
+import { recordFailure } from '../lib/health.mjs';
 
 const rules = JSON.parse(readFileSync(new URL('../playbook/routing.json', import.meta.url), 'utf8'));
 const NOW = Date.parse('2026-11-12T12:00:00Z');
@@ -18,11 +19,11 @@ function deepFreeze(o) {
 const inst = { enabled: true, constraints: [], limit: 4, failures: 0, cooldownUntil: null };
 const model = (instance, name, tier) => [`${instance}::${name}`, {
   instance, model: name, family: 'f', tier, tierSource: 'user', available: true, confirmedAt: null,
-  failures: 0, cooldownUntil: null, lastUsedAt: null,
+  failures: 0, cooldownUntil: null, lastUsedAt: null, outcomes: {},
 }];
 const registry = {
   version: 1,
-  instances: { a: inst, b: inst },
+  instances: { a: { ...inst }, b: { ...inst } },
   models: Object.fromEntries([model('a', 'm2', 2), model('b', 'm2', 2), model('a', 'm3', 3), model('b', 'm4', 4)]),
 };
 const unit = (id, over = {}) => ({
@@ -76,6 +77,7 @@ test('rule 1: completed thread moves to gating, removes the lease and starts a g
   assert.equal(r.events[0].status, 'completed');
   assert.deepEqual(r.actions, [
     { type: 'lease-remove', unit: 'a', threadId: 't-a' },
+    { type: 'mark-alive', unit: 'a', key: 'a::m2' },
     { type: 'gate-start', unit: 'a', attempt: 1 },
   ]);
 });
@@ -352,4 +354,48 @@ test('second review item 2: feedback deferred for a slot keeps the unit in fligh
   const r = go(awaiting, { cap: 1, leases: [lease('other')] });
   assert.equal(r.report.noSlots, true);
   assert.equal(r.report.inFlight, 1);
+});
+
+test('a provider failure steers the relaunch to another instance, even at a higher tier', () => {
+  const spread = { ...registry, models: Object.fromEntries([model('a', 'm2', 2), model('a', 'm2x', 2), model('b', 'm3', 3)]) };
+  const r = go([launched('a')], { registry: spread, threads: { 't-a': thread('t-a', { status: 'failed' }) } });
+  const [l] = launches(r);
+  assert.equal(l.unit, 'a');
+  assert.equal(l.key, 'b::m3');
+  const onlyA = { ...registry, instances: { a: inst }, models: Object.fromEntries([model('a', 'm2', 2), model('a', 'm3', 3)]) };
+  const fallback = launches(go([launched('a')], { registry: onlyA, threads: { 't-a': thread('t-a', { status: 'failed' }) } }));
+  assert.equal(fallback[0].key, 'a::m3');
+});
+
+const solo = {
+  version: 1,
+  instances: { a: inst },
+  models: Object.fromEntries([model('a', 'm2', 2), model('a', 'm2x', 2), model('a', 'm3', 3)]),
+};
+const onA = (u, key) => launched(u, { key: `a::${key}`, model: key, threadId: `t-${u}` });
+const failedThread = (...ids) => ({ threads: Object.fromEntries(ids.map((id) => [id, thread(id, { status: 'failed' })])) });
+
+test('same-poll strike: one instance, 1st failure relaunches there flagged avoided, 2nd waits for the cooldown', () => {
+  const plan1 = { goal: 'g', units: [unit('a')] };
+  const first = go([onA('a', 'm2')], { registry: solo, plan: plan1, ...failedThread('t-a') });
+  const [l] = launches(first);
+  assert.deepEqual([l.key, l.avoided], ['a::m2x', true]);
+  const persisted = recordFailure(solo, 'a::m2', { now: NOW, jobClass: 'implement', kind: 'unknown' });
+  const second = go([onA('a', 'm2'), ended('a', 'failed'), onA('a', 'm2x')], { registry: persisted, plan: plan1, ...failedThread('t-a') });
+  assert.deepEqual(launches(second), []);
+  assert.deepEqual(evTypes(second), ['thread-ended:a']);
+  assert.equal(second.report.unroutable[0].retryAt, NOW + 10 * MIN);
+  assert.match(second.report.unroutable[0].reason, /cooling down/);
+});
+
+test('same-poll strike: two units failing on one instance are not relaunched on it in that poll', () => {
+  const two = { ...solo, instances: { a: { ...inst }, b: { ...inst } }, models: { ...solo.models, ...Object.fromEntries([model('b', 'm4', 4)]) } };
+  const four = { goal: 'g', units: [unit('a'), unit('c'), unit('d'), unit('e')] };
+  const r = go([...doneA, onA('c', 'm2'), onA('e', 'm2x')], { registry: two, plan: four, ...failedThread('t-c', 't-e') });
+  assert.deepEqual(launches(r).map((x) => [x.unit, x.instance]), [['c', 'b'], ['d', 'b'], ['e', 'b']]);
+});
+
+test('a completed thread marks its instance alive', () => {
+  const r = go([launched('a')], { threads: { 't-a': thread('t-a', { status: 'completed' }) } });
+  assert.deepEqual(r.actions.filter((a) => a.type === 'mark-alive'), [{ type: 'mark-alive', unit: 'a', key: 'a::m2' }]);
 });
