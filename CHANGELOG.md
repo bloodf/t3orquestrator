@@ -36,3 +36,4 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `evidence-target-changed` is no longer raised for a test file the unit added itself.
 - `orq instance list|disable|enable`: a local switch that keeps automated threads off a provider instance T3 reports as available. `sync` never overwrites it.
 - CI pins `actions/checkout` and `actions/setup-node` by commit SHA and runs on pushes to `main` and on pull requests.
+- A gate that dies without a result reports the last line it logged, for unit gates and the final gate. The log of an earlier gate run is never read as the reason.

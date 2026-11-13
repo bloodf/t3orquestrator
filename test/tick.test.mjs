@@ -427,3 +427,12 @@ test('rule 2: a gate that could not complete reports why when the gate process l
   const twice = go([launched('a'), ended('a'), gateStarted('a'), gateStarted('a')], { gates: lost });
   assert.equal(twice.events[0].reason, 'gate could not complete: orq: globs must be an array');
 });
+
+test('rule 6: a final gate that could not complete reports why when the gate process left an error', () => {
+  const started = { type: 'gate-started', unit: FINAL, at: 9, attempt: 1, headSha: C, pid: 1 };
+  const lost = { [FINAL]: { running: false, result: null, error: 'orq: boom' } };
+  const r = go([...doneA, started, started], { plan: { goal: 'g', units: [unit('a')] }, gates: lost });
+  assert.deepEqual(r.report.judgment, [{ unit: FINAL, reason: 'final gate could not complete: orq: boom' }]);
+  const silent = go([...doneA, started, started], { plan: { goal: 'g', units: [unit('a')] }, gates: { [FINAL]: { running: false, result: null } } });
+  assert.deepEqual(silent.report.judgment, [{ unit: FINAL, reason: 'final gate could not complete' }]);
+});

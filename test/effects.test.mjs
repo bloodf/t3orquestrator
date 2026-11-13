@@ -520,3 +520,22 @@ test('collectGate: a dead gate with no result reports the last line of its log',
   await fs.writeFile(gateFile(s.p.repo, 'a', 1, 'log'), 'x'.repeat(500));
   assert.equal((await collectGate(s.fx, 'a', 1)).error.length, 160);
 });
+
+test('gate-start: the log of an earlier gate for the same unit and attempt is not read as this gate\'s reason', async (t) => {
+  const s = await setup(t, [unitSpec('a')], { fx: { spawnGate: async () => 5151, isAlive: () => false } });
+  await s.act(launchA());
+  const u = unitOf(await readState(s.p.repo), 'a');
+  await commitOn(s.p.repo, u.branch, { 'a.txt': 'A\n' });
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'completed' });
+  const log = gateFile(s.p.repo, 'a', 1, 'log');
+  await fs.mkdir(path.dirname(log), { recursive: true });
+  await fs.writeFile(log, 'gate a attempt 1: pass\n');
+  await s.act({ type: 'gate-start', unit: 'a', attempt: 1 });
+  assert.deepEqual(await collectGate(s.fx, 'a', 1), { running: false, result: null }); // killed before it logged anything
+});
+
+test('collectGate: a log that cannot be read gives no reason instead of failing the poll', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await fs.mkdir(gateFile(s.p.repo, 'a', 1, 'log'), { recursive: true }); // a directory: reading it fails with EISDIR
+  assert.deepEqual(await collectGate(s.fx, 'a', 1), { running: false, result: null });
+});
