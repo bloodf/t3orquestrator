@@ -1,12 +1,12 @@
 # t3orquestrator
 
-An orchestration stack for T3 Code. A small zero-dependency Node CLI, `orq`, does the deterministic half of orchestration: sizing how many agent threads may be active, tracking state and routing work. The orchestrating agent does the judgment half.
+An orchestration kit for T3 Code. You paste a short stub into a thread, and that thread becomes an orchestrator. It plans each request, hands the work to worker threads on the models you have enabled, and judges the results. A small zero-dependency Node CLI, `orq`, does the deterministic part: it counts threads, routes models, gates results and merges them.
 
-Status: Pre-release: under construction, not yet usable.
+It is for developers who already run several coding agents through T3 Code and want them to work in parallel on one repository without overrunning the machine, and without accepting work that no test has checked.
 
-## How it will work
+## Paste this
 
-Paste this stub into a project's first prompt:
+Paste the stub as the first message of a thread in your project:
 
 ```
 You are the orchestrator for this project.
@@ -17,15 +17,17 @@ You are the orchestrator for this project.
 You plan, dispatch and judge. You never write product code yourself.
 ```
 
-Paste it as the first message of a thread, never into `AGENTS.md` (see [BOOTSTRAP.md](BOOTSTRAP.md)).
+Never put it in `AGENTS.md`, because workers read that file (see [BOOTSTRAP.md](BOOTSTRAP.md)). The stub pins an exact commit. Read that commit before you run it: see [SECURITY.md](SECURITY.md).
 
 ## What happens after you paste
 
-1. The thread fetches the kit, runs `orq init`, and asks you once how far it may go on its own: open a draft pull request; also have a second model review it and workers fix the findings; or also merge once checks pass.
-2. It syncs the models and tools you have enabled and routes each job to one by job class and tier.
-3. For each request it writes a plan, usually one unit, and `orq` runs each unit in its own worker thread and git worktree.
-4. `orq` gates every result with its evidence command in a clean checkout, merges what passes into an integration branch, and hands failures back to the orchestrator to judge.
+1. The thread fetches the kit and runs `orq init`. Then it asks you once how far it may go on its own. It can open a draft pull request. It can also have a model from another family review the work and send workers to fix the findings. Or it can also merge once the host's checks pass.
+2. It syncs the providers, models and tools you have enabled. Each job is then routed to a model by job class and tier.
+3. For each request it writes a plan, usually one unit. `orq` runs each unit in its own worker thread and git worktree.
+4. `orq` gates every result: it runs the unit's evidence command in a clean checkout of the worker's commit. Passing units are merged into an integration branch. A failed gate goes back to the same worker once, then to a fresh worker one tier up. Only after that does the orchestrator decide.
 5. The orchestrator finishes in the mode you chose and reports what it decided.
+
+Read [How it works](docs/how-it-works.md) for the full sequence.
 
 ## Requirements
 
@@ -33,15 +35,35 @@ Paste it as the first message of a thread, never into `AGENTS.md` (see [BOOTSTRA
 - Node >= 22
 - git
 
+## Status and limits
+
+- Pre-release. Interfaces and file formats may change between commits.
+- Tested on macOS against one T3 Code nightly. There has been no testing on Windows.
+- The `t3` CLI is not a stable interface. A T3 Code update can break the adapter. [docs/t3-surface.md](docs/t3-surface.md) records the version it was verified against.
+- Workers run in T3's full-access mode: they edit files and run commands without asking. Use this only in projects where you would let an agent work unattended.
+- A global agent instruction file that mandates another dispatch or routing procedure conflicts with the playbook. Exempt projects that use this kit from it.
+- There is no token-usage accounting, because T3's CLI does not expose token usage.
+- The machine-wide thread cap counts only threads `orq` started. Threads you start by hand are not counted.
+
 ## Models and providers
 
-The framework names no models or providers. It discovers what is enabled on your machine and works from that. Suggestions for specific models or tools live only in dated suggestion files, never in framework code.
+The framework names no models or providers. It discovers what is enabled on your machine and works from that. Suggestions for specific models and tools live only in the dated files `playbook/suggestions.json` and `playbook/tools.json`. Before you let automated threads use a subscription, read [Provider terms](docs/provider-terms.md).
+
+## Documentation
+
+- [How it works](docs/how-it-works.md): the agent and `orq`, the life of a request, state, slots, autonomy modes, the gate
+- [Scheduling](docs/scheduling.md): unit states, the cap, failure handling, what `orq wait` returns
+- [Commands](docs/commands.md): every `orq` command, its output and exit codes
+- [Provider terms](docs/provider-terms.md): accounts, credentials and automated use
+- [Example profile](docs/example-profile.md): a worked illustration of sync, tiers and routing
+- [T3 surface](docs/t3-surface.md): what was observed of the T3 Code CLI and tools
 
 ## Project
 
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Changelog](CHANGELOG.md)
 
 ## License
 

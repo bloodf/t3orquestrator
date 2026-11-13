@@ -1,0 +1,197 @@
+# Commands
+
+Run `orq` as `node ~/.t3orq/kit/bin/orq.mjs`. Project commands act on the current directory and its `.orq/`.
+
+| Command | Purpose |
+|---|---|
+| [`init`](#init) | Set up this project: detect T3, slots and checks |
+| [`sync`](#sync) | Merge `orchestrator_capabilities` output into the registry |
+| [`instance`](#instance) | List provider instances, or keep one out of automated use |
+| [`model add`](#model-add) | Add a model a provider does not list |
+| [`tier set`](#tier-set) | Correct a model's tier |
+| [`route`](#route) | Show which models a job class routes to |
+| [`config`](#config) | Read or change project or machine settings |
+| [`plan check`](#plan-check) | Validate `.orq/plan.json` |
+| [`wait`](#wait) | Run the plan until something needs the orchestrator |
+| [`status`](#status) | The plan, slots and one line per unit |
+| [`unit`](#unit) | Retry or drop a unit after judgment |
+| [`review`](#review) | Start or read a review of the integrated result |
+| [`summary`](#summary) | Write the pull request body |
+| [`probe`](#probe) | Print the machine cap and why |
+| [`version`](#version) | Print the `orq` and kit versions |
+| [`update`](#update) | Move the kit to a release |
+| `help` | List commands (also `--help`, `-h`, or no arguments) |
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Error; the message follows `orq:` on stderr |
+| 2 | Usage error: unknown command, unknown option or missing argument |
+| 3 | `init` was run inside a worker thread |
+| 4 | Refused or nothing to do: invalid plan, no route, tier owned by the user, unit busy, review not possible, update refused |
+| 5 | Another `orq wait` is running for this project |
+
+## init
+
+`orq init`
+
+This command records the `t3` binary and its version. It resolves the capability slots from commands on `PATH`, and detects check commands from the project files. It adds `.orq/` to the repository's local exclude file. Checks you have set, even to `null`, are never overwritten.
+
+```
+t3=<version|missing> cap=<n> kit=<sha|unknown>
+slots: judge=<name> memory=<name> code-index=<name> git-host=<name>
+checks: setup=<cmd|none> full=<cmd|none>
+autonomy=<draft|review-fix|review-fix-merge|unset>
+registry: <n> instances, <n> models, synced <n>h ago|never
+next: pipe orchestrator_capabilities JSON to "orq sync"
+```
+
+The `next:` line appears when the registry has never been synced or is more than 12 hours old. Exit 3 with `this thread is a worker started by orq; follow your work order` when a lease exists for the calling thread.
+
+## sync
+
+`orq sync < capabilities.json`
+
+This command reads JSON on stdin: either the `orchestrator_capabilities` result, or `{"capabilities": <that result>, "tools": [<tool names>]}`. It merges providers and models into the registry and harvests models proven by completed threads in this project. With `tools`, it also resolves the MCP-based slots. Tiers set by you or the orchestrator are never overwritten. Instances you disabled stay disabled.
+
+```
++instances: <ids>
+-instances: <ids>
+enabled: <ids>
++models: <n>
+unavailable: <n>
+synced: <n> instances (<n> enabled), <n> models (<n> confirmed)
+inferred: <keys> — set with: orq tier set <key> <1-4>
+```
+
+Lines with nothing to report are left out. `inferred:` lists at most 8 keys, then `+<n> more`. Exit 2 when stdin is empty or over 8 MiB. Exit 1 when the JSON is invalid or the capabilities look truncated.
+
+## instance
+
+`orq instance list | orq instance disable <id> | orq instance enable <id>`
+
+`list` prints one line per instance:
+
+```
+<id> on|off-user|off-t3 models=<n>[ cooldown_until=<iso time>]
+```
+
+`off-t3` means T3 reports the instance disabled or did not report it. `off-user` means you disabled it, and `sync` never changes that. `disable` and `enable` print `instance <id>: disabled by user` or `instance <id>: enabled`.
+
+## model add
+
+`orq model add <instance> <model> [--tier N]`
+
+Adds a model to an instance that lists none, such as an agent that reports `models: []`. Prints `added <instance>::<model> tier=<n> (<source>)`.
+
+## tier set
+
+`orq tier set <instance>::<model> <1-4> [--by user|orchestrator]`
+
+Prints `tier <key> = <n> (<by>)`. `--by` defaults to `orchestrator`. A tier set by `user` outranks one set by `orchestrator`, which outranks one that was suggested or inferred. When the current tier has a higher source, it prints `unchanged: <key> is set by <source>` and exits 4.
+
+## route
+
+`orq route --job <class> [--author-tier N] [--author-family F] [--json]`
+
+Lists the eligible models in the order `orq` would use them:
+
+```
+1 <instance> <model> tier=<n> family=<family> confirmed|unconfirmed[ same-family][ below-tier]
+```
+
+`review` and `fix` need the author's tier, and `review` also needs the family. If the project has integrated units, the values come from the ledger. Exit 4 with `none blocked=<excluded|cooling|limit|mixed|empty> retry_at=<iso time|-> reason="<why>"` when nothing is eligible.
+
+## config
+
+`orq config get [--machine] | orq config set [--machine] <key> <value>`
+
+`get` prints the config as JSON. `set` prints `<key> = <value>`. The value `null` clears `autonomy`, `cap` or a check.
+
+| Scope | Keys |
+|---|---|
+| project (`.orq/config.json`) | `autonomy`, `base`, `checks.setup`, `checks.unit`, `checks.full`, `pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes` |
+| machine (`~/.t3orq/config.json`) | `cap`, `perInstanceLimit` |
+
+`checks.unit` runs in every unit's gate after the evidence. `checks.full` runs once on the integration head.
+
+## plan check
+
+`orq plan check [--json]`
+
+Prints `plan ok: <n> units, order: <ids>`, or one `error: <problem>` line per problem and exit 4. Exit 1 when there is no plan. It checks the schema, job classes, unit ids, dependencies and cycles. It also checks that each work order is a file under `.orq/` of at most 40 lines, and that units which could run in parallel have non-overlapping `paths`.
+
+## wait
+
+`orq wait [--max-seconds N]`
+
+This runs the scheduler for up to `N` seconds (default 480). The first line it prints is one of `done:`, `judgment:`, `blocked:`, `idle:` or `timeout:`. See [Scheduling](scheduling.md#what-orq-wait-returns). Exit 4 when the plan is invalid or uses the reserved unit id `integration`. Exit 1 when no usable `t3` is recorded. Exit 5 when another `orq wait` holds this project.
+
+## status
+
+`orq status [--json]`
+
+```
+plan: <goal> (<planId>|not started)
+integration: <branch> head=<sha> base=<sha>
+cap=<n> active=<n> blocked=<n> gates=<n> machine_leases=<n>[ expired_leases=<n>]
+<unit> <state>[ attempt=<n>][ model=<key>][ tier=<n>][ thread=<id>][ flags=<kinds>][ <reason>]
+authors: max_tier=<n> family=<family>
+cooling: <instance> until <iso time>, …
+note: cap covers threads orq started; threads started by hand are not counted
+```
+
+The `integration:`, `authors:` and `cooling:` lines appear only when they apply.
+
+## unit
+
+`orq unit retry <id> [--tier N] | orq unit drop <id>`
+
+`retry` moves a `failed` unit back to `queued` and clears its attempts, its excluded models and its provider failure count. `--tier` sets a minimum tier (1-4). It prints `retried <id>: queued[, minimum tier <n>]`. `orq unit retry integration` restarts a final gate that could not complete.
+
+`drop` removes a unit from the run and prints `dropped <id>`. If its thread was running, a note says it keeps running in T3. Dropping is refused, with exit 4, while the unit is being gated or merged.
+
+## review
+
+`orq review start [--order <file>] | orq review show [<n>]`
+
+`start` needs at least one integrated unit. It routes job `review` on the author's tier and family. Then it starts a thread on the integration head, on branch `orq/<planId>/review-<n>`, with the order file as its first message. The order file defaults to `.orq/orders/review.md`, must be under `.orq/orders/`, and is at most 40 lines. It prints `review <n>: thread=<id> model=<key> head=<sha>`. When no model is eligible it prints the same `none …` line as `route` and exits 4.
+
+`show` reads the latest review, or review `n`. It prints `review <n>: running`, or `review <n>: completed` followed by the reviewer's last message. A failed review prints `review <n>: failed; run "orq review start" again` and exits 4.
+
+## summary
+
+`orq summary [--out <file>]`
+
+Writes the pull request body to `.orq/summary.md`, or to another `.md` file directly under `.orq/`. The body has these sections: goal, decisions, a unit table, evidence results, final checks, reviews, and units not done. It prints `summary: <file> (<n> lines)`. Exit 4 when the plan has not started.
+
+## probe
+
+`orq probe [--json]`
+
+Prints `cap=<n> cores=<n> mem_gb=<n> load1=<n> reasons="<why>"`.
+
+## version
+
+`orq version`
+
+Prints `orq <package version> kit=<sha|unknown>[ tag=<tag>]`. `orq --version` prints the package version alone.
+
+## update
+
+`orq update [--to <tag|sha>] [--check]`
+
+This fetches the kit's `origin` and moves the kit checkout to the highest `vX.Y.Z` tag, or to `--to`, which must be a full 40-hex commit SHA or an existing tag. It refuses, with exit 4, when the kit has local changes, is not a git checkout, has no release tag yet, or its origin cannot be reached.
+
+It does not move backwards on its own. When the target is not ahead of the current commit, for example a development clone that is past the latest tag, it refuses and tells you to pass `--to`. With `--to` it moves anyway and prints `moved (not a fast-forward): <old> -> <new>` in place of `updated:`.
+
+The kit's origin is trusted and tags are not signature-checked. The commit pinned in the stub is the trust anchor; `update` is a convenience.
+
+```
+updated: <old sha> -> <new sha>[ (<tag>)]
+review the changes: git -C <kit dir> log --oneline <old>..<new>
+```
+
+With `--check` it changes nothing, works even when the kit has local changes, and prints `update available: <old> -> <new>[ (<tag>)]` or `would move (not a fast-forward): <old> -> <new>`. Either way, it prints `up to date at <sha>` when there is nothing to do.
