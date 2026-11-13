@@ -380,6 +380,28 @@ test('an unrelated plain directory at workDir is refused and left alone', async 
   await fs.stat(path.join(w.workDir, 'keep.txt'));
 });
 
+test('a leftover directory in .orq/gate/ (a gate killed mid-run) is cleared and the gate runs', async (t) => {
+  const w = await realWork(t, { 'lib/a.mjs': 'x\n' });
+  const workDir = path.join(w.repo, '.orq', 'gate', 'u1');
+  await fs.mkdir(path.join(workDir, 'node_modules', 'x'), { recursive: true });
+  await fs.writeFile(path.join(workDir, 'node_modules', 'x', 'junk.js'), 'junk');
+  const r = await real(w, 'test -f lib/a.mjs && test ! -d node_modules', { workDir });
+  assert.equal(r.verdict, 'pass', JSON.stringify(r.failures));
+  await assert.rejects(fs.stat(workDir));
+});
+
+test('a leftover in .orq/gate/ that is a symlink to elsewhere is refused and its target left alone', async (t) => {
+  const w = await realWork(t, { 'lib/a.mjs': 'x\n' });
+  const elsewhere = path.join(path.dirname(w.repo), 'elsewhere');
+  await fs.mkdir(elsewhere);
+  await fs.writeFile(path.join(elsewhere, 'keep.txt'), 'mine');
+  await fs.mkdir(path.join(w.repo, '.orq', 'gate'), { recursive: true });
+  const workDir = path.join(w.repo, '.orq', 'gate', 'u1');
+  await fs.symlink(elsewhere, workDir);
+  await assert.rejects(real(w, 'true', { workDir }), (e) => e.message === `workDir exists and is not a worktree: ${workDir}`);
+  await fs.stat(path.join(elsewhere, 'keep.txt'));
+});
+
 async function plantHooks(repo, root) {
   await fs.writeFile(path.join(repo, '.git', 'hooks', 'post-checkout'), `#!/bin/sh\ntouch "${root}/hook-marker"\n`, { mode: 0o755 });
   const fsm = path.join(root, 'fsm.sh');

@@ -456,3 +456,15 @@ test('wait: the slot line counts only ready units, not those waiting on dependen
   const r = await orq(['wait', '--max-seconds', '30'], p, simulator(p, {}));
   assert.equal(r.out, 'timeout: 0 running, 0 blocked, 0 gating, 3 queued, 0 passed\nwaiting: 2 ready units wait for a free slot (machine cap 1, or a provider instance limit)\n');
 });
+
+test('wait and status name a machine cap override above what the machine computes, once per wait', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')], { cap: 18 });
+  const sim = simulator(p, { a: [['commit-complete']] });
+  const r = await orq(['wait'], p, sim);
+  const note = 'note: cap 18 is an override; this machine computes 4 (cpu: 8 cores allow 4)';
+  assert.deepEqual(r.out.trim().split('\n').slice(1), [note]);
+  assert.ok(r.out.trim().split('\n')[0].startsWith('done: '));
+  assert.ok((await orq(['status'], p, sim)).out.split('\n').includes(note));
+  const fine = await makeProject(t, [unitSpec('a')], { cap: 3 });
+  assert.doesNotMatch((await orq(['status'], fine, simulator(fine, {}))).out, /is an override/);
+});

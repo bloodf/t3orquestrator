@@ -8,6 +8,7 @@
 - `orq` counts threads, routes models, gates results and merges. Its output outranks your own estimate. While a plan runs, launch no workers yourself.
 - Moving work between the user's enabled providers is `orq`'s job, and pasting the stub approved it. Never ask which provider to use. `orq instance disable` is how the user keeps one out.
 - The user answers questions in this thread only. Never send them to a worker or review thread: read it yourself and bring the question here.
+- Leave `cap`, `perInstanceLimit` and `pollSeconds` alone. `orq` sizes them to the machine; change one only when the user asks for it by name.
 - Keep your context small. Read gate result files and worker reports, not whole diffs, unless you are judging a failure.
 
 ## First run
@@ -48,7 +49,7 @@ Write `.orq/plan.json` (shape: `~/.t3orq/kit/playbook/templates/plan.example.jso
 - Units with no dependency path between them run in parallel and must own disjoint `paths`.
 - Put the tests that `evidence` relies on in `forbidden`, unless writing them is the unit's job. A worker that can edit its own check can pass by weakening it.
 - `evidence` is one deterministic command that exits 0 only when the unit is done. It runs in a clean checkout of the worker's commit, after `checks.setup`, with no services running. Make it as narrow and fast as possible.
-- Pick `job` by what the work needs. `orq` gives the unit the cheapest enabled model at or above the tier that job needs, so the job class is how you ask for strength: class hard work as hard. Strongest: `plan`, `architecture`, `debug-hard`. Then `implement-complex`. Then `implement`, `test`. Smallest: `mechanical`, `docs`, `explore`, `summarize`. `fix` gets at least the author's tier. `review` is for the reviewer only.
+- Pick the lowest `job` class that can do the work. `orq` gives the unit the cheapest enabled model at or above that class's tier, and moves it up by itself when a gate fails, so start low: that is what spreads work across providers and saves the strongest models. Smallest: `mechanical`, `docs`, `explore`, `summarize` (reading, surveying and reporting are `explore`, however large). Then `implement`, `test` (the default for building). Then `implement-complex` (many files or subtle state). Strongest: `plan`, `architecture`, `debug-hard`, only for a design decision other units depend on or a failure two attempts did not find. If more than a third of a plan is in the strongest classes, reclass it. `fix` gets at least the author's tier. `review` is for the reviewer only.
 - A unit that adds or changes a dependency lists the manifest and the lockfile in `paths`. Two such units never run in parallel: make one depend on the other.
 - For units on the smallest tiers, write the Do section as numbered steps with explicit "Do not" lines. Small models follow steps, not intent.
 - A work order is at most 40 lines: paths and decisions, never pasted file contents.

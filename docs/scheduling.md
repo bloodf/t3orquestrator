@@ -85,9 +85,11 @@ Feedback can also go unseen. If the thread still shows its run from before the f
 
 | Attempt that failed | Next |
 |---|---|
-| 1 | The failures are sent back to the same thread: "The gate rejected this work: … Fix it, commit, and report." This takes a slot. |
+| 1 | The failures are sent back to the same thread: "The gate rejected this work: … Fix it, commit, and report." When the worker committed nothing (`no commits on top of <sha>`), the message says so plainly instead: it is the implementer, it must do the work in its worktree and commit it, not wait for another thread or for approval, and reply `BLOCKED` or `NEEDS_CONTEXT` only if something truly blocks it. This takes a slot. |
 | 2 | A fresh thread on a different model, at least one tier up (at most 4). The failures go at the top of its work order. |
 | 3 | `failed` with `gate failed 3 times: <failures>` |
+
+A gate directory left in `.orq/gate/<unit>` by a gate killed mid-run is cleared before the next gate of that unit; a path outside `.orq/gate/`, or reached through a symlink, is refused.
 
 A gate that started twice without producing a result goes to `failed` with `gate could not complete`, followed by `: <last line the gate process logged>` when it logged one.
 
@@ -116,7 +118,7 @@ Project settings, set with `orq config set <key> <n>`:
 
 | Key | Default |
 |---|---|
-| `pollSeconds` | 15 |
+| `pollSeconds` | 15 (at least 5: every poll runs `t3` once plus once per running thread; a lower value in the file is read as 5) |
 | `stallMinutes` | 20 |
 | `gateConcurrency` | 1 |
 | `leaseTtlMinutes` | 30 |

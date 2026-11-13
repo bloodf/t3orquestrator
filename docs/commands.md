@@ -110,7 +110,7 @@ Lists the eligible models in the order `orq` would use them:
 
 `orq config get [--machine] | orq config set [--machine] <key> <value>`
 
-`get` prints the config as JSON. `set` prints `<key> = <value>`. The value `null` clears `autonomy`, `cap` or a check. `questions` is `auto` (the default: `orq ask` lets the strongest enabled model decide) or `user` (every question goes to the user).
+`get` prints the config as JSON. `set` prints `<key> = <value>`. The value `null` clears `autonomy`, `cap` or a check. `pollSeconds` is at least 5. `questions` is `auto` (the default: `orq ask` lets the strongest enabled model decide) or `user` (every question goes to the user).
 
 | Scope | Keys |
 |---|---|
@@ -160,7 +160,7 @@ cooling: <instance> until <iso time>, …
 note: cap covers threads orq started; threads started by hand are not counted
 ```
 
-A line `ask: decision <n> running thread=<id> model=<key>` follows the `authors:` line for each decision thread still running. The `integration:`, `authors:`, `ask:` and `cooling:` lines appear only when they apply. `wanted_tier` appears when the unit was launched below its minimum tier because no model at that tier was usable.
+When the machine `cap` is an override above what the machine computes, a line `note: cap <n> is an override; this machine computes <m> (<reasons>)` comes before the last note; `orq wait` prints the same note once per call. A line `ask: decision <n> running thread=<id> model=<key>` follows the `authors:` line for each decision thread still running. The `integration:`, `authors:`, `ask:` and `cooling:` lines appear only when they apply. `wanted_tier` appears when the unit was launched below its minimum tier because no model at that tier was usable.
 
 ## unit
 

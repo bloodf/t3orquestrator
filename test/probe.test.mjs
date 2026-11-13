@@ -198,3 +198,12 @@ test('resolveCap appends machine notes to reasons', () => {
   const r = resolveCap({ machine: { ...base, notes: ['mem: fallback to os.freemem (x)'] }, config: {} });
   assert.equal(r.reasons.at(-1), 'mem: fallback to os.freemem (x)');
 });
+
+test('overrideNote: only an override above what the machine computes is named, with the reasons', async () => {
+  const { overrideNote } = await import('../lib/probe.mjs');
+  const machine = { cores: 10, availableMemBytes: 64 * 2 ** 30, load1: 148 };
+  assert.equal(overrideNote({ machine, config: { cap: 18 } }),
+    'note: cap 18 is an override; this machine computes 4 (cpu: 10 cores allow 5; load: load1 148.00 over 0.7 per core, minus 1)');
+  assert.equal(overrideNote({ machine, config: { cap: 4 } }), null);
+  assert.equal(overrideNote({ machine, config: {} }), null);
+});

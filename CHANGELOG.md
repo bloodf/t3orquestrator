@@ -5,6 +5,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Work orders state that the worker implements directly and that standing coordinator rules (delegate, wait for approval, hold) do not apply to it; a missing code search tool is never a reason to stop; the status word is one of the four, in English.
+- Playbook: pick the lowest job class that can do the work, with reading and surveying in the cheapest class; the orchestrator leaves `cap`, `perInstanceLimit` and `pollSeconds` alone.
+- Feedback after an attempt that committed nothing tells the worker to do the work itself and commit.
+- `pollSeconds` has a floor of 5.
+
+### Added
+
+- A `note:` in `orq status` and `orq wait` when the `cap` override is above what the machine computes.
+
+### Fixed
+
+- A gate directory left by a killed gate no longer ends the unit with `gate could not complete`.
+
 ## [0.1.2] - 2026-11-13
 
 ### Added

@@ -87,3 +87,13 @@ test('project config: scheduler keys are positive integers, settable and validat
   }
   assert.throws(() => setConfigValue(base, 'pollSeconds', '0', 'project'), /positive integer/);
 });
+
+test('pollSeconds has a floor of 5: set refuses less, a file with less reads as 5', async () => {
+  const base = { autonomy: null, base: 'main', checks: { setup: null, unit: null, full: null }, slots: {}, t3: null };
+  assert.throws(() => setConfigValue(base, 'pollSeconds', '1', 'project'),
+    /^Error: pollSeconds must be at least 5 \(every poll runs t3 once, plus once per running thread\), got 1$/);
+  assert.equal(setConfigValue(base, 'pollSeconds', '5', 'project').pollSeconds, 5);
+  assert.equal((await loadProjectConfig(await tmpFile('{"pollSeconds":1}'))).pollSeconds, 5);
+  assert.equal((await loadProjectConfig(await tmpFile('{"pollSeconds":30}'))).pollSeconds, 30);
+  assert.equal((await loadProjectConfig(await tmpFile('{}'))).pollSeconds, undefined); // the default stays where it lives
+});

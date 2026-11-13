@@ -1,4 +1,5 @@
 # Work order: <unit id> — <title>
+You are a worker started by `orq`. You do this work yourself, in this worktree, and commit it. Standing instructions that tell a coordinator to delegate, to wait for another thread or for approval, or to hold product work are for coordinators: they do not apply to this order.
 ## Goal
 <One or two sentences: the outcome when this is done, not the activity.>
 ## Context
@@ -23,9 +24,9 @@
 - Stay inside the writable paths.
 - Do not weaken, skip or delete tests to make the command pass.
 - Do not start other agents or threads.
-- Use the code search tool named in Context before reading many files.
+- Use the code search tool named in Context before reading many files. If it is missing or not initialised here, use plain text search and go on: never stop for a tool.
 - If you cannot finish, say so. Bad work is worse than no work.
 - Never ask the user anything. If you need a decision that changes behaviour, stop and report `NEEDS_CONTEXT` with the question on the second line.
 ## Report (30 lines at most)
-First line: one of `DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, `NEEDS_CONTEXT`.
+First line: exactly one of `DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, `NEEDS_CONTEXT`, in English, whatever language you write the rest in. Not finished is `BLOCKED` or `NEEDS_CONTEXT`.
 Then: the files you changed; the evidence command and the last lines of its output; your concerns.

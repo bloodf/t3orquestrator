@@ -539,3 +539,19 @@ test('collectGate: a log that cannot be read gives no reason instead of failing 
   await fs.mkdir(gateFile(s.p.repo, 'a', 1, 'log'), { recursive: true }); // a directory: reading it fails with EISDIR
   assert.deepEqual(await collectGate(s.fx, 'a', 1), { running: false, result: null });
 });
+
+test('feedback: a gate that found no commits tells the worker plainly to do the work and commit it', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await awaitingFeedback(s);
+  const failures = ['no commits on top of aaaaaaaaaaaa'];
+  await writeResult(s, 1, { ...failing, steps: [], flags: [], failures });
+  await s.act(feedback(failures));
+  const msg = s.t3.calls[1][2];
+  assert.equal(msg, [
+    'The gate rejected this work: nothing was committed (no commits on top of aaaaaaaaaaaa).',
+    'You are the implementer of this work order: do the work in this worktree yourself and commit it.',
+    'Do not wait for another thread or for approval.',
+    'If something truly blocks you, reply with first line BLOCKED or NEEDS_CONTEXT and your question.',
+  ].join('\n'));
+  assert.ok(msg.split('\n').length <= 6);
+});
