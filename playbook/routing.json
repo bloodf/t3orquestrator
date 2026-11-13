@@ -12,6 +12,7 @@
     "explore": { "minTier": 1 },
     "summarize": { "minTier": 1 },
     "review": { "minTier": "author", "differentFamily": true },
-    "fix": { "minTier": "author" }
+    "fix": { "minTier": "author" },
+    "decide": { "minTier": 4, "strongest": true }
   }
 }

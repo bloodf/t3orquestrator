@@ -104,3 +104,16 @@ test('tendLeases: a just-started review lease whose thread is not listed yet is 
   await writeLease(s.dir, lease(NOW - 3 * MIN));
   assert.deepEqual((await tendLeases(s.fx, state, {})).removed, ['rv1']);
 });
+
+test('tendLeases: a decision thread keeps its lease while .orq/asks.json lists it running, and loses it after', async (t) => {
+  const s = await setup(t);
+  const ask = { ...s.ahead('ask-1'), threadId: 'th-ask', kind: 'ask', ask: 1, launch: undefined, startedAt: NOW, heartbeatAt: NOW };
+  await writeLease(s.dir, ask);
+  await fs.writeFile(path.join(s.p.repo, '.orq', 'asks.json'), JSON.stringify({ asks: [{ n: 1, status: 'running', threadId: 'th-ask' }] }));
+  const state = await readState(s.p.repo);
+  await tendLeases(s.fx, state, { 'th-ask': { id: 'th-ask', status: 'running' } });
+  assert.deepEqual((await s.leases()).map((l) => l.threadId), ['th-ask']);
+  await fs.writeFile(path.join(s.p.repo, '.orq', 'asks.json'), JSON.stringify({ asks: [{ n: 1, status: 'answered', threadId: 'th-ask' }] }));
+  await tendLeases(s.fx, state, { 'th-ask': { id: 'th-ask', status: 'completed' } });
+  assert.deepEqual(await s.leases(), []);
+});

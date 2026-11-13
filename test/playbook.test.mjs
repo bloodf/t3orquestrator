@@ -10,7 +10,7 @@ const lineCount = (f) => read(f).replace(/\n$/, '').split('\n').length;
 const stub = (f) => read(f).match(/```\n([\s\S]*?)```/)?.[1];
 
 const ORCH = 'playbook/ORCHESTRATOR.md';
-const TEMPLATES = ['playbook/templates/work-order.md', 'playbook/templates/review-order.md'];
+const TEMPLATES = ['playbook/templates/work-order.md', 'playbook/templates/review-order.md', 'playbook/templates/decision-order.md'];
 const DOCS = ['BOOTSTRAP.md', ORCH, ...TEMPLATES];
 
 test('playbook files stay within their line budgets', () => {

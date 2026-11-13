@@ -31,3 +31,13 @@ test('parseWorkerStatus strips control characters from what it returns', () => {
   assert.equal(/[\u0000-\u001f\u007f]/.test(got.detail), false);
   assert.match(got.detail, /red.*text/);
 });
+
+test('parseStatusLine: any status set, the same tolerance, and the lines after the status', async () => {
+  const { parseStatusLine } = await import('../lib/worker-status.mjs');
+  const S = ['ANSWER', 'ESCALATE'];
+  assert.deepEqual(parseStatusLine('**Answer** — use port 8080\n\nbecause the config says so\n- and the docs', S),
+    { status: 'ANSWER', detail: 'use port 8080', rest: ['because the config says so', '- and the docs'] });
+  assert.deepEqual(parseStatusLine('## `escalate`\nWhich account pays?\nwhy', S), { status: 'ESCALATE', detail: 'Which account pays?', rest: ['why'] });
+  assert.equal(parseStatusLine('I think yes', S).status, 'I THINK YES');
+  assert.equal(parseStatusLine(`ANSWER: ${'x'.repeat(600)}`, S, 400).detail.length, 400);
+});

@@ -20,7 +20,7 @@ const keys = (r) => r.candidates.map((c) => c.key);
 
 test('routing.json lists the expected jobs', () => {
   assert.deepEqual(Object.keys(rules.jobs).sort(), [
-    'architecture', 'debug-hard', 'docs', 'explore', 'fix', 'implement', 'implement-complex',
+    'architecture', 'debug-hard', 'decide', 'docs', 'explore', 'fix', 'implement', 'implement-complex',
     'mechanical', 'plan', 'review', 'summarize', 'test',
   ]);
 });
@@ -200,4 +200,34 @@ test('avoidKeys: a model that failed this unit goes last, behind one only on a f
   const one = reg({ a: inst() }, [mod('a', 'm2', 2)]);
   const only = go(one, { avoidKeys: ['a::m2'] });
   assert.deepEqual([keys(only), only.candidates[0].avoided], [['a::m2'], true]);
+});
+
+test('decide: routing.json asks for tier 4 and the strongest model', () => {
+  assert.deepEqual(rules.jobs.decide, { minTier: 4, strongest: true });
+});
+
+test('strongest: highest tier first, then the usual order; best available below tier 4; health rules apply', () => {
+  const strong = { jobs: { x: { minTier: 1, strongest: true }, decide: rules.jobs.decide } };
+  const r = reg({ a: inst(), b: inst() }, [mod('a', 'm2', 2), mod('b', 'm4', 4), mod('a', 'm3', 3), mod('b', 'n4', 4, { lastUsedAt: 5 })]);
+  assert.deepEqual(keys(go(r, { rules: strong, job: 'x' })), ['b::m4', 'b::n4', 'a::m3', 'a::m2']);
+  const no4 = reg({ a: inst() }, [mod('a', 'm2', 2), mod('a', 'm3', 3)]);
+  const below = go(no4, { rules: strong, job: 'decide' });
+  assert.deepEqual([keys(below), below.candidates[0].belowTier], [['a::m3'], true]);
+  const cooling = reg({ a: inst(), b: inst() }, [mod('a', 'm4', 4, { cooldownUntil: 5000 }), mod('b', 'm4', 4)]);
+  assert.deepEqual(keys(go(cooling, { rules: strong, job: 'decide' })), ['b::m4']);
+  const off = reg({ a: inst(), b: inst({ enabled: false }) }, [mod('a', 'm3', 3), mod('b', 'm4', 4)]);
+  assert.deepEqual(keys(go(off, { rules: strong, job: 'decide' })), ['a::m3']);
+});
+
+test('strongest: when every top-tier model is cooling or at its limit, the strongest free model is used', () => {
+  const strong = { jobs: { decide: rules.jobs.decide } };
+  const r = reg({ a: inst(), b: inst({ limit: 1 }) }, [mod('a', 'm4', 4, { cooldownUntil: 5000 }), mod('b', 'n4', 4), mod('a', 'm2', 2), mod('b', 'm3', 3)]);
+  const got = go(r, { rules: strong, job: 'decide', running: { b: 1 } });
+  assert.deepEqual([keys(got), got.candidates[0].belowTier, got.candidates[0].wantedTier], [['a::m2'], true, 4]);
+  const free3 = go(reg({ a: inst(), b: inst() }, [mod('a', 'm4', 4, { cooldownUntil: 5000 }), mod('b', 'm3', 3), mod('b', 'm2', 2)]), { rules: strong, job: 'decide' });
+  assert.deepEqual(keys(free3), ['b::m3', 'b::m2']);
+  const nothing = go(reg({ a: inst() }, [mod('a', 'm4', 4, { cooldownUntil: 5000 }), mod('a', 'm2', 2, { cooldownUntil: 6000 })]), { rules: strong, job: 'decide' });
+  assert.deepEqual([nothing.candidates, nothing.blocked, nothing.retryAt], [[], 'cooling', 5000]);
+  // other jobs keep waiting for their tier
+  assert.equal(go(r, { job: 'plan', running: { b: 1 } }).candidates.length, 0);
 });

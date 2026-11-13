@@ -26,7 +26,8 @@ Never put it in `AGENTS.md`, because workers read that file (see [BOOTSTRAP.md](
 2. It syncs the providers, models and tools you have enabled. Each job is then routed to a model by job class and tier.
 3. For each request it writes a plan, usually one unit. `orq` runs each unit in its own worker thread and git worktree.
 4. `orq` gates every result: it runs the unit's evidence command in a clean checkout of the worker's commit. Passing units are merged into an integration branch. A failed gate goes back to the same worker once, then to a fresh worker one tier up. Only after that does the orchestrator decide.
-5. The orchestrator finishes in the mode you chose and reports what it decided.
+5. Questions do not wait for you. When a worker needs a decision, the orchestrator gets it from the strongest model you have enabled (`orq ask`) and records it. Only what must stay with you reaches you, and always in the orchestrator's thread: destructive actions, spending, and anything beyond the mode you chose. Turn this off with `orq config set questions user`.
+6. The orchestrator finishes in the mode you chose and reports what it decided, including the decisions taken without you.
 
 Read [How it works](docs/how-it-works.md) for the full sequence.
 

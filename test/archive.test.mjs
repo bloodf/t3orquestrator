@@ -278,3 +278,11 @@ test('archive also removes clean leftovers from an earlier plan', async (t) => {
   assert.equal(await exists(dir), false);
   assert.ok(branches(p).includes('orq/p0/review-1'));
 });
+
+test('archive removes decision worktrees, with and without a plan id in the branch', async (t) => {
+  const { p } = await finished(t);
+  const dirs = [addWorker(p, 'ask1', 'orq/ask-1'), addWorker(p, 'ask2', 'orq/p1/ask-2')];
+  const r = await orq(['plan', 'archive'], p);
+  assert.match(r.out, /\nremoved 2 worker worktrees\n/);
+  for (const d of dirs) assert.equal(await exists(d), false);
+});

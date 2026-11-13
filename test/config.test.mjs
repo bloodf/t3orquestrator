@@ -26,7 +26,7 @@ test('machine config: invalid values name the file', async () => {
 
 test('project config: defaults merged', async () => {
   assert.deepEqual(await loadProjectConfig(await tmpFile()), {
-    autonomy: null, base: 'main', checks: { setup: null, unit: null, full: null }, slots: {}, t3: null,
+    autonomy: null, questions: 'auto', base: 'main', checks: { setup: null, unit: null, full: null }, slots: {}, t3: null,
   });
   const c = await loadProjectConfig(await tmpFile('{"autonomy":"draft","checks":{"full":"make test"}}'));
   assert.equal(c.autonomy, 'draft');
@@ -37,6 +37,7 @@ test('project config: validation', async () => {
   for (const [json, what] of [
     ['{"autonomy":"yolo"}', /autonomy/], ['{"base":""}', /base/], ['{"checks":{"unit":3}}', /checks\.unit/],
     ['{"slots":[]}', /slots/], ['{"t3":{"bin":"x"}}', /t3/], ['{"checks":[]}', /checks/],
+    ['{"questions":"maybe"}', /questions/], ['{"orchestrator":{"instance":"a"}}', /orchestrator/],
   ]) {
     await assert.rejects(loadProjectConfig(await tmpFile(json)), (e) => /^invalid config /.test(e.message) && what.test(e.message));
   }
@@ -54,6 +55,15 @@ test('setConfigValue: project keys, immutability, null clears', () => {
   assert.equal(base.checks.setup, 'a');
   assert.throws(() => setConfigValue(base, 'autonomy', 'bogus', 'project'), /autonomy/);
   assert.throws(() => setConfigValue(base, 'base', 'null', 'project'), /base/);
+  assert.equal(setConfigValue(base, 'questions', 'user', 'project').questions, 'user');
+  assert.equal(setConfigValue(base, 'questions', 'auto', 'project').questions, 'auto');
+  assert.throws(() => setConfigValue(base, 'questions', 'never', 'project'), /questions must be one of auto, user/);
+});
+
+test('project config: questions defaults to auto; the orchestrator model is {instance, model} when recorded', async () => {
+  assert.equal((await loadProjectConfig(await tmpFile('{"questions":null}'))).questions, 'auto');
+  const c = await loadProjectConfig(await tmpFile('{"orchestrator":{"instance":"pa","model":"m4"}}'));
+  assert.deepEqual(c.orchestrator, { instance: 'pa', model: 'm4' });
 });
 
 test('setConfigValue: machine keys and unknown keys', () => {

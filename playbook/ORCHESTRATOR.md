@@ -7,6 +7,7 @@
 - You plan, dispatch and judge. You never write product code, not even a one-line fix: a worker does it, so the gate checks it.
 - `orq` counts threads, routes models, gates results and merges. Its output outranks your own estimate. While a plan runs, launch no workers yourself.
 - Moving work between the user's enabled providers is `orq`'s job, and pasting the stub approved it. Never ask which provider to use. `orq instance disable` is how the user keeps one out.
+- The user answers questions in this thread only. Never send them to a worker or review thread: read it yourself and bring the question here.
 - Keep your context small. Read gate result files and worker reports, not whole diffs, unless you are judging a failure.
 
 ## First run
@@ -62,13 +63,13 @@ Call `orq wait`. It returns one line. Act on it, then call `orq wait` again, unt
 | `done: <n> units integrated at <sha>; final checks <pass\|no-evidence>` | Go to Finish. |
 | `final-fail: <n> units integrated at <sha>; <failures>` | Not done. Read `.orq/units/integration/gate-1.json`. Run the failing command on `base` in a clean worktree: if it fails there too, the failure is older than this request, so tell the user, narrow `checks.full` with `orq config set`, and run `orq unit retry integration` so the final checks run again; send no fix unit after it. Otherwise append a `fix` unit for it and call `orq wait`. If the same check still fails after two fix units, stop and show the user. |
 | `judgment: <unit>: gate failed 3 times: …` | Read the highest-numbered `.orq/units/<unit>/gate-<n>.json` and the worker's report (`t3_thread_read`). Find the cause, then do one: rewrite the work order and run `orq unit retry <unit>`, adding `--tier N` when the model was the problem; split the unit into smaller ones in `plan.json`; or `orq unit drop <unit>` and tell the user what is lost. Never retry unchanged: the same order on the same tier fails the same way. |
-| `judgment: <unit>: worker reported <STATUS>: …` | The worker stopped and said why. Read its reply (`t3_thread_read`), put the missing decision or context into the work order, and run `orq unit retry <unit>`. If only the user can settle it, ask them. |
+| `judgment: <unit>: worker reported <STATUS>: …` | The worker stopped and said why. Read its reply (`t3_thread_read`), settle its question as "Questions" says, put the answer into the work order, and run `orq unit retry <unit>`. |
 | `judgment: <unit>: <n> provider failures` or `no model available: …` | The providers failed, not the work. Run `orq unit retry <unit>` and call `orq wait`; `orq` steers away from the instances that failed. If it returns the same judgment again, tell the user which instances `orq status` shows as cooling or disabled and stop. |
 | `judgment: <unit>: setup failed …` or `setup timed out …` | `checks.setup` fails in a clean checkout. That is the project, not the worker: correct it with `orq config set checks.setup "<cmd>"` or tell the user, then `orq unit retry <unit>`. |
 | `judgment: <unit>: merge conflict: <files>` or `integrate failed: …` | Another unit changed the same files first. Say so in the work order and run `orq unit retry <unit>`; the new worker starts from the merged code. Then fix the `paths` overlap in the plan. |
 | `judgment: <unit>: depends on dropped unit <id>` | Drop it too, or remove that entry from its `deps` in `plan.json` when it can stand alone. Then call `orq wait`. |
 | `judgment: <unit>: gate could not start: …`, `gate could not complete[: …]` or `final gate could not complete[: …]` | The gate process died; any text after the colon is why, and the `.log` file beside the gate result has the rest. Correct what it names, then `orq unit retry <unit>` (`orq unit retry integration` for the final gate). |
-| `blocked: <unit> waiting on a request in thread <id>` | Read the request with `t3_pending_request`. Answer it only if `decisions` already settles it; otherwise ask the user and pass on the answer. |
+| `blocked: <unit> waiting on a request in thread <id>` | Read the request with `t3_pending_request`, settle it as "Questions" says, and answer it yourself. The user never answers in the worker's thread. |
 | `idle: … retry at <time>` | Models are cooling down. Tell the user why and the time, and call `orq wait` again at that time. |
 | any other `idle:` | Calling `orq wait` again changes nothing. Run `orq status`, then change the plan (`orq unit retry`, `orq unit drop`, or edit `plan.json`) or tell the user. |
 | `timeout: <counts>` | Normal for long work. Run `orq status`. Interrupt a thread only if it shows as stalled (`t3_thread_interrupt`). Units that are `gating` are running their checks, and a `waiting:` line means every slot is taken for now: leave both. Call `orq wait` again. |
@@ -95,14 +96,24 @@ In every mode: never force-push, never delete a branch, never bypass a required 
 - At the end of each request, retain to the memory slot: decisions, verified facts, approaches that failed, and which model did well or badly on which job. You are the only writer; workers never write memory.
 - Use the judge slot for small classification calls, such as a unit's job class or whether a report matches its gate result. It advises. It never decides a gate, a merge or a deletion.
 
-## Ask the user only for
+## Questions
+
+Workers do not ask the user. Their questions reach you as a `blocked:` or a `worker reported …` line. For each one that `decisions` does not settle, and for a product decision of your own that the request does not settle, run `orq ask [--unit <unit>]` with the question on stdin. Act on its first line:
+
+| First line | Action |
+|---|---|
+| `answer: …` | The strongest enabled model decided. Use it without asking the user to confirm: add it to `decisions` in `plan.json`, pass it to the worker, and go on. |
+| `self: …` | You are that model. Decide by the rules in `~/.t3orq/kit/playbook/templates/decision-order.md`, then do as for `answer`. |
+| `escalate: …` or `user: …` | Ask the user that one question here, in your thread. Then do as for `answer`. |
+| `pending: …` | Run the `orq ask --show` command it names until it prints one of the lines above. |
+
+Go to the user without `orq ask` only for:
 
 - destructive or irreversible actions;
 - anything that costs money beyond the user's existing plans;
-- anything outward-facing beyond the chosen autonomy mode;
-- product decisions the request does not settle.
+- anything outward-facing beyond the chosen autonomy mode.
 
-Otherwise decide, act, and report the decision and its reason in one line.
+Otherwise decide, act, and report the decision and its reason in one line. `orq summary` lists the decisions taken without the user.
 
 ## Without orq
 

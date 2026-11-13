@@ -53,7 +53,7 @@ test('init: prints facts, writes config, hints at sync', async () => {
   assert.match(lines[0], /^t3=v1\.2\.3 cap=5 kit=([0-9a-f]{12}|unknown)$/);
   assert.equal(lines[1], 'slots: judge=self memory=file code-index=search git-host=gh');
   assert.equal(lines[2], 'checks: setup=pnpm install --frozen-lockfile full=pnpm run test');
-  assert.equal(lines[3], 'autonomy=unset');
+  assert.equal(lines[3], 'autonomy=unset questions=auto');
   assert.equal(lines[4], 'registry: 0 instances, 0 models, synced never');
   assert.equal(lines[5], 'next: pipe orchestrator_capabilities JSON to "orq sync"');
   const cfg = await read(path.join(s.cwd, '.orq/config.json'));

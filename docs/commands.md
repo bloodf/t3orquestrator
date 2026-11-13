@@ -17,6 +17,7 @@ Run `orq` as `node ~/.t3orq/kit/bin/orq.mjs`. Project commands act on the curren
 | [`status`](#status) | The plan, slots and one line per unit |
 | [`unit`](#unit) | Retry or drop a unit after judgment |
 | [`review`](#review) | Start or read a review of the integrated result |
+| [`ask`](#ask) | Get a decision from the strongest enabled model instead of the user |
 | [`summary`](#summary) | Write the pull request body |
 | [`probe`](#probe) | Print the machine cap and why |
 | [`version`](#version) | Print the `orq` and kit versions |
@@ -30,7 +31,7 @@ Run `orq` as `node ~/.t3orq/kit/bin/orq.mjs`. Project commands act on the curren
 | 0 | Success |
 | 1 | Error; the message follows `orq:` on stderr |
 | 2 | Usage error: unknown command, unknown option or missing argument |
-| 3 | `init` was run inside a worker thread |
+| 3 | `init` or `ask` was run inside a worker thread |
 | 4 | Refused or nothing to do: invalid plan, no route, tier owned by the user, unit busy, review not possible, update refused |
 | 5 | Another `orq wait` is running for this project |
 
@@ -44,7 +45,7 @@ This command records the `t3` binary and its version. It resolves the capability
 t3=<version|missing> cap=<n> kit=<sha|unknown>
 slots: judge=<name> memory=<name> code-index=<name> git-host=<name>
 checks: setup=<cmd|none> full=<cmd|none>
-autonomy=<draft|review-fix|review-fix-merge|unset>
+autonomy=<draft|review-fix|review-fix-merge|unset> questions=<auto|user>
 registry: <n> instances, <n> models, synced <n>h ago|never
 next: pipe orchestrator_capabilities JSON to "orq sync"
 ```
@@ -55,7 +56,7 @@ The `next:` line appears when the registry has never been synced or is more than
 
 `orq sync < capabilities.json`
 
-This command reads JSON on stdin: either the `orchestrator_capabilities` result, or `{"capabilities": <that result>, "tools": [<tool names>]}`. It merges providers and models into the registry and harvests models proven by completed threads in this project. With `tools`, it also resolves the MCP-based slots. Tiers set by you or the orchestrator are never overwritten. Instances you disabled stay disabled.
+This command reads JSON on stdin: either the `orchestrator_capabilities` result, or `{"capabilities": <that result>, "tools": [<tool names>]}`. It merges providers and models into the registry and harvests models proven by completed threads in this project. With `tools`, it also resolves the MCP-based slots. Tiers set by you or the orchestrator are never overwritten. Instances you disabled stay disabled. When the payload names the orchestrator's own model (`inheritedProviderInstanceId` and `inheritedModel`), it is recorded in `.orq/config.json` as `orchestrator: {instance, model}`, so `orq ask` knows when no stronger model exists.
 
 ```
 +instances: <ids>
@@ -109,11 +110,11 @@ Lists the eligible models in the order `orq` would use them:
 
 `orq config get [--machine] | orq config set [--machine] <key> <value>`
 
-`get` prints the config as JSON. `set` prints `<key> = <value>`. The value `null` clears `autonomy`, `cap` or a check.
+`get` prints the config as JSON. `set` prints `<key> = <value>`. The value `null` clears `autonomy`, `cap` or a check. `questions` is `auto` (the default: `orq ask` lets the strongest enabled model decide) or `user` (every question goes to the user).
 
 | Scope | Keys |
 |---|---|
-| project (`.orq/config.json`) | `autonomy`, `base`, `checks.setup`, `checks.unit`, `checks.full`, `pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes` |
+| project (`.orq/config.json`) | `autonomy`, `base`, `checks.setup`, `checks.unit`, `checks.full`, `pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`, `questions` |
 | machine (`~/.t3orq/config.json`) | `cap`, `perInstanceLimit` |
 
 `checks.unit` runs in every unit's gate after the evidence. `checks.full` runs once on the integration head.
@@ -159,7 +160,7 @@ cooling: <instance> until <iso time>, …
 note: cap covers threads orq started; threads started by hand are not counted
 ```
 
-The `integration:`, `authors:` and `cooling:` lines appear only when they apply. `wanted_tier` appears when the unit was launched below its minimum tier because no model at that tier was usable.
+A line `ask: decision <n> running thread=<id> model=<key>` follows the `authors:` line for each decision thread still running. The `integration:`, `authors:`, `ask:` and `cooling:` lines appear only when they apply. `wanted_tier` appears when the unit was launched below its minimum tier because no model at that tier was usable.
 
 ## unit
 
@@ -177,11 +178,30 @@ The `integration:`, `authors:` and `cooling:` lines appear only when they apply.
 
 `show` reads the latest review, or review `n`. It prints `review <n>: running`, or `review <n>: completed` followed by the reviewer's last message. A failed review prints `review <n>: failed; run "orq review start" again` and exits 4.
 
+## ask
+
+`orq ask [--unit <id>] [--max-seconds N] < question | orq ask --show [<n>]`
+
+Gets a decision without the user. The question is read from stdin (required, at most 16 KiB; exit 2 otherwise). The orchestrator acts on the first line printed; up to 29 lines of reasons follow it, with control characters removed. The exit code is 0 for every outcome below.
+
+| First line | Meaning |
+|---|---|
+| `answer: <decision>` | The deciding model decided. Act on it. |
+| `escalate: <question>` | The deciding model says only the user can decide (data loss, money, publishing beyond the autonomy mode, a secret). Ask the user in your own thread. |
+| `escalate: no decision (<why>)` | No decision was made: `no model: <reason>`, `no free machine slot`, `start failed on <key>`, `the decision thread failed`, `the reply had no ANSWER or ESCALATE line`, `no usable t3; run "orq init"`, `no checkout to read: …`. Ask the user in your own thread. |
+| `user: questions are set to user` | `questions` is `user`. Ask the user. No thread is started. |
+| `self: you run on the strongest enabled tier; decide it yourself` | The orchestrator's recorded model has a tier at least as high as every enabled model. No thread is started. |
+| `pending: decision <n> still running; run "orq ask --show <n>"` | `--max-seconds` (default 300) passed while the decision thread runs. |
+
+The decision thread routes job `decide`: tier 4, strongest first. When no tier-4 model exists, or all are cooling down or at their limit, the strongest free model decides instead (its key and tier are recorded and shown in the summary); `no model` means nothing at all is routable. It holds a machine lease while it runs. When every slot is held it waits for one within `--max-seconds`, then prints `escalate: no decision (no free machine slot)`. Its first message is `playbook/templates/decision-order.md`, then `## Question`, `## Plan` (goal and decisions, when a plan exists) and, with `--unit`, `## Unit` (id, title, paths and the work order; an unknown id is exit 2). It runs on the integration head on branch `orq/<planId>/ask-<n>` once the plan has started, else on the configured base on branch `orq/ask-<n>`. Decisions are recorded in `.orq/asks.json`, which `orq plan archive` moves with the plan.
+
+`--show` looks at decision `n` (default: the latest) once and prints the same lines. Exit 4 when there is no such decision. Exit 3 inside a worker thread, as for `init`.
+
 ## summary
 
 `orq summary [--out <file>]`
 
-Writes the pull request body to `.orq/summary.md`, or to another `.md` file directly under `.orq/`. The body has these sections: goal, decisions, a unit table, evidence results, final checks, reviews, and units not done. It prints `summary: <file> (<n> lines)`. Exit 4 when the plan has not started.
+Writes the pull request body to `.orq/summary.md`, or to another `.md` file directly under `.orq/`. The body has these sections: goal, decisions, decisions taken without you (answered `orq ask` decisions: question → answer and the model; omitted when there are none), a unit table, evidence results, final checks, reviews, and units not done. It prints `summary: <file> (<n> lines)`. Exit 4 when the plan has not started.
 
 `orq summary --plan <planId>` prints the summary of an archived plan and writes nothing.
 

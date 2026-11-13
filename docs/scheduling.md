@@ -58,7 +58,7 @@ Until some unit has passed its gate, only one unit is in flight. A plan with a b
 
 Among enabled, available models at or above the minimum tier, candidates are ordered by:
 
-1. lowest tier first;
+1. lowest tier first (highest first for `decide`, the job `orq ask` routes: it wants the strongest model, and when every tier-4 model is cooling down or at its limit it takes the strongest free model rather than wait);
 2. then fewest running threads on that instance;
 3. then least recently used;
 4. then key order.

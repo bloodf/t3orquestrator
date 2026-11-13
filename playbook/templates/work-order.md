@@ -25,6 +25,7 @@
 - Do not start other agents or threads.
 - Use the code search tool named in Context before reading many files.
 - If you cannot finish, say so. Bad work is worse than no work.
+- Never ask the user anything. If you need a decision that changes behaviour, stop and report `NEEDS_CONTEXT` with the question on the second line.
 ## Report (30 lines at most)
 First line: one of `DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, `NEEDS_CONTEXT`.
 Then: the files you changed; the evidence command and the last lines of its output; your concerns.

@@ -155,3 +155,16 @@ test('summary command: a symlink under .orq cannot redirect the write', async (t
   assert.equal(r.code, 2);
   await assert.rejects(fs.stat(outside));
 });
+
+test('renderSummary: decisions taken without the user list answered asks only; the section is omitted when none', () => {
+  const asks = { asks: [
+    { n: 1, question: 'Which port?', status: 'answered', outcome: 'use 8080', key: 'pb::m4' },
+    { n: 2, question: 'Drop the table?', status: 'escalated', outcome: 'the user must decide', key: 'pb::m4' },
+    { n: 3, question: 'Rename x?', status: 'running', outcome: null, key: 'pb::m4' },
+  ] };
+  const text = renderSummary({ ...input(), asks });
+  assert.match(text, /## Decisions taken without you\n\n- Which port\? → use 8080 \(pb::m4\)\n\n## Units/);
+  assert.doesNotMatch(text, /Drop the table|Rename x/);
+  assert.doesNotMatch(renderSummary({ ...input(), asks: { asks: [asks.asks[1]] } }), /taken without you/);
+  assert.doesNotMatch(renderSummary(input()), /taken without you/);
+});

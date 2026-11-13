@@ -34,12 +34,12 @@ A plan can grow. Append units to `plan.json` after `done` and call `orq wait` ag
 | `~/.t3orq/leases/` | machine | One file per thread `orq` started; the cap counts these |
 | `~/.t3orq/config.json` | machine | `cap`, `perInstanceLimit` |
 | `~/.t3orq/tools.json` | machine | Your own tool catalog, tried before the kit's |
-| `.orq/config.json` | project | `autonomy`, `base`, `checks`, resolved slots, scheduler settings |
+| `.orq/config.json` | project | `autonomy`, `questions`, `base`, `checks`, resolved slots, scheduler settings, the orchestrator's own model |
 | `.orq/plan.json`, `.orq/orders/` | project | The plan and its work orders |
 | `.orq/ledger.jsonl` | project | Append-only event log; unit states are derived from it |
 | `.orq/units/<id>/gate-<n>.json` | project | Gate result per attempt, with `.log` beside it |
 | `.orq/integration/` | project | The integration worktree |
-| `.orq/reviews.json`, `.orq/summary.md` | project | Review threads and the pull request body |
+| `.orq/reviews.json`, `.orq/asks.json`, `.orq/summary.md` | project | Review threads, decisions taken by `orq ask`, and the pull request body |
 
 Set `T3ORQ_HOME` to an absolute path to move the machine state.
 
@@ -71,6 +71,10 @@ Candidates come from `~/.t3orq/tools.json` first, then from `playbook/tools.json
 | `review-fix-merge` | As `review-fix`, then it waits for the host's checks, marks the pull request ready and merges it. |
 
 It never force-pushes, never deletes a branch, and never bypasses a required check or branch protection, whatever the mode. If the repository has no remote, the branch stays local.
+
+## Questions
+
+Workers and the orchestrator hit questions the plan does not settle. By default (`questions=auto`) the user is not asked: `orq ask` starts a short read-only thread on the strongest enabled model, which answers in the user's place or escalates. It escalates only what stays with the user: data loss, money, publishing beyond the autonomy mode, or a secret or intent nothing records. When the orchestrator itself runs on the strongest enabled tier, `orq ask` tells it to decide. What cannot be decided is asked in the orchestrator's thread, never in a worker's. Answered decisions are listed in the pull request body. `orq config set questions user` sends every question to the user.
 
 ## The gate
 
