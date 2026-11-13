@@ -128,7 +128,7 @@ Prints `plan ok: <n> units, order: <ids>`, or one `error: <problem>` line per pr
 
 `orq plan archive`
 
-Each request gets its own plan, ledger and integration branch. This moves the current plan's state (`plan.json`, `ledger.jsonl`, `units/`, `orders/`, `reviews.json`, `summary.md`) into `.orq/archive/<planId>/`, removes the integration worktree when it is clean, and keeps the integration branch. Config, memory and capabilities stay. The next `plan.json` starts a new plan cut from the configured base.
+Each request gets its own plan, ledger and integration branch. This moves the current plan's state (`plan.json`, `ledger.jsonl`, `units/`, `orders/`, `reviews.json`, `summary.md`) into `.orq/archive/<planId>/`, removes the integration worktree when it is clean, and keeps the integration branch. It also removes the worker and review worktrees (every worktree on an `orq/*` branch, including leftovers of earlier plans) with a plain `git worktree remove`; one with uncommitted or untracked files, or a locked one, is kept and reported in a `note: kept worktree` line. No branch is ever deleted. Config, memory and capabilities stay. The next `plan.json` starts a new plan cut from the configured base.
 
 It refuses, with exit 4, while anything is in flight: a unit that is running, blocked, gating or passed but not merged, a running gate or review, a running `orq wait`, or an integration worktree with uncommitted changes. Units that were never integrated do not block it; it lists them in a note.
 

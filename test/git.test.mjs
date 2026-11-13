@@ -235,3 +235,14 @@ test('a rename is reported with the new path and the old path as deleted (names 
   const f = git.changedFiles(repo, base, git.headSha(repo)).map((x) => `${x.status} ${x.path}`).sort();
   assert.deepEqual(f, ['D old name.txt', 'R new name.txt']);
 });
+
+test('listWorktrees parses porcelain output, including a detached worktree', async (t) => {
+  const { root, repo } = await makeRepo(t);
+  sh(repo, 'worktree', 'add', '-q', '-b', 'orq/p/u-a1', path.join(root, 'b'));
+  sh(repo, 'worktree', 'add', '-q', '--detach', path.join(root, 'd'));
+  assert.deepEqual(git.listWorktrees(repo), [
+    { path: repo, branch: 'refs/heads/main' },
+    { path: path.join(root, 'b'), branch: 'refs/heads/orq/p/u-a1' },
+    { path: path.join(root, 'd'), branch: null },
+  ]);
+});

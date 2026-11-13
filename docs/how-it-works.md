@@ -45,7 +45,7 @@ Set `T3ORQ_HOME` to an absolute path to move the machine state.
 
 `orq` adds `.orq/` to the repository's local exclude file (`info/exclude` in the git directory), not to `.gitignore`. Nothing in your tracked files changes. Workers run in their own worktrees and never see `.orq/`.
 
-Each request gets its own plan. When a request is finished, `orq plan archive` moves that plan's state into `.orq/archive/<planId>/` and keeps its integration branch, so the next request starts a fresh plan from the base branch.
+Each request gets its own plan. When a request is finished, `orq plan archive` moves that plan's state into `.orq/archive/<planId>/` and keeps its integration branch, so the next request starts a fresh plan from the base branch. It also removes the worker and review worktrees; one with uncommitted or untracked files is kept and reported, and no branch is deleted.
 
 ## Capability slots
 

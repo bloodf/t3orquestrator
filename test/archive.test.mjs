@@ -229,3 +229,52 @@ test('an archive that fails after the marker says the way out; deleting the mark
   assert.equal(s.code, 0, s.err);
   assert.match(s.out, /^plan: test goal \(p1\)\n/);
 });
+
+// Worker worktrees: T3 Code creates them outside the repo on orq/<plan>/<unit>-a<n> branches.
+const addWorker = (p, name, branch) => {
+  const dir = path.join(p.root, name);
+  sh(p.repo, 'worktree', 'add', '-q', '-b', branch, dir, p.baseSha);
+  return dir;
+};
+const branches = (p) => sh(p.repo, 'branch', '--format=%(refname:short)').split('\n');
+
+test('archive removes a clean worker worktree and keeps its branch', async (t) => {
+  const { p } = await finished(t);
+  const dir = addWorker(p, 'w1', 'orq/p1/a-a1-w');
+  const before = branches(p);
+  const r = await orq(['plan', 'archive'], p);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /\nremoved 1 worker worktrees\n/);
+  assert.equal(await exists(dir), false);
+  assert.deepEqual(branches(p), before);
+});
+
+test('archive keeps a worker worktree with an untracked file and says so, exit 0', async (t) => {
+  const { p } = await finished(t);
+  const dir = addWorker(p, 'w1', 'orq/p1/a-a1-w');
+  await fs.writeFile(path.join(dir, 'stray.txt'), 'x\n');
+  const r = await orq(['plan', 'archive'], p);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, new RegExp(`\\nnote: kept worktree ${dir}: .*(untracked|modified)`));
+  assert.doesNotMatch(r.out, /removed \d+ worker/);
+  assert.equal(await exists(dir), true);
+  assert.ok(branches(p).includes('orq/p1/a-a1-w'));
+});
+
+test('archive leaves worktrees on non-orq branches alone', async (t) => {
+  const { p } = await finished(t);
+  const dir = addWorker(p, 'w1', 'feature/x');
+  const r = await orq(['plan', 'archive'], p);
+  assert.equal(r.code, 0, r.err);
+  assert.doesNotMatch(r.out, /worker worktrees|kept worktree/);
+  assert.equal(await exists(dir), true);
+});
+
+test('archive also removes clean leftovers from an earlier plan', async (t) => {
+  const { p } = await finished(t);
+  const dir = addWorker(p, 'old', 'orq/p0/review-1');
+  const r = await orq(['plan', 'archive'], p);
+  assert.match(r.out, /\nremoved 1 worker worktrees\n/);
+  assert.equal(await exists(dir), false);
+  assert.ok(branches(p).includes('orq/p0/review-1'));
+});
