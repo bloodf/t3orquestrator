@@ -50,7 +50,7 @@ test('init: prints facts, writes config, hints at sync', async () => {
   const r = await orq(['init'], s);
   assert.equal(r.code, 0, r.err);
   const lines = r.out.trim().split('\n');
-  assert.equal(lines[0], 't3=v1.2.3 cap=5');
+  assert.match(lines[0], /^t3=v1\.2\.3 cap=5 kit=([0-9a-f]{12}|unknown)$/);
   assert.equal(lines[1], 'slots: judge=self memory=file code-index=search git-host=gh');
   assert.equal(lines[2], 'checks: setup=pnpm install --frozen-lockfile full=pnpm run test');
   assert.equal(lines[3], 'autonomy=unset');
@@ -159,7 +159,7 @@ test('init: no usable t3 records null and is not an error', async () => {
   const s = await setup();
   const r = await orq(['init'], s, { deps: { exec: () => ({ code: 1, stdout: '', stderr: 'nope' }) } });
   assert.equal(r.code, 0);
-  assert.match(r.out, /^t3=missing cap=5/);
+  assert.match(r.out, /^t3=missing cap=5 kit=/);
   assert.equal((await read(path.join(s.cwd, '.orq/config.json'))).t3, null);
   const thrown = await orq(['init'], s, { deps: { exec: () => { throw new Error('failed to run t3'); } } });
   assert.match(thrown.out, /^t3=missing/);

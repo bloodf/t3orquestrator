@@ -87,7 +87,7 @@ test('instance list/disable/enable and the sync line', async () => {
   assert.match((await orq(['instance', 'list'], s)).out, /^a on models=2$/m);
   assert.doesNotMatch((await orq(['sync'], s, payload)).out, /user-disabled/);
   const bad = await orq(['instance', 'disable', 'zz'], s);
-  assert.equal(bad.code, 1);
+  assert.equal(bad.code, 4);
   assert.match(bad.err, /unknown instance zz/);
   assert.equal((await orq(['instance', 'frob'], s)).code, 2);
   assert.equal((await orq(['instance', 'disable'], s)).code, 2);

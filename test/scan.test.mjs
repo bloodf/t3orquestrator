@@ -82,5 +82,12 @@ test('evidence-target-changed: a changed file named in the evidence command', ()
   const flags = scan([], files, { evidence: 'node --test test/a.mjs' });
   assert.deepEqual(flags, [{ kind: 'evidence-target-changed', path: 'test/a.mjs', detail: 'evidence command names a changed file' }]);
   assert.deepEqual(scan([], files, { evidence: null }), []);
+  for (const status of ['D', 'T', 'X']) assert.equal(scan([], [{ status, path: 'test/a.mjs' }], { evidence: 'node --test test/a.mjs' }).filter((f) => f.kind === 'evidence-target-changed').length, 1);
+  assert.deepEqual(scan([], [{ status: 'R', path: 'test/a.mjs' }], { evidence: 'node --test test/a.mjs' }).map((f) => f.kind), ['evidence-target-changed']);
   assert.deepEqual(scan([], files), []);
+});
+
+test('evidence-target-changed: not raised for a file the unit itself added', () => {
+  const files = [{ status: 'A', path: 'test/a.mjs' }];
+  assert.deepEqual(scan([], files, { evidence: 'node --test test/a.mjs' }), []);
 });
