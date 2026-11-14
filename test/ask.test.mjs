@@ -331,3 +331,12 @@ test('ask: a decision thread that fails, or does not start, is retried on the ne
   assert.equal(solo.out, 'escalate: no decision (the decision thread failed; tried pb::m4)\n');
   assert.equal(starts(solo).length, 1);
 });
+
+test('M3: an answered decision is a success for the decide job; an escalation or a bad reply is not', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  await orq(['ask'], p);
+  await orq(['ask'], p, { reply: 'ESCALATE: which account?' });
+  await orq(['ask'], p, { reply: 'no idea' });
+  const reg = await readJson(path.join(p.home, 'registry.json'));
+  assert.deepEqual(reg.models['pb::m4'].outcomes.decide, { attempts: 3, firstPass: 1 });
+});

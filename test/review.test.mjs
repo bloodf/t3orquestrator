@@ -6,7 +6,9 @@ import path from 'node:path';
 import { run } from '../lib/cli.mjs';
 import { commit } from '../lib/ledger.mjs';
 import { listLeases, writeLease } from '../lib/leases.mjs';
-import { makeProject, unitSpec, REGISTRY } from './support/project.mjs';
+import {
+  makeProject, unitSpec, REGISTRY, sh,
+} from './support/project.mjs';
 
 const NOW = Date.parse('2026-11-12T12:00:00Z');
 
@@ -35,13 +37,19 @@ async function orq(args, p, world = {}) {
   const out = []; const err = [];
   const code = await run(args, {
     stdout: { write: (x) => out.push(x) }, stderr: { write: (x) => err.push(x) }, env: p.env, cwd: p.repo, now: () => NOW,
-    deps: { exec: t3.exec, readMachine: () => ({ cores: 8, availableMemBytes: 2 ** 34, load1: 0 }) },
+    deps: { exec: t3.exec, pause: async () => {}, readMachine: () => ({ cores: 8, availableMemBytes: 2 ** 34, load1: 0 }) },
   });
   return { code, out: out.join(''), err: err.join(''), calls: t3.calls };
 }
 
 async function integratedProject(t, opts = {}) {
   const p = await makeProject(t, [unitSpec('a')], opts);
+  if (opts.lockfile) { // a pnpm project: its node_modules may be shared (the head must hold the lockfile)
+    await fs.writeFile(path.join(p.repo, 'pnpm-lock.yaml'), 'lockfileVersion: 1\n');
+    sh(p.repo, 'add', 'pnpm-lock.yaml');
+    sh(p.repo, 'commit', '-q', '-m', 'lock');
+    p.baseSha = sh(p.repo, 'rev-parse', 'HEAD');
+  }
   const ev = [
     { type: 'plan-started', unit: null, planId: 'p1', baseSha: p.baseSha, integrationBranch: 'orq/p1/integration' },
     {
@@ -172,7 +180,7 @@ test('show: running, completed (recorded once), failed', async (t) => {
   assert.deepEqual(await listLeases(path.join(p.home, 'leases')), []);
   await orq(['review', 'show'], p, { status: 'completed' });
   const m = (await registry(p)).models['pa::m2'];
-  assert.equal(m.outcomes.review.attempts, 1);
+  assert.deepEqual(m.outcomes.review, { attempts: 1, firstPass: 1 }); // a completed review is a success for its job
   assert.equal(m.confirmedAt, NOW);
   // one model only: nothing to replace a failed review with
   const p2 = await integratedProject(t, { registry: { ...REGISTRY, models: { 'pa::m2': REGISTRY.models['pa::m2'] } } });
@@ -256,4 +264,21 @@ test('show: a failed review is replaced on another model (same order, same head)
   assert.deepEqual([last.code, last.out], [4, 'review 3: failed; run "orq review start" again\n']);
   assert.equal(last.calls.filter((c) => c.args[1] === 'start').length, 0);
   assert.deepEqual(await listLeases(path.join(p.home, 'leases')), []);
+});
+
+test('S: a review thread is told about linked dependencies and its worktree is linked (here T3 never shows it: a note)', async (t) => {
+  const p = await integratedProject(t, { lockfile: true });
+  const { createGit, defaultExec } = await import('../lib/git.mjs');
+  const { excludeShares } = await import('../lib/share.mjs');
+  await fs.mkdir(path.join(p.repo, 'node_modules', 'x'), { recursive: true });
+  await fs.writeFile(path.join(p.repo, '.git', 'info', 'exclude'), '.orq/\n');
+  excludeShares(p.repo, ['node_modules'], createGit({ exec: defaultExec }));
+  const cfgFile = path.join(p.repo, '.orq', 'config.json');
+  await fs.writeFile(cfgFile, JSON.stringify({ ...await readJson(cfgFile), share: ['node_modules'] }));
+  const r = await orq(['review', 'start'], p);
+  assert.equal(r.code, 0, r.err);
+  const start = r.calls.find((c) => c.args[1] === 'start');
+  assert.ok(start.input.startsWith('Dependencies: node_modules are linked from the main checkout.'), start.input);
+  assert.ok(start.input.endsWith('Review the integrated diff.\n'));
+  assert.deepEqual(r.out.split('\n').slice(1), ['note: review 1: dependencies not linked: node_modules (worktree not found)', '']);
 });

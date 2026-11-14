@@ -13,11 +13,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Plan field `setup: false` on a unit skips `checks.setup` in that unit's gate.
 - `orq plan check` warns when a unit's evidence runs a file outside the repository or under `.orq/`.
 - A `note:` in `orq status` and `orq wait` when the `cap` override is above what the machine computes.
+- Worker, review and decision worktrees link `node_modules` from the main checkout in pnpm and bun projects (config key `share`, unit field `share: false`). npm and yarn projects are never linked: `npm ci` was tested to empty a linked directory.
+- A `providers:` line in `orq init`, `orq sync` and `orq status`: usable, disabled in T3, disabled by you, cooling.
+- Routing prefers, within a tier, models with a better first-pass record for the job class, and tries a model that keeps failing a class last.
+- A `playbook:` line in `orq wait` and `orq status` when the kit changed since the orchestrator read the playbook, so running orchestrators update themselves.
+- `orq plan check` and `orq wait` refuse a `plan.json` that dropped units the ledger knows; `orq plan archive` handles that case.
 - `orq stats [--all] [--json]`: per-model launches, provider failures, gate results, first passes and stops from the ledger, plus tier, instance and time totals.
 
 ### Changed
 
 - A thread status from T3 that this version does not know is treated as running, with a note, instead of failing every poll.
+- Playbook: before planning, the orchestrator asks once, at most five questions that change what gets built, each with the answer it will assume.
 - Playbook: the orchestrator writes no record files of its own, a replacement orchestrator resumes with `orq wait`, and evidence must run what is in the repository.
 - Work orders state that the worker implements directly and that standing coordinator rules (delegate, wait for approval, hold) do not apply to it; a missing code search tool is never a reason to stop; the status word is one of the four, in English.
 - Playbook: pick the lowest job class that can do the work, with reading and surveying in the cheapest class; the orchestrator leaves `cap`, `perInstanceLimit` and `pollSeconds` alone.

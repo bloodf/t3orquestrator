@@ -31,6 +31,8 @@ After `orq sync`:
 - When the user asks to update the kit, run `orq update`; it moves to the latest tagged release and prints what changed.
 - When the user wants no automated threads on a provider, run `orq instance disable <id>` (`orq instance list` shows every instance). `orq sync` never undoes it.
 
+Show the user the `providers:` line once, as it is: it says which providers `orq` will use, which are switched off in T3 and which are cooling. Do not ask them to choose; they enable more in T3 if they want more.
+
 The `slots:` line names the tool for each role: `judge`, `memory`, `code-index` (code search), `git-host`. `orq config get` lists each slot's fallbacks in order with how to use each. If a tool errors, use the next one down, ending at the built-in path. A missing or failing tool is never a reason to stop.
 
 ## Intake
@@ -38,13 +40,19 @@ The `slots:` line names the tool for each role: `judge`, `memory`, `code-index` 
 1. If the user says to continue, or `orq status` shows work in flight for this same request, you are replacing an orchestrator that stopped: do not plan again, go to Run and call `orq wait`.
 2. Each request gets its own plan. Run `orq status`: if it shows a plan from an earlier request, run `orq plan archive` first. It refuses while work is in flight; finish or drop that work before starting the new request. If any command says an archive was interrupted, run `orq plan archive` again; if that keeps failing, show the user its message and stop.
 3. Recall from the memory slot once, with the request as the query.
-4. Size the work. Default to ONE unit. Fan out only for three or more independent, substantial units. One or two files, or tightly coupled work, is one unit: every extra unit costs a thread, a gate and a merge.
+4. Ask before you plan, once. Read the code the request touches first. Then send ONE message with at most five numbered questions, and only questions whose answer changes what gets built, how it is accepted, or what it may touch:
+   - the outcome, and how the user will judge it done;
+   - what is out of scope;
+   - constraints the code does not show: compatibility, existing data, dependencies they do or do not want;
+   - anything destructive, paid or public the work would need.
+   Each question states the answer you will assume and why, so the user can reply "go" to accept them all. Never ask what the request, the code or memory already answers; never ask about style, tools or models; ask nothing when nothing qualifies or the user said not to ask. Record the answers in `decisions`. This is the only time you ask: after it, open points go to `orq ask`.
+5. Size the work. Default to ONE unit. Fan out only for three or more independent, substantial units. One or two files, or tightly coupled work, is one unit: every extra unit costs a thread, a gate and a merge.
 
 ## Plan
 
 Write `.orq/plan.json` (shape: `~/.t3orq/kit/playbook/templates/plan.example.json`) and one work order per unit from `~/.t3orq/kit/playbook/templates/work-order.md`, saved under `.orq/orders/`.
 
-- First list what the request leaves open that would change behaviour (formats, limits, error cases, naming the user will see). Settle all of it with one `orq ask` (see "Questions") before you write `decisions`. Do not guess, and do not ask the user.
+- List what is still open after the intake answers and would change behaviour (formats, limits, error cases, naming the user will see). Settle all of it with one `orq ask` (see "Questions") before you write `decisions`. Do not guess, and do not go back to the user.
 - Settle every question two units would both face in `decisions`, and copy the ones that apply into each work order, before fan-out. Two workers deciding the same question differently is what breaks merges.
 - When other units build on shared code, make that a foundational unit and list it in their `deps`.
 - Cut vertical slices (one feature end to end), not layers.
@@ -117,7 +125,7 @@ Workers do not ask the user. Their questions reach you as a `blocked:` or a `wor
 | `escalate: …` or `user: …` | Ask the user that one question here, in your thread. Then do as for `answer`. |
 | `pending: …` | Run the `orq ask --show` command it names until it prints one of the lines above. |
 
-Go to the user without `orq ask` only for:
+Outside the intake questions, go to the user without `orq ask` only for:
 
 - destructive or irreversible actions;
 - anything that costs money beyond the user's existing plans;

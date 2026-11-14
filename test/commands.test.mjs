@@ -61,6 +61,7 @@ test('sync: fixture, then a provider removed, then a truncated payload', async (
   assert.match(r.out, /^\+instances: provider-e, provider-f, provider-g$/m);
   assert.match(r.out, /^\+models: \d+$/m);
   assert.match(r.out, /^synced: 3 instances \(2 enabled\), \d+ models \(1 confirmed\)$/m);
+  assert.match(r.out, /^providers: 2 usable \(provider-e, provider-f\); 1 disabled in T3 \(provider-g\); 0 disabled by you; 0 cooling$/m);
   const reg = await read(regFile(s));
   assert.equal(reg.syncedAt, NOW);
   assert.ok(reg.models['provider-e::model-small'].confirmedAt > 0);
@@ -319,4 +320,27 @@ test('plan check prints a warning per unit whose evidence runs a file outside th
   const r = await orq(['plan', 'check'], s);
   assert.equal(r.code, 0, r.err);
   assert.equal(r.out, 'warning: a: evidence runs a file outside the repository (.orq/verify.mjs); a check belongs in the repository, written by a unit\nplan ok: 1 units, order: a\n');
+});
+
+test('route explains the outcome record: score and attempts, and demoted', async () => {
+  const s = await setup();
+  const m = (instance, model, outcomes) => ({
+    instance, model, family: 'f', tier: 2, tierSource: 'user', available: true, confirmedAt: null, failures: 0, cooldownUntil: null, lastUsedAt: null, outcomes,
+  });
+  const inst = { enabled: true, constraints: [], limit: null, failures: 0, cooldownUntil: null };
+  await fs.writeFile(regFile(s), JSON.stringify({
+    version: 1, syncedAt: NOW, instances: { a: inst, b: inst },
+    models: { 'a::x': m('a', 'x', { implement: { attempts: 6, firstPass: 5 } }), 'b::y': m('b', 'y', { implement: { attempts: 6, firstPass: 1 } }) },
+  }));
+  const r = await orq(['route', '--job', 'implement'], s);
+  assert.equal(r.out, '1 a x tier=2 family=f unconfirmed score=0.83 n=6\n2 b y tier=2 family=f unconfirmed score=0.17 n=6 demoted\n');
+});
+
+test('U1: sync re-records the playbook its session read', async () => {
+  const s = await setup();
+  await orq(['init'], s);
+  const cfgFile = path.join(s.cwd, '.orq/config.json');
+  await fs.writeFile(cfgFile, JSON.stringify({ ...(await read(cfgFile)), playbook: { hash: 'stale' } }));
+  assert.equal((await orq(['sync'], s, { stdin: capsFixture })).code, 0);
+  assert.notEqual((await read(cfgFile)).playbook.hash, 'stale');
 });

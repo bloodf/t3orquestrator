@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { run } from '../lib/cli.mjs';
 import { defaultExec as gitExecReal } from '../lib/git.mjs';
@@ -484,7 +485,7 @@ test('wait: a worker whose provider failed after committing is continued on anot
   const [first, ...notes] = r.out.trim().split('\n');
   assert.match(first, /^done: 1 units integrated at /);
   const [a1, a2] = sim.byUnit.a;
-  assert.deepEqual(notes, [`note: unit a continues on ${a2.instance}::${a2.model} from 1 commits left by ${a1.instance}::${a1.model}`]);
+  assert.deepEqual(notes, [`note: unit a continues on ${a2.instance}::${a2.model} from 1 commit left by ${a1.instance}::${a1.model}`]);
   assert.notEqual(`${a1.instance}::${a1.model}`, `${a2.instance}::${a2.model}`);
   assert.equal(a2.base, sh(p.repo, 'rev-parse', a1.branch)); // started at the failed branch head
   assert.match(a2.message, /^## Hand-over\n/);
@@ -577,4 +578,82 @@ test('wait: with cap 1 a given-up thread still holds the slot; the continuation 
   const second = await orq(['wait'], p, sim);
   assert.match(second.out, /^done: 1 units integrated at /);
   assert.equal(sim.byUnit.a.length, 2);
+});
+
+test('G1: a plan.json replaced before archiving is refused; archive keeps it and archives the ledger; the next wait runs it fresh', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['commit-complete']], b: [['commit-complete']] });
+  assert.match((await orq(['wait'], p, sim)).out, /^done: /);
+  const old = (await readState(p.repo)).plan;
+  const planFile = path.join(p.repo, '.orq', 'plan.json');
+  await fs.writeFile(path.join(p.repo, '.orq', 'orders', 'b.md'), 'Work order for b.\n');
+  const next = JSON.stringify({ goal: 'next request', units: [unitSpec('b')] });
+  await fs.writeFile(planFile, next);
+  const msg = 'plan.json no longer lists units the ledger knows (a); this looks like a new request: restore plan.json or run "orq plan archive" first';
+  const check = await orq(['plan', 'check'], p, sim);
+  assert.deepEqual([check.code, check.out], [4, `error: ${msg}\n`]);
+  const w = await orq(['wait'], p, sim);
+  assert.deepEqual([w.code, w.err], [4, `orq: ${msg}\n`]);
+  // appending units is still a growing plan, not a new request
+  await fs.writeFile(planFile, JSON.stringify({ goal: 'test goal', units: [unitSpec('a'), unitSpec('b')] }));
+  assert.equal((await orq(['plan', 'check'], p, sim)).code, 0);
+  await fs.writeFile(planFile, next);
+  sim.now += 60_000;
+  const archived = await orq(['plan', 'archive'], p, sim);
+  assert.equal(archived.code, 0, archived.err);
+  assert.ok(archived.out.split('\n').includes('note: plan.json did not match the ledger; archived the ledger and kept plan.json for the next request'), archived.out);
+  assert.equal(await fs.readFile(planFile, 'utf8'), next);
+  const dir = path.join(p.repo, '.orq', 'archive', old.planId);
+  assert.equal(fsSync.existsSync(path.join(dir, 'ledger.jsonl')), true);
+  assert.equal(fsSync.existsSync(path.join(dir, 'plan.json')), false); // the new request's plan was not archived as the old one
+  await fs.stat(path.join(p.repo, '.orq', 'orders', 'b.md')); // its work orders stay too
+  const fresh = await orq(['wait'], p, sim);
+  assert.match(fresh.out, /^done: 1 units integrated at /);
+  const now = (await readState(p.repo)).plan;
+  assert.notEqual(now.planId, old.planId);
+  assert.equal(unitOf(await readState(p.repo), 'b').state, 'integrated');
+});
+
+// A kit of its own (not a git checkout) whose playbook the test can change.
+async function kitWith(t, text) {
+  const kit = await fs.mkdtemp(path.join(os.tmpdir(), 'orq-kit-'));
+  t.after(() => fs.rm(kit, { recursive: true, force: true }));
+  await fs.mkdir(path.join(kit, 'playbook'));
+  await fs.writeFile(path.join(kit, 'playbook', 'ORCHESTRATOR.md'), text);
+  return { kit, file: path.join(kit, 'playbook', 'ORCHESTRATOR.md') };
+}
+const recordPlaybook = async (p, file) => {
+  const { playbookHash } = await import('../lib/playbook-mark.mjs');
+  const cfgFile = path.join(p.repo, '.orq', 'config.json');
+  await fs.writeFile(cfgFile, JSON.stringify({ ...JSON.parse(await fs.readFile(cfgFile, 'utf8')), playbook: { hash: playbookHash(file) } }));
+};
+
+test('U1: wait names a changed playbook as the second line, before settle and notes; not when unchanged', async (t) => {
+  const { kit, file } = await kitWith(t, 'v1\n');
+  const p = await makeProject(t, [unitSpec('a')], { cap: 18 });
+  await recordPlaybook(p, file);
+  const sim = simulator(p, { a: [['commit-fail'], ['complete']] });
+  sim.settled = false;
+  await fs.writeFile(file, 'v2\n');
+  const r = await orq(['wait'], p, sim, { kitDir: kit });
+  const lines = r.out.trim().split('\n');
+  assert.match(lines[0], /^done: /);
+  assert.equal(lines[1], `playbook: the kit was updated (unknown -> unknown); read ${file} again now, then run "orq init"`);
+  assert.match(lines[2], /^settle: /);
+  assert.match(lines[3], /^note: cap 18 is an override/);
+  assert.equal((await orq(['status'], p, sim, { kitDir: kit })).out.split('\n')[1], lines[1]); // status, with a plan
+  await recordPlaybook(p, file);
+  assert.doesNotMatch((await orq(['wait'], p, sim, { kitDir: kit })).out, /playbook:/);
+});
+
+test('U1: a config written by an older kit (no playbook record) still runs; the line says unknown', async (t) => {
+  const { kit, file } = await kitWith(t, 'v1\n');
+  const p = await makeProject(t, [unitSpec('a')]);
+  const cfgFile = path.join(p.repo, '.orq', 'config.json');
+  const { playbook: _drop, ...old } = JSON.parse(await fs.readFile(cfgFile, 'utf8'));
+  await fs.writeFile(cfgFile, JSON.stringify(old));
+  const r = await orq(['wait'], p, simulator(p, { a: [['commit-complete']] }), { kitDir: kit });
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(r.out.trim().split('\n').slice(0, 2).map((l) => l.replace(/[0-9a-f]{12}/g, 'X')),
+    ['done: 1 units integrated at X; final checks no-evidence', `playbook: the kit was updated (unknown -> unknown); read ${file} again now, then run "orq init"`]);
 });

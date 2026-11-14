@@ -54,8 +54,10 @@ test('init: prints facts, writes config, hints at sync', async () => {
   assert.equal(lines[1], 'slots: judge=self memory=file code-index=search git-host=gh');
   assert.equal(lines[2], 'checks: setup=pnpm install --frozen-lockfile full=pnpm run test');
   assert.equal(lines[3], 'autonomy=unset questions=auto');
-  assert.equal(lines[4], 'registry: 0 instances, 0 models, synced never');
-  assert.equal(lines[5], 'next: pipe orchestrator_capabilities JSON to "orq sync"');
+  assert.equal(lines[4], 'share: none');
+  assert.equal(lines[5], 'registry: 0 instances, 0 models, synced never');
+  assert.equal(lines[6], 'providers: 0 usable; 0 disabled in T3; 0 disabled by you; 0 cooling');
+  assert.equal(lines[7], 'next: pipe orchestrator_capabilities JSON to "orq sync"');
   const cfg = await read(path.join(s.cwd, '.orq/config.json'));
   assert.deepEqual(cfg.t3, { bin: 't3', version: 'v1.2.3' });
   assert.equal(cfg.checks.full, 'pnpm run test');
@@ -197,4 +199,34 @@ test('init: fresh registry has no hint', async () => {
   const r = await orq(['init'], s);
   assert.match(r.out, /synced 1h ago/);
   assert.doesNotMatch(r.out, /next:/);
+});
+
+test('U1: init records the playbook it points at; status names a kit update until init runs again; nothing else is reset', async () => {
+  const s = await setup();
+  const kit = path.join(s.root, 'kit');
+  const { spawnSync } = await import('node:child_process');
+  const git = (...a) => spawnSync('git', ['-c', 'commit.gpgsign=false', ...a], { cwd: kit, encoding: 'utf8' }).stdout.trim();
+  await fs.mkdir(path.join(kit, 'playbook'), { recursive: true });
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.name', 'T'); git('config', 'user.email', 't@example.invalid');
+  const file = path.join(kit, 'playbook', 'ORCHESTRATOR.md');
+  await fs.writeFile(file, 'v1\n');
+  git('add', '-A'); git('commit', '-q', '-m', 'one');
+  const one = git('rev-parse', 'HEAD').slice(0, 12);
+  const deps = { kitDir: kit };
+  assert.equal((await orq(['init'], s, { deps })).code, 0);
+  const cfg = await read(path.join(s.cwd, '.orq/config.json'));
+  assert.equal(cfg.playbook.kit, one);
+  assert.match(cfg.playbook.hash, /^[0-9a-f]{16}$/);
+  assert.doesNotMatch((await orq(['status'], s, { deps })).out, /playbook:/);
+  assert.equal((await orq(['config', 'set', 'autonomy', 'draft'], s, { deps })).code, 0);
+  await fs.writeFile(file, 'v2\n');
+  git('commit', '-q', '-am', 'two');
+  const two = git('rev-parse', 'HEAD').slice(0, 12);
+  const line = `playbook: the kit was updated (${one} -> ${two}); read ${file} again now, then run "orq init"`;
+  assert.equal((await orq(['status'], s, { deps })).out.split('\n')[1], line);
+  assert.equal((await orq(['init'], s, { deps })).code, 0);
+  assert.doesNotMatch((await orq(['status'], s, { deps })).out, /playbook:/);
+  const after = await read(path.join(s.cwd, '.orq/config.json'));
+  assert.deepEqual([after.autonomy, after.playbook.kit], ['draft', two]);
 });

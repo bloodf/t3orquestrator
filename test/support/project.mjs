@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { playbookHash } from '../../lib/playbook-mark.mjs';
 
 export function sh(cwd, ...args) {
   const r = spawnSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' });
@@ -48,6 +50,7 @@ export async function makeProject(t, units, { cap = 2, checks = {}, registry = R
   await fs.writeFile(path.join(repo, '.orq', 'plan.json'), JSON.stringify({ goal: 'test goal', units }));
   await fs.writeFile(path.join(repo, '.orq', 'config.json'), JSON.stringify({
     t3: { bin: 't3', version: 'v1' }, checks: { setup: null, unit: null, full: null, ...checks },
+    playbook: { hash: playbookHash(fileURLToPath(new URL('../../playbook/ORCHESTRATOR.md', import.meta.url))) }, // read: no update line
   }));
   await fs.writeFile(path.join(home, 'registry.json'), JSON.stringify(registry));
   await fs.writeFile(path.join(home, 'config.json'), JSON.stringify({ cap }));

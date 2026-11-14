@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -288,7 +289,7 @@ function sh(cwd, ...args) {
   return r.stdout.trim();
 }
 
-async function realWork(t, committed, untracked = {}) {
+async function realWork(t, committed, untracked = {}, baseFiles = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orq-gate-')));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const repo = path.join(root, 'repo');
@@ -297,6 +298,7 @@ async function realWork(t, committed, untracked = {}) {
   sh(repo, 'config', 'user.name', 'Test User');
   sh(repo, 'config', 'user.email', 'test@example.invalid');
   await fs.writeFile(path.join(repo, 'README.md'), 'hi\n');
+  for (const [name, body] of Object.entries(baseFiles)) await fs.writeFile(path.join(repo, name), body);
   sh(repo, 'add', '-A');
   sh(repo, 'commit', '-m', 'init');
   const baseSha = sh(repo, 'rev-parse', 'HEAD');
@@ -436,4 +438,22 @@ test('a unit without a forbidden list is gated as if the list were empty', async
   const { forbidden, ...bare } = unit();
   const r = await gate({ unit: bare });
   assert.equal(r.verdict, 'pass');
+});
+
+test('S: the gate checkout links shared dependencies before its steps; removing it leaves them alone', async (t) => {
+  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'pnpm-lock.yaml': 'lockfileVersion: 1\n' });
+  const { excludeShares } = await import('../lib/share.mjs');
+  await fs.mkdir(path.join(w.repo, 'node_modules', 'x'), { recursive: true });
+  await fs.writeFile(path.join(w.repo, 'node_modules', 'x', 'y.js'), '1\n');
+  excludeShares(w.repo, ['node_modules'], w.git);
+  const evidence = 'test -f node_modules/x/y.js && test -z "$(git status --porcelain)"';
+  const without = await real(w, evidence);
+  assert.equal(without.verdict, 'fail');
+  const r = await real(w, `test -L node_modules && ${evidence}`, { share: { paths: ['node_modules'], unit: null } });
+  assert.equal(r.verdict, 'pass', JSON.stringify(r.failures));
+  // with a setup step the checkout is left unlinked: an installer (npm ci) can empty a directory through a link
+  const withSetup = await real(w, 'test ! -e node_modules', { checks: { setup: 'true', unit: null }, share: { paths: ['node_modules'], unit: null } });
+  assert.equal(withSetup.verdict, 'pass', JSON.stringify(withSetup.failures));
+  await fs.stat(path.join(w.repo, 'node_modules', 'x', 'y.js'));
+  assert.equal(fsSync.existsSync(w.workDir), false);
 });

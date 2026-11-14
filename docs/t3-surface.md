@@ -106,3 +106,7 @@ Confirmed from the CLI's `--help` output. These are the exact invocations `lib/t
 - `thread send [flags] <thread> <message>`: `<message>` may be `-` for stdin. Flags: `--wait`, `--json`.
 - `thread show [flags] <thread>`: flags `--messages <integer>`, `--json`.
 - `thread list [flags]`: flags `--project <id|path>` (defaults to the current directory), `--json`.
+
+## Model options
+
+`orchestrator_capabilities` lists per-model options, for example `reasoningEffort` with its `values` and `default`. `t3 thread start` has no flag to set them (checked with `t3 thread start --help`: only `--base-dir`, `--title`, `--provider`, `--model`, `--worktree`, `--branch`, `--wait`, `--json`), so a thread started by `orq` runs with the model's default options. `orq sync` records each model's options in the registry (`options: {<id>: {values, default}}`) for reference; nothing reads them to start a thread.

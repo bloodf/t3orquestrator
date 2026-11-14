@@ -50,6 +50,7 @@ test('status: plan line, counts, one line per unit, and the note', async (t) => 
     'plan: test goal (p1)',
     `integration: orq/p1/integration head=${A.slice(0, 12)} base=${A.slice(0, 12)}`,
     'cap=3 active=1 blocked=1 gates=0 machine_leases=3 expired_leases=1',
+    'providers: 2 usable (pa, pb); 0 disabled in T3; 0 disabled by you; 0 cooling',
     'a running attempt=1 model=pa::m2 tier=2 thread=th1',
     'b blocked attempt=1 model=pa::m2 tier=2 thread=th2',
     'c failed 3 provider failures',
@@ -65,7 +66,7 @@ test('status: plan line, counts, one line per unit, and the note', async (t) => 
 test('status: a plan that has not started', async (t) => {
   const p = await makeProject(t, [unitSpec('a')]);
   const r = await orq(['status'], p);
-  assert.match(r.out, /^plan: test goal \(not started\)\ncap=.*\na queued\nnote: /);
+  assert.match(r.out, /^plan: test goal \(not started\)\ncap=.*\nproviders: .*\na queued\nnote: /);
 });
 
 test('unit retry: only from failed, resets the budget, optional tier', async (t) => {
@@ -119,9 +120,9 @@ test('status: flags, tiers and the authors line once units are integrated', asyn
   assert.equal(r.code, 0, r.err);
   const lines = r.out.split('\n');
   assert.equal(lines[1], `integration: orq/p1/integration head=${C.slice(0, 12)} base=${A.slice(0, 12)}`);
-  assert.equal(lines[3], 'a integrated attempt=1 model=pb::m3 tier=3 thread=th1 flags=flaky,placeholder');
-  assert.equal(lines[4], 'b integrated attempt=1 model=pa::m4 tier=4 thread=th2');
-  assert.equal(lines[6], 'authors: max_tier=4 family=fam-c');
+  assert.equal(lines[4], 'a integrated attempt=1 model=pb::m3 tier=3 thread=th1 flags=flaky,placeholder');
+  assert.equal(lines[5], 'b integrated attempt=1 model=pa::m4 tier=4 thread=th2');
+  assert.equal(lines[7], 'authors: max_tier=4 family=fam-c');
   const json = JSON.parse((await orq(['status', '--json'], p)).out);
   assert.deepEqual(json.integration, { branch: 'orq/p1/integration', head: C, base: A });
   assert.deepEqual(json.authors, { maxTier: 4, family: 'fam-c' });
@@ -252,4 +253,32 @@ test('unit retry says when the unit continues from work a failed provider left',
     { type: 'needs-judgment', unit: 'a', reason: '3 provider failures', provider: true });
   assert.equal((await orq(['unit', 'retry', 'a', '--tier', '3'], q)).out, 'retried a: queued, minimum tier 3\n');
   assert.equal(unitOf(await readState(q.repo), 'a').failedLaunch, null);
+});
+
+test('status shows the provider pool line', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  assert.match((await orq(['status'], p)).out, /^providers: 2 usable \(pa, pb\); 0 disabled in T3; 0 disabled by you; 0 cooling$/m);
+});
+
+test('C2: a provider judgment during the feedback round does not promise a continuation the relaunch would not make', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  await append(p, { type: 'plan-started', unit: null, planId: 'p1', baseSha: A, integrationBranch: 'orq/p1/integration' },
+    launched('a', 'th1'), { type: 'thread-ended', unit: 'a', status: 'completed' }, { type: 'gate-started', unit: 'a', attempt: 1, headSha: B, pid: 1 },
+    { type: 'gated', unit: 'a', attempt: 1, verdict: 'fail', failures: ['x'], flags: [], headSha: B },
+    { type: 'feedback-sent', unit: 'a', attempt: 2, threadId: 'th1' }, { type: 'thread-ended', unit: 'a', status: 'failed' },
+    { type: 'needs-judgment', unit: 'a', reason: 'no model available: all excluded', provider: true });
+  assert.equal(unitOf(await readState(p.repo), 'a').failedLaunch.attempt, 2);
+  assert.equal((await orq(['unit', 'retry', 'a'], p)).out, 'retried a: queued\n');
+  assert.equal(unitOf(await readState(p.repo), 'a').failedLaunch, null);
+});
+
+test('T1: config set <scheduler key> null clears it back to the default', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  for (const k of ['pollSeconds', 'stallMinutes', 'gateConcurrency', 'leaseTtlMinutes']) {
+    assert.equal((await orq(['config', 'set', k, '30'], p)).code, 0);
+    const r = await orq(['config', 'set', k, 'null'], p);
+    assert.deepEqual([r.code, r.out], [0, `${k} = null\n`]);
+    const cfg = JSON.parse(await fs.readFile(path.join(p.repo, '.orq', 'config.json'), 'utf8'));
+    assert.equal(Object.hasOwn(cfg, k), false, k);
+  }
 });

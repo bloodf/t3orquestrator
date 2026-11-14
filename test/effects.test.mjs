@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import fsSync from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createGit, defaultExec } from '../lib/git.mjs';
 import { perform } from '../lib/effects.mjs';
@@ -36,6 +37,11 @@ function fakeT3(repo, { fail = false, world = {} } = {}) {
       }
       sh(repo, 'branch', o.branch, o.worktree);
       n += 1;
+      if (world.makeWorktrees) { // like T3: a worktree of its own for the thread, outside the repository
+        const dir = `${repo}-wt-${n}`;
+        sh(repo, 'worktree', 'add', '-q', dir, o.branch);
+        world.worktrees = { ...world.worktrees, [`th${n}`]: dir };
+      }
       return { threadId: `th${n}`, projectId: 'p', runId: 'r' };
     },
     showThread(id) {
@@ -55,7 +61,7 @@ async function setup(t, units, opts = {}) {
   const p = await makeProject(t, units, opts);
   const t3 = fakeT3(p.repo, opts);
   const fx = {
-    cwd: p.repo, env: p.env, now: () => NOW, t3, git, spawnGate: spawnGateRun, isAlive: () => false, ...opts.fx,
+    cwd: p.repo, env: p.env, now: () => NOW, t3, git, spawnGate: spawnGateRun, isAlive: () => false, pause: async () => {}, ...opts.fx,
   };
   const run = {
     plan: JSON.parse(await fs.readFile(path.join(p.repo, '.orq', 'plan.json'), 'utf8')),
@@ -590,7 +596,7 @@ test('continue: a relaunch after a provider failure starts at the failed branch 
   const b = s.p.baseSha.slice(0, 12);
   assert.equal(o.message, [
     '## Hand-over',
-    'A previous worker (pa::m2) stopped because its provider failed. Its committed work (1 commits, '
+    'A previous worker (pa::m2) stopped because its provider failed. Its committed work (1 commit, '
       + `${b}..${head.slice(0, 12)}) is already in this branch.`,
     `Read it first with \`git log ${b}..HEAD\` and \`git diff ${b}..HEAD\`: keep what is right, fix what is not, then finish the work order below.`,
     'Do not start over.',
@@ -599,7 +605,7 @@ test('continue: a relaunch after a provider failure starts at the failed branch 
   ].join('\n'));
   const u = unitOf(await readState(s.p.repo), 'a');
   assert.deepEqual([u.baseSha, u.continues, u.key], [first.baseSha, head, 'pb::m2']);
-  assert.deepEqual(r.notes, ['note: unit a continues on pb::m2 from 1 commits left by pa::m2']);
+  assert.deepEqual(r.notes, ['note: unit a continues on pb::m2 from 1 commit left by pa::m2']);
   const lease = (await leasesOf(s.p)).find((l) => l.threadId === 'th3'); // th2 is b's
   assert.equal(lease.continues, head); // an adopted launch keeps it too
 });
@@ -663,7 +669,7 @@ test('continue: a thread given up as stalled is described as having stopped resp
   await append(s, { type: 'thread-ended', unit: 'a', status: 'stalled' });
   await s.act(launchA('a', otherModel));
   const msg = s.t3.calls.filter((c) => c[0] === 'start').at(-1)[1].message;
-  assert.ok(msg.startsWith(`## Hand-over\nA previous worker (pa::m2) stopped responding and was given up. Its committed work (1 commits, ${s.p.baseSha.slice(0, 12)}..${head.slice(0, 12)}) is already in this branch.\n`), msg);
+  assert.ok(msg.startsWith(`## Hand-over\nA previous worker (pa::m2) stopped responding and was given up. Its committed work (1 commit, ${s.p.baseSha.slice(0, 12)}..${head.slice(0, 12)}) is already in this branch.\n`), msg);
 });
 
 test('lease-abandon marks the lease abandoned and keeps it', async (t) => {
@@ -687,7 +693,7 @@ test('continue: a provider failure during the feedback run continues on the reje
   const b = s.p.baseSha.slice(0, 12);
   assert.ok(o.message.startsWith([
     '## Hand-over',
-    `A previous worker (pa::m2) stopped because its provider failed. Its committed work (1 commits, ${b}..${head.slice(0, 12)}) is already in this branch.`,
+    `A previous worker (pa::m2) stopped because its provider failed. Its committed work (1 commit, ${b}..${head.slice(0, 12)}) is already in this branch.`,
     `The gate rejected this work; its failures follow. Read it with \`git log ${b}..HEAD\` and \`git diff ${b}..HEAD\`, fix the failures, then finish the work order below.`,
     'Do not start over.',
     '',
@@ -705,6 +711,67 @@ test('continue: through a failed start, the next launch still continues from the
   const o = s.t3.calls.filter((c) => c[0] === 'start').at(-1)[1];
   assert.match(o.branch, /\/a-a1-l3$/);
   assert.equal(o.worktree, head);
-  assert.ok(o.message.includes(`(1 commits, ${first.baseSha.slice(0, 12)}..${head.slice(0, 12)})`), o.message);
-  assert.deepEqual(r.notes, ['note: unit a continues on pa::m3 from 1 commits left by pa::m2']); // the author, not the start that failed
+  assert.ok(o.message.includes(`(1 commit, ${first.baseSha.slice(0, 12)}..${head.slice(0, 12)})`), o.message);
+  assert.deepEqual(r.notes, ['note: unit a continues on pa::m3 from 1 commit left by pa::m2']); // the author, not the start that failed
+});
+
+// The main checkout has installed dependencies matching its committed manifests; `share` lists them.
+async function withDeps(t, over = {}) {
+  const world = { makeWorktrees: true, ...over.world };
+  const s = await setup(t, [unitSpec('a', over.unit ?? {})], { cap: 3, world });
+  t.after(() => fs.rm(`${s.p.repo}-wt-1`, { recursive: true, force: true }));
+  await fs.writeFile(path.join(s.p.repo, '.gitignore'), 'node_modules/\n');
+  await fs.writeFile(path.join(s.p.repo, 'package.json'), '{"name":"x"}\n');
+  await fs.writeFile(path.join(s.p.repo, 'pnpm-lock.yaml'), 'lockfileVersion: 1\n'); // npm projects are never shared
+  sh(s.p.repo, 'add', '-A');
+  sh(s.p.repo, 'commit', '-q', '-m', 'deps');
+  await fs.mkdir(path.join(s.p.repo, 'node_modules', 'x'), { recursive: true });
+  await fs.writeFile(path.join(s.p.repo, 'node_modules', 'x', 'y.js'), '1\n');
+  const { excludeShares } = await import('../lib/share.mjs');
+  excludeShares(s.p.repo, ['node_modules'], git);
+  s.run.config = { ...s.run.config, share: ['node_modules'] };
+  return { s, world };
+}
+
+test('S: a worker whose commit has the same manifests gets the main checkout\'s node_modules linked, and is told so', async (t) => {
+  const { s, world } = await withDeps(t);
+  const r = await s.act(launchA());
+  assert.equal(r.notes, undefined);
+  const o = s.t3.calls.find((c) => c[0] === 'start')[1];
+  assert.ok(o.message.startsWith('Dependencies: node_modules are linked from the main checkout. Do not install, delete or modify them; if you must change dependencies, report NEEDS_CONTEXT.\n\nWork order for a.'), o.message);
+  const link = path.join(world.worktrees.th1, 'node_modules');
+  assert.equal(await fs.readlink(link), path.join(s.p.repo, 'node_modules'));
+});
+
+test('S: no link and no line when the manifests differ, the unit changes dependencies, or it opts out', async (t) => {
+  for (const [label, over, change] of [
+    ['manifests differ', {}, (repo) => fs.writeFile(path.join(repo, 'package.json'), '{"name":"y"}\n')],
+    ['unit touches package.json', { unit: { paths: ['a.txt', 'package.json'] } }, null],
+    ['share: false', { unit: { share: false } }, null],
+  ]) {
+    const { s, world } = await withDeps(t, over);
+    if (change) await change(s.p.repo);
+    await s.act(launchA());
+    const o = s.t3.calls.find((c) => c[0] === 'start')[1];
+    assert.equal(o.message, 'Work order for a.\n', label);
+    assert.equal(fsSync.existsSync(path.join(world.worktrees.th1, 'node_modules')), false, label);
+  }
+});
+
+test('S: a worktree T3 never reports is skipped with a note', async (t) => {
+  const { s } = await withDeps(t, { world: { makeWorktrees: false } });
+  const r = await s.act(launchA());
+  assert.deepEqual(r.notes, ['note: unit a: dependencies not linked: node_modules (worktree not found)']);
+});
+
+test('T2: two commits are counted in the plural', async (t) => {
+  const s = await setup(t, [unitSpec('a')], { cap: 3 });
+  await s.act(launchA());
+  const u = unitOf(await readState(s.p.repo), 'a');
+  await commitOn(s.p.repo, u.branch, { 'a.txt': '1\n' });
+  await commitOn(s.p.repo, u.branch, { 'a.txt': '2\n' });
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'failed' });
+  const r = await s.act(launchA('a', otherModel));
+  assert.deepEqual(r.notes, ['note: unit a continues on pb::m2 from 2 commits left by pa::m2']);
+  assert.match(s.t3.calls.filter((c) => c[0] === 'start').at(-1)[1].message, /Its committed work \(2 commits, /);
 });

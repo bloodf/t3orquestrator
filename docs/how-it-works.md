@@ -45,6 +45,32 @@ Set `T3ORQ_HOME` to an absolute path to move the machine state.
 
 `orq` adds `.orq/` to the repository's local exclude file (`info/exclude` in the git directory), not to `.gitignore`. Nothing in your tracked files changes. Workers run in their own worktrees and never see `.orq/`.
 
+### Shared dependency directories
+
+Each worker, review and decision thread runs in its own worktree, and each gate in its own checkout. Installing dependencies in every one of them costs gigabytes per thread, so `orq` links the main checkout's dependency directories into them instead (the `share` config key). `orq init` detects only `node_modules` directories whose installer was tested safe with a link (below): pnpm (`pnpm-lock.yaml`) and bun (`bun.lock`, `bun.lockb`). `.venv`, `vendor` and other directories are never detected, since their installers are untested; they are linked only when you list them in `share` yourself. When `orq init` finds a `node_modules` it will not share, it says why: `share: none (npm projects are not shared: "npm ci" empties a linked node_modules)`, `share: none (yarn is untested)` or `share: none (no lockfile)`. A path is linked as a symlink to the main checkout's directory only when all of these hold:
+
+- for a `node_modules`: the lockfile next to it or at the repository root is pnpm's or bun's, and there is no `package-lock.json`, `npm-shrinkwrap.json` (npm: `npm ci` empties a linked directory) or `yarn.lock` (untested) there; with no lockfile at all it is not linked either. This holds whatever `share` says;
+- the directory exists in the main checkout, and nothing exists at that path in the worktree (nothing is ever replaced or deleted);
+- git ignores the path in the worktree, so the link can never be committed (`orq` adds anchored entries to `info/exclude` for this);
+- the files that govern it are byte-identical in the worktree's commit and the main checkout's working tree: for `node_modules`, `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lock` and `bun.lockb` next to it and at the repository root (other kinds have none and are linked when the rest holds);
+- the unit does not opt out (`"share": false` in the plan) and its `paths` do not cover any of those files (a unit that changes dependencies installs its own).
+
+The decision is made from git before the thread starts, and the work order then begins with `Dependencies: <paths> are linked from the main checkout. Do not install, delete or modify them; if you must change dependencies, report NEEDS_CONTEXT.` The links are made once T3 reports the worktree (it is retried for a few seconds); if that fails, `orq wait` prints `note: unit <id>: dependencies not linked: <paths> (<why>)` and the worker installs as before. The gate links into its own checkout only when no setup step will run there (`checks.setup` is unset, or the unit has `"setup": false`), under the same rules, for the commit it judges; only ignored dependency directories are linked, so the committed files it judges are still a fresh checkout. When a setup step runs, the gate's checkout is left unlinked and setup installs a private copy: the disk saving in the gate is given up rather than risk the main checkout's install (see the npm result below). Removing a worktree, the gate's checkout or a leftover gate directory removes the link, never the directory it points to.
+
+The links are shared, not copied: a thread can write through its link into the main checkout's directory, and every other worktree sees the change. Workers are told not to install; nothing enforces it.
+
+What package managers do when run in a checkout whose `node_modules` is such a link (tested by `test/share-installers.test.mjs` on macOS with Node 26.13.0, offline, with a `file:` dependency; each test is skipped when its tool is missing):
+
+| Tool and command | Result |
+|---|---|
+| npm 11.20.0 `npm ci` | Destructive. It empties the directory the link points to (the main checkout's `node_modules` is left empty), then replaces the link with a directory of its own. |
+| npm 11.20.0 `npm install` | Replaces the link with a directory of its own; the main checkout's directory is untouched. |
+| pnpm 12.18.0 `pnpm install --frozen-lockfile --offline` and `pnpm install --offline` | Keeps the link and writes through it; files already in the main checkout's directory stay. A `.modules.yaml` recorded for another store directory or an older layout did not make it purge the directory. Other pnpm settings (for example a non-global virtual store) and other versions are untested. |
+| bun 1.4.2 `bun install` and `bun install --frozen-lockfile` | Keeps the link; files already in the main checkout's directory stay. |
+| yarn | Untested (not installed). |
+
+That is why npm and yarn projects are never shared, and why the gate never links when a setup step runs. A worker in a shared pnpm or bun project can still write through its link (an install there writes into the main checkout's `node_modules`); turn sharing off with `orq config set share null`, or set `"share": false` on units that may install, if that is not acceptable.
+
 Each request gets its own plan. When a request is finished, `orq plan archive` moves that plan's state into `.orq/archive/<planId>/` and keeps its integration branch, so the next request starts a fresh plan from the base branch. It also removes the worker and review worktrees; one with uncommitted or untracked files is kept and reported, and no branch is deleted.
 
 ## Capability slots

@@ -97,3 +97,14 @@ test('pollSeconds has a floor of 5: set refuses less, a file with less reads as 
   assert.equal((await loadProjectConfig(await tmpFile('{"pollSeconds":30}'))).pollSeconds, 30);
   assert.equal((await loadProjectConfig(await tmpFile('{}'))).pollSeconds, undefined); // the default stays where it lives
 });
+
+test('share: a list of repository-relative directories, set as a comma list, null turns it off', async () => {
+  const base = { autonomy: null, base: 'main', checks: { setup: null, unit: null, full: null }, slots: {}, t3: null };
+  assert.deepEqual(setConfigValue(base, 'share', 'node_modules, apps/shop/node_modules', 'project').share, ['node_modules', 'apps/shop/node_modules']);
+  assert.equal(setConfigValue(base, 'share', 'null', 'project').share, null);
+  assert.throws(() => setConfigValue(base, 'share', 'node_modules,../x', 'project'), /share: "\.\.\/x" must be a relative path inside the repository \(not \.git or \.orq\)/);
+  assert.equal((await loadProjectConfig(await tmpFile('{"share":["node_modules"]}'))).share[0], 'node_modules');
+  assert.equal((await loadProjectConfig(await tmpFile('{}'))).share, undefined); // unset: init detects it
+  await assert.rejects(loadProjectConfig(await tmpFile('{"share":["/abs"]}')), /share must be null or a list of relative paths/);
+  await assert.rejects(loadProjectConfig(await tmpFile('{"share":".orq"}')), /share must be null or a list of relative paths/);
+});

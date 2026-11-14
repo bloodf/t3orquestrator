@@ -48,11 +48,13 @@ t3=<version|missing> cap=<n> kit=<sha|unknown>
 slots: judge=<name> memory=<name> code-index=<name> git-host=<name>
 checks: setup=<cmd|none> full=<cmd|none>
 autonomy=<draft|review-fix|review-fix-merge|unset> questions=<auto|user>
+share: <paths>|none[ (<why not>)]
 registry: <n> instances, <n> models, synced <n>h ago|never
+providers: <n> usable (<ids>); <n> disabled in T3 (<ids>); <n> disabled by you (<ids>); <n> cooling (<ids>)[; <n> no models listed (<ids>)]
 next: pipe orchestrator_capabilities JSON to "orq sync"
 ```
 
-The `next:` line appears when the registry has never been synced or is more than 12 hours old. Exit 3 with `this thread is a worker started by orq; follow your work order` when a lease exists for the calling thread.
+The `next:` line appears when the registry has never been synced or is more than 12 hours old. `init` (and `sync`, which starts each session) records which playbook the orchestrator has read: `playbook: {kit: <sha12>, hash: <16 hex>}` in `.orq/config.json` (the hash of the running kit's `playbook/ORCHESTRATOR.md`; `kit` only when the kit is a git checkout). Running `init` again re-records it and changes nothing else. Exit 3 with `this thread is a worker started by orq; follow your work order` when a lease exists for the calling thread.
 
 ## sync
 
@@ -67,6 +69,7 @@ enabled: <ids>
 +models: <n>
 unavailable: <n>
 synced: <n> instances (<n> enabled), <n> models (<n> confirmed)
+providers: … (as for init)
 inferred: <keys> — set with: orq tier set <key> <1-4>
 ```
 
@@ -103,7 +106,7 @@ Prints `tier <key> = <n> (<by>)`. `--by` defaults to `orchestrator`. A tier set 
 Lists the eligible models in the order `orq` would use them:
 
 ```
-1 <instance> <model> tier=<n> family=<family> confirmed|unconfirmed[ same-family][ below-tier]
+1 <instance> <model> tier=<n> family=<family> confirmed|unconfirmed[ same-family][ below-tier][ score=<rate|-> n=<attempts>][ demoted]
 ```
 
 `review` and `fix` need the author's tier, and `review` also needs the family. If the project has integrated units, the values come from the ledger. Exit 4 with `none blocked=<excluded|cooling|limit|mixed|empty> retry_at=<iso time|-> reason="<why>"` when nothing is eligible.
@@ -112,11 +115,11 @@ Lists the eligible models in the order `orq` would use them:
 
 `orq config get [--machine] | orq config set [--machine] <key> <value>`
 
-`get` prints the config as JSON. `set` prints `<key> = <value>`. The value `null` clears `autonomy`, `cap` or a check. `pollSeconds` is at least 5. `questions` is `auto` (the default: `orq ask` lets the strongest enabled model decide) or `user` (every question goes to the user).
+`get` prints the config as JSON. `set` prints `<key> = <value>`. The value `null` clears `autonomy`, `cap`, a check, or a scheduler key (`pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`: back to its default). `pollSeconds` is at least 5. `share` is a comma list of repository-relative dependency directories (`node_modules, apps/shop/node_modules`) that worktrees link from the main checkout, or `null` to turn sharing off; `orq init` detects it when the key is absent: every git-ignored `node_modules` up to 4 levels deep, not inside another one, whose lockfile (next to it or at the root) is pnpm's or bun's; npm, yarn and lockfile-less projects are never shared, whatever `share` says, and `.venv`/`vendor` only when listed explicitly. The init line then reads `share: <paths>`, or `share: none (<why>)` when a `node_modules` was found but cannot be shared. Setting it adds anchored entries (`/node_modules`) to the repository's `info/exclude`, so a link is ignored even where `.gitignore` says `node_modules/` (a pattern that matches directories only, not symlinks). `questions` is `auto` (the default: `orq ask` lets the strongest enabled model decide) or `user` (every question goes to the user).
 
 | Scope | Keys |
 |---|---|
-| project (`.orq/config.json`) | `autonomy`, `base`, `checks.setup`, `checks.unit`, `checks.full`, `pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`, `questions` |
+| project (`.orq/config.json`) | `autonomy`, `base`, `checks.setup`, `checks.unit`, `checks.full`, `pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`, `questions`, `share` |
 | machine (`~/.t3orq/config.json`) | `cap`, `perInstanceLimit` |
 
 `checks.unit` runs in every unit's gate after the evidence. `checks.full` runs once on the integration head.
@@ -125,7 +128,7 @@ Lists the eligible models in the order `orq` would use them:
 
 `orq plan check [--json]`
 
-Prints `plan ok: <n> units, order: <ids>`, or one `error: <problem>` line per problem and exit 4. Before `plan ok` it prints `warning: <unit>: evidence runs a file outside the repository (<paths>); a check belongs in the repository, written by a unit` for a unit whose evidence names a file under `.orq/`, or an absolute path (`/…`, `~/…`) outside the project that is a command word or ends in a file extension; paths under system locations (`/usr`, `/bin`, `/sbin`, `/opt`, `/nix`, `/snap`, `/dev`, `/proc`, `/sys`, `/etc`, `/System`, `/Library`, `/Applications`) are not counted. A warning never changes the exit code; `orq wait` repeats it once per call. `--json` adds a `warnings` array. A unit may set `"setup": false` (boolean, default `true`) to skip `checks.setup` in its own gate; any other value is an error. Exit 1 when there is no plan. It checks the schema, job classes, unit ids, dependencies and cycles. It also checks that each work order is a file under `.orq/` of at most 40 lines, and that units which could run in parallel have non-overlapping `paths`.
+Prints `plan ok: <n> units, order: <ids>`, or one `error: <problem>` line per problem and exit 4. Before `plan ok` it prints `warning: <unit>: evidence runs a file outside the repository (<paths>); a check belongs in the repository, written by a unit` for a unit whose evidence names a file under `.orq/`, or an absolute path (`/…`, `~/…`) outside the project that is a command word or ends in a file extension; paths under system locations (`/usr`, `/bin`, `/sbin`, `/opt`, `/nix`, `/snap`, `/dev`, `/proc`, `/sys`, `/etc`, `/System`, `/Library`, `/Applications`) are not counted. A warning never changes the exit code; `orq wait` repeats it once per call. `--json` adds a `warnings` array. A unit may set `"setup": false` (boolean, default `true`) to skip `checks.setup` in its own gate, and `"share": false` (boolean, default `true`) to keep its worktree and gate from linking shared dependency directories; any other value is an error. When the ledger knows units that `plan.json` no longer lists (a new request written over a plan that was not archived), `plan check` and `orq wait` refuse with exit 4: `plan.json no longer lists units the ledger knows (<ids>); this looks like a new request: restore plan.json or run "orq plan archive" first`. Adding units is fine. `orq plan archive` then archives the ledger without that `plan.json`, leaves `plan.json` and the work orders in place for the next request, and prints `note: plan.json did not match the ledger; archived the ledger and kept plan.json for the next request`. Exit 1 when there is no plan. It checks the schema, job classes, unit ids, dependencies and cycles. It also checks that each work order is a file under `.orq/` of at most 40 lines, and that units which could run in parallel have non-overlapping `paths`.
 
 ## plan archive
 
@@ -146,7 +149,7 @@ While an archive is in progress the project is frozen: it writes `.orq/archiving
 
 `orq wait [--max-seconds N]`
 
-This runs the scheduler for up to `N` seconds (default 480). The first line it prints is one of `done:`, `final-fail:`, `judgment:`, `blocked:`, `idle:` or `timeout:`. It exits 0 for each of them. When threads orq started are done for good and still unsettled in T3, the second line is `settle: <threadId> <threadId> …` (at most 20 ids, then `+<n> more`); notes and detail lines follow. See [Scheduling](scheduling.md#what-orq-wait-returns). Exit 4 when the plan is invalid or uses the reserved unit id `integration`. Exit 1 when no usable `t3` is recorded. Exit 5 when another `orq wait` holds this project.
+This runs the scheduler for up to `N` seconds (default 480). The first line it prints is one of `done:`, `final-fail:`, `judgment:`, `blocked:`, `idle:` or `timeout:`. It exits 0 for each of them. When the running kit's playbook differs from the one recorded (`orq update` moved the kit, or the project was set up by an older kit), the second line is `playbook: the kit was updated (<old kit12|unknown> -> <new kit12|unknown>); read <path of the running kit's playbook/ORCHESTRATOR.md> again now, then run "orq init"`. When threads orq started are done for good and still unsettled in T3, the next line is `settle: <threadId> <threadId> …` (at most 20 ids, then `+<n> more`); notes and detail lines follow. See [Scheduling](scheduling.md#what-orq-wait-returns). Exit 4 when the plan is invalid or uses the reserved unit id `integration`. Exit 1 when no usable `t3` is recorded. Exit 5 when another `orq wait` holds this project.
 
 ## status
 
@@ -154,8 +157,10 @@ This runs the scheduler for up to `N` seconds (default 480). The first line it p
 
 ```
 plan: <goal> (<planId>|not started)
+playbook: the kit was updated (…); read <file> again now, then run "orq init"   (only after a kit update)
 integration: <branch> head=<sha> base=<sha>
 cap=<n> active=<n> blocked=<n> gates=<n> machine_leases=<n>[ expired_leases=<n>]
+providers: … (as for init)
 <unit> <state>[ attempt=<n>][ model=<key>][ tier=<n>][ wanted_tier=<n>][ continued][ thread=<id>][ flags=<kinds>][ <reason>]
 authors: max_tier=<n> family=<family>
 cooling: <instance> until <iso time>, …
@@ -244,6 +249,7 @@ The kit's origin is trusted and tags are not signature-checked. The commit pinne
 ```
 updated: <old sha> -> <new sha>[ (<tag>)]
 review the changes: git -C <kit dir> log --oneline <old>..<new>
+running orchestrators are told on their next "orq wait"
 ```
 
 With `--check` it changes nothing, works even when the kit has local changes, and prints `update available: <old> -> <new>[ (<tag>)]` or `would move (not a fast-forward): <old> -> <new>`. Either way, it prints `up to date at <sha>` when there is nothing to do.

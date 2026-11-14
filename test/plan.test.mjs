@@ -150,3 +150,8 @@ test('evidence outside the repository is a warning, not an error; setup must be 
   const bad = check({ goal: 'g', units: [unit('a', { setup: 'no' }), unit('b', { setup: false, paths: ['b/**'] })] });
   assert.deepEqual(bad.errors, ['unit a: setup must be true or false']);
 });
+
+test('share must be true or false, like setup', () => {
+  const bad = check({ goal: 'g', units: [unit('a', { share: 'no' }), unit('b', { share: false, paths: ['b/**'] })] });
+  assert.deepEqual(bad.errors, ['unit a: share must be true or false']);
+});

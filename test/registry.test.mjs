@@ -300,3 +300,34 @@ test('markAlive resets the instance only; failure, alive, failure is not two in 
   const again = recordFailure(markAlive(one, 'a::m-1', 15), 'a::m-2', { now: 40 });
   assert.deepEqual([again.instances.a.failures, again.instances.a.cooldownUntil], [1, null]);
 });
+
+test('providersLine: the pool at a glance, every instance in exactly one group', async () => {
+  const { providersLine } = await import('../lib/providers.mjs');
+  const inst = (over = {}) => ({ enabled: true, constraints: [], limit: null, failures: 0, cooldownUntil: null, ...over });
+  const model = (instance, available = true) => ({ instance, model: 'm', tier: 2, available });
+  const reg = {
+    instances: {
+      a: inst(), b: inst(), off: inst({ enabled: false }), mine: inst({ userDisabled: true }), hot: inst({ cooldownUntil: 50 }), bare: inst(),
+    },
+    models: {
+      'a::m': model('a'), 'b::m': model('b'), 'off::m': model('off'), 'mine::m': model('mine'), 'hot::m': model('hot'),
+    },
+  };
+  assert.equal(providersLine(reg, 10), 'providers: 2 usable (a, b); 1 disabled in T3 (off); 1 disabled by you (mine); 1 cooling (hot); 1 no models listed (bare)');
+  assert.equal(providersLine({ instances: {}, models: {} }, 10), 'providers: 0 usable; 0 disabled in T3; 0 disabled by you; 0 cooling');
+  const many = { instances: Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`p${i}`, inst()])), models: Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`p${i}::m`, model(`p${i}`)])) };
+  assert.equal(providersLine(many, 10), 'providers: 9 usable (p0, p1, p2, p3, p4, p5 +3 more); 0 disabled in T3; 0 disabled by you; 0 cooling');
+});
+
+test('M4: model options from capabilities are recorded (orq cannot pass them to a thread; kept for reference)', () => {
+  const { registry } = merge(emptyRegistry(), caps);
+  assert.deepEqual(registry.models['provider-e::model-small'].options, {
+    reasoningEffort: { values: ['low'], default: 'low' }, serviceTier: { values: ['default', 'priority'], default: 'default' },
+  });
+  // a later sync replaces them
+  const changed = structuredClone(caps);
+  changed.providers[0].models[0].options = [{ id: 'reasoningEffort', values: ['low', 'high'], default: 'high' }];
+  assert.deepEqual(merge(registry, changed).registry.models['provider-e::model-small'].options, { reasoningEffort: { values: ['low', 'high'], default: 'high' } });
+  const plain = merge(emptyRegistry(), { ...caps, providers: [{ providerInstanceId: 'x', models: ['m1'] }] }).registry;
+  assert.deepEqual(plain.models['x::m1'].options, {});
+});

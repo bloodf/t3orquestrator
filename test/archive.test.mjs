@@ -286,3 +286,17 @@ test('archive removes decision worktrees, with and without a plan id in the bran
   assert.match(r.out, /\nremoved 2 worker worktrees\n/);
   for (const d of dirs) assert.equal(await exists(d), false);
 });
+
+test('C1: archive keeps an abandoned lease (its thread may still run) and says to interrupt it', async (t) => {
+  const { p } = await finished(t);
+  const dir = path.join(p.home, 'leases');
+  const lease = (threadId, over = {}) => ({ threadId, project: p.repo, unit: 'a', instance: 'pa', model: 'm2', startedAt: NOW, heartbeatAt: NOW, blocked: false, ...over });
+  await writeLease(dir, lease('mine'));
+  await writeLease(dir, lease('quiet', { abandoned: true }));
+  const r = await orq(['plan', 'archive'], p);
+  assert.equal(r.code, 0, r.err);
+  const lines = r.out.trim().split('\n');
+  assert.ok(lines.includes('note: removed 1 lease left by the archived plan'), r.out);
+  assert.ok(lines.includes('note: thread quiet was given up and may still be running: interrupt it (t3_thread_interrupt)'), r.out);
+  assert.deepEqual((await listLeases(dir)).map((l) => l.threadId), ['quiet']);
+});

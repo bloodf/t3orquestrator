@@ -22,10 +22,10 @@ Never put it in `AGENTS.md`, because workers read that file (see [BOOTSTRAP.md](
 
 ## What happens after you paste
 
-1. The thread fetches the kit and runs `orq init`. Then it asks you once how far it may go on its own. It can open a draft pull request. It can also have a model from another family review the work and send workers to fix the findings. Or it can also merge once the host's checks pass.
+1. The thread fetches the kit and runs `orq init`. It shows which of your providers it will use, then asks you once how far it may go on its own. It can open a draft pull request. It can also have a model from another family review the work and send workers to fix the findings. Or it can also merge once the host's checks pass.
 2. It syncs the providers, models and tools you have enabled. Each job is then routed to a model by job class and tier.
-3. For each request it writes a plan, usually one unit. `orq` runs each unit in its own worker thread and git worktree.
-4. `orq` gates every result: it runs the unit's evidence command in a clean checkout of the worker's commit. Passing units are merged into an integration branch. A failed gate goes back to the same worker once, then to a fresh worker one tier up. Only after that does the orchestrator decide.
+3. For each request it first asks you, once, the few questions that change what gets built or how it is accepted, each with the answer it will assume. Then it writes a plan, usually one unit. `orq` runs each unit in its own worker thread and git worktree. In pnpm and bun projects, worktrees link `node_modules` from your main checkout instead of installing it again.
+4. `orq` gates every result: it runs the unit's evidence command in a clean checkout of the worker's commit. Passing units are merged into an integration branch. A failed gate goes back to the same worker once, then to a fresh worker one tier up. Only after that does the orchestrator decide. When a thread hits a limit, fails or stops responding, the unit continues on another model from the commits that thread left.
 5. Questions do not wait for you. When a worker needs a decision, the orchestrator gets it from the strongest model you have enabled (`orq ask`) and records it. Only what must stay with you reaches you, and always in the orchestrator's thread: destructive actions, spending, and anything beyond the mode you chose. Turn this off with `orq config set questions user`.
 6. The orchestrator finishes in the mode you chose and reports what it decided, including the decisions taken without you.
 
@@ -49,6 +49,9 @@ Read [How it works](docs/how-it-works.md) for the full sequence.
 - There is no token-usage accounting, because T3's CLI does not expose token usage.
 - The machine-wide thread cap counts only threads `orq` started. Threads you start by hand are not counted.
 - Worker and review worktrees are removed at `orq plan archive`. One with uncommitted or untracked files is kept and reported.
+- A shared `node_modules` is a symlink into your main checkout: a thread can write through it. npm and yarn projects are never shared. Turn sharing off with `orq config set share null`. See [SECURITY.md](SECURITY.md).
+- T3's CLI cannot set a model's reasoning effort, so every thread runs at the provider's default.
+- A thread that stays silent for twice `stallMinutes` (default 20) is given up. Raise it for projects with single commands that run longer.
 
 ## Models and providers
 

@@ -63,7 +63,7 @@ test('update: picks the highest tag numerically, --check does not move', async (
   assert.equal(check.out, `update available: ${s12(w.first)} -> ${s12(ten)} (v0.10.0)\n`);
   assert.equal(git(w.kit, 'rev-parse', 'HEAD'), w.first);
   const up = await orq(['update'], w);
-  assert.equal(up.out, `updated: ${s12(w.first)} -> ${s12(ten)} (v0.10.0)\nreview the changes: git -C ${w.kit} log --oneline ${s12(w.first)}..${s12(ten)}\n`);
+  assert.equal(up.out, `updated: ${s12(w.first)} -> ${s12(ten)} (v0.10.0)\nreview the changes: git -C ${w.kit} log --oneline ${s12(w.first)}..${s12(ten)}\nrunning orchestrators are told on their next "orq wait"\n`);
   assert.equal(git(w.kit, 'rev-parse', 'HEAD'), ten);
   assert.equal((await orq(['update'], w)).out, `up to date at ${s12(ten)}\n`);
   assert.ok(third);
@@ -123,7 +123,7 @@ test('update: never downgrades without --to; --check reports the same cases', as
   assert.equal(would.out, `would move (not a fast-forward): ${s12(ahead)} -> ${s12(w.first)}\n`);
   assert.equal(git(w.kit, 'rev-parse', 'HEAD'), ahead);
   const moved = await orq(['update', '--to', 'v0.9.0'], w);
-  assert.equal(moved.out, `moved (not a fast-forward): ${s12(ahead)} -> ${s12(w.first)}\nreview the changes: git -C ${w.kit} log --oneline ${s12(ahead)}..${s12(w.first)}\n`);
+  assert.equal(moved.out, `moved (not a fast-forward): ${s12(ahead)} -> ${s12(w.first)}\nreview the changes: git -C ${w.kit} log --oneline ${s12(ahead)}..${s12(w.first)}\nrunning orchestrators are told on their next "orq wait"\n`);
   assert.equal((await orq(['update', '--to', 'v0.9.0'], w)).out, `up to date at ${s12(w.first)}\n`);
 });
 
