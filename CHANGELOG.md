@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-14
+
 ### Added
 
 - A project can bound its own threads: `orq config set cap <n>` (without `--machine`) in the project, `null` to remove it, stored in `.orq/config.json`. A project then fills at most the smaller of the machine cap less every active lease and its own cap less its own leases, so two projects on one machine can be limited separately. The project cap counts units, reviews and decisions of that project. `orq status` shows `project_cap=` and `project_leases=`, and says so when the project cap is the limit in force, as does the `waiting:` line of `orq wait`. The machine `cap` works as before.
