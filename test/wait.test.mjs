@@ -508,7 +508,8 @@ test('wait: a unit with setup: false skips checks.setup; others still run it; th
   assert.doesNotMatch(r.out, /warning:/); // /etc is a system location, not a check of the orchestrator's
   const q = await makeProject(t, [unitSpec('a', { evidence: 'node /srv/checks/a.mjs' })]);
   const w = await orq(['wait', '--max-seconds', '20'], q, simulator(q, { a: [['idle']] }));
-  assert.ok(w.out.split('\n').includes('warning: a: evidence runs a file outside the repository (/srv/checks/a.mjs); a check belongs in the repository, written by a unit'), w.out);
+  assert.ok(w.out.split('\n').includes('note: 1 units run evidence outside the repository (a); run "orq plan check" for the list'), w.out);
+  assert.doesNotMatch(w.out, /^warning:/m); // one note, not a line per unit: plan check keeps those
 });
 
 test('wait: a thread with an unknown status is read as running, noted once, and given up when it stays quiet', async (t) => {

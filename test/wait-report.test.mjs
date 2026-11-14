@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withNotes } from '../lib/commands/wait-report.mjs';
+import { withNotes, evidenceNote } from '../lib/commands/wait-report.mjs';
 
 const notes = (n) => Array.from({ length: n }, (_, i) => `note: n${i}`);
 
@@ -17,4 +17,12 @@ test('a settle line sits after the summary, is not a note, and never pushes a de
   const out = ['judgment: a: x', 'settle: t1 t2', 'b: y', 'c: z', 'd: w', 'e: v', 'f: u'];
   assert.deepEqual(withNotes(out, notes(3), 7, 2), ['judgment: a: x', 'settle: t1 t2', 'note: 3 more notes omitted', 'b: y', 'c: z', 'd: w', 'e: v', 'f: u']);
   assert.deepEqual(withNotes(['done: x', 'settle: t1'], notes(2), 7, 2), ['done: x', 'settle: t1', 'note: n0', 'note: n1']);
+});
+
+test('evidenceNote: one note for every unit whose evidence runs outside the repository, naming up to 3', () => {
+  const w = (id) => `${id}: evidence runs a file outside the repository (/x/${id}.py); a check belongs in the repository, written by a unit`;
+  assert.equal(evidenceNote([]), null);
+  assert.equal(evidenceNote([w('a')]), 'note: 1 units run evidence outside the repository (a); run "orq plan check" for the list');
+  assert.equal(evidenceNote(['a', 'b', 'c'].map(w)), 'note: 3 units run evidence outside the repository (a, b, c); run "orq plan check" for the list');
+  assert.equal(evidenceNote(['a', 'b', 'c', 'd', 'e'].map(w)), 'note: 5 units run evidence outside the repository (a, b, c +2 more); run "orq plan check" for the list');
 });

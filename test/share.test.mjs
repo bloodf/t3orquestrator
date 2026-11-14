@@ -236,3 +236,36 @@ test('S1: config set share refuses a directory git tracks files under; init drop
   assert.ok(init.out.split('\n').includes('note: share: "vendor" has tracked files; only untracked, ignored directories can be shared'), init.out);
   assert.doesNotMatch(await fs.readFile(path.join(r.dir, '.git', 'info', 'exclude'), 'utf8'), /\/vendor/);
 });
+
+test('E1: unbalanced or duplicated orq markers leave the exclude file untouched, with a note', async (t) => {
+  const r = await repo(t);
+  const file = path.join(r.dir, '.git', 'info', 'exclude');
+  const note = 'note: .git/info/exclude has unbalanced "orq share" markers; left untouched';
+  for (const text of [
+    '# user\n# orq share begin\n/user-secret-ignore\n*.log\n', // a stray begin (the reviewer's case)
+    '# orq share begin\n/node_modules\n# orq share begin\n/x\n# orq share end\n', // duplicated begin
+    '# orq share end\n/a\n# orq share begin\n', // end before begin
+    '# orq share begin\n/a\n# orq share end\n# orq share end\n', // duplicated end
+  ]) {
+    await fs.writeFile(file, text);
+    assert.deepEqual(syncShareExclude(r.dir, ['node_modules'], git, { prune: true }), { note }, text);
+    assert.equal(await fs.readFile(file, 'utf8'), text, text);
+  }
+  await fs.writeFile(file, '# user\n');
+  assert.deepEqual(syncShareExclude(r.dir, ['node_modules'], git, { prune: true }), { note: null });
+  assert.equal(await fs.readFile(file, 'utf8'), '# user\n# orq share begin\n/node_modules\n# orq share end\n');
+  assert.deepEqual(fsSync.readdirSync(path.dirname(file)).filter((f) => f !== 'exclude'), []); // no temporary file left
+});
+
+test('E1: init and config set report unbalanced markers instead of rewriting', async (t) => {
+  const r = await repo(t);
+  const home = path.join(r.root, 'home');
+  await fs.mkdir(home);
+  const file = path.join(r.dir, '.git', 'info', 'exclude');
+  await fs.writeFile(file, '# user\n# orq share begin\n/user-secret-ignore\n');
+  const note = 'note: .git/info/exclude has unbalanced "orq share" markers; left untouched';
+  assert.ok((await orqIn(r.dir, home, ['init'])).out.split('\n').includes(note));
+  assert.equal((await orqIn(r.dir, home, ['config', 'set', 'share', 'null'])).out, `share = null\n${note}\n`);
+  // every user line kept (init's own `.orq/` line is appended at the end, as always)
+  assert.ok((await fs.readFile(file, 'utf8')).startsWith('# user\n# orq share begin\n/user-secret-ignore\n'));
+});
