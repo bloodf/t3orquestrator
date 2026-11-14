@@ -53,6 +53,18 @@ test('feedback round: no commit, then pass, is not a first pass', () => {
   assert.equal(s.workerMinutes, 7);
 });
 
+test('a nudged turn counts as no-commit, not as a gate failure, and the later pass is not a first pass', () => {
+  const s = computeStats([
+    start(), launch('u', 1, A), ended('u', 5), ev('unfinished', 'u', 6, { failures: ['no commits on top of abc123'] }),
+    ev('feedback-sent', 'u', 7, { attempt: 1, threadId: 't' }), ended('u', 10), gated('u', 11, 'pass', 1),
+  ]);
+  assert.deepEqual(
+    [s.models[A].gate_fail, s.models[A].gate_pass, s.models[A].no_commit, s.models[A].first_pass],
+    [0, 1, 1, 0],
+  );
+  assert.equal(s.workerMinutes, 7);
+});
+
 test('worker-reported stop and unit end states', () => {
   const s = computeStats([
     start(), launch('u', 1, A), launch('v', 1, A), launch('w', 1, B),

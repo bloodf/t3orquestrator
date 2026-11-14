@@ -690,3 +690,16 @@ test('G1: a goal edit while the plan still runs is allowed; a ledger without a r
   await fs.writeFile(path.join(q.repo, '.orq', 'plan.json'), JSON.stringify({ goal: 'whatever', units: [unitSpec('a')] }));
   assert.equal((await orq(['plan', 'check'], q, simulator(q, {}))).code, 0);
 });
+
+test('wait: a worker whose turn ends with nothing committed is told to go on in the same thread; its work passes as attempt 1', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['complete']] }); // the turn ends with no commit; after a message the thread commits
+  const r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^done: 1 units integrated at /);
+  assert.deepEqual(sim.sends, ['th1']);
+  assert.equal(sim.byUnit.a.length, 1); // no second thread
+  const u = unitOf(await readState(p.repo), 'a');
+  assert.deepEqual([u.state, u.attempt, u.launches, u.nudges], ['integrated', 1, 1, 1]);
+  assert.deepEqual(await listLeases(path.join(p.home, 'leases')), []);
+});

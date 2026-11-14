@@ -322,6 +322,32 @@ test('plan check prints a warning per unit whose evidence runs a file outside th
   assert.equal(r.out, 'warning: a: evidence runs a file outside the repository (.orq/verify.mjs); a check belongs in the repository, written by a unit\nplan ok: 1 units, order: a\n');
 });
 
+test('plan check: no warning for a finished unit; the shape of what is left is printed', async () => {
+  const s = await setup();
+  const A = 'a'.repeat(40);
+  const unit = (id, deps = []) => ({ id, title: id, job: 'implement', deps, paths: [`${id}/**`], evidence: `node .orq/verify.mjs ${id}`, order: `.orq/units/${id}/order.md` });
+  for (const id of ['a', 'b', 'c', 'd']) {
+    await fs.mkdir(path.join(s.cwd, `.orq/units/${id}`), { recursive: true });
+    await fs.writeFile(path.join(s.cwd, `.orq/units/${id}/order.md`), 'x\n');
+  }
+  await fs.writeFile(path.join(s.cwd, '.orq/plan.json'), JSON.stringify({ goal: 'g', units: [unit('a'), unit('b', ['a']), unit('c', ['b']), unit('d', ['c'])] }));
+  const events = [
+    { type: 'plan-started', unit: null, at: 1, planId: 'p', baseSha: A, integrationBranch: 'orq/p/integration', goal: 'g' },
+    { type: 'launched', unit: 'a', at: 2, attempt: 1, threadId: 't', key: 'i::m', instance: 'i', model: 'm', branch: 'orq/p/a-a1', baseSha: A, tier: 2 },
+    { type: 'thread-ended', unit: 'a', at: 3, status: 'completed' },
+    { type: 'gate-started', unit: 'a', at: 4, attempt: 1, headSha: A, pid: 1 },
+    { type: 'gated', unit: 'a', at: 5, attempt: 1, verdict: 'pass', failures: [], flags: [], headSha: A },
+    { type: 'integrated', unit: 'a', at: 6, sha: A, head: A },
+  ];
+  await fs.writeFile(path.join(s.cwd, '.orq/ledger.jsonl'), `${events.map((e) => JSON.stringify(e)).join('\n')}\n`);
+  const r = await orq(['plan', 'check'], s);
+  assert.equal(r.code, 0, r.err);
+  const lines = r.out.trimEnd().split('\n');
+  assert.deepEqual(lines.map((l) => l.split(':')[0]), ['warning', 'warning', 'warning', 'warning', 'plan ok']);
+  assert.ok(!r.out.includes('warning: a: '));
+  assert.match(lines[3], /^warning: the 3 units still to run form one chain, so they run one at a time/);
+});
+
 test('route explains the outcome record: score and attempts, and demoted', async () => {
   const s = await setup();
   const results = (n, pass) => Array.from({ length: n }, (_, i) => ({ at: NOW, pass: i < pass }));

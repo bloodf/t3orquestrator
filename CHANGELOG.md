@@ -5,6 +5,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- A worker whose turn ends with nothing committed is told to continue in the same thread, once per thread, before anything counts as a gate failure. In two real runs one gate in four failed only for this reason, and almost every such worker committed on its next turn. The ledger records it as `unfinished`; `orq stats` counts it under `no-commit`.
+- `orq plan check` says how parallel the units still to run are, and warns when they form a single chain.
+
+### Changed
+
+- `orq unit retry <unit>` after `gate could not complete` gates the same commit again instead of starting a new worker. `--tier N` still starts a new worker.
+- The message for a turn that ended without a commit now also names the way out when nothing needs to change (`BLOCKED` with the reason).
+- The work order template tells the worker to finish in one turn.
+
+### Fixed
+
+- A gate no longer fails with `workDir exists and is not a worktree` when a step started by a killed gate still writes into `.orq/gate/<unit>`: it runs in a directory beside it.
+
 ## [0.2.0] - 2026-11-13
 
 ### Added

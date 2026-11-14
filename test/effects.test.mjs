@@ -566,10 +566,10 @@ test('feedback: a gate that found no commits tells the worker plainly to do the 
   await s.act(feedback(failures));
   const msg = s.t3.calls[1][2];
   assert.equal(msg, [
-    'The gate rejected this work: nothing was committed (no commits on top of aaaaaaaaaaaa).',
-    'You are the implementer of this work order: do the work in this worktree yourself and commit it.',
-    'Do not wait for another thread or for approval.',
-    'If something truly blocks you, reply with first line BLOCKED or NEEDS_CONTEXT and your question.',
+    'Your turn ended with nothing committed (no commits on top of aaaaaaaaaaaa), so the work order is not done.',
+    'You are the implementer of this work order: do the work in this worktree yourself, commit it, then report.',
+    'Do not wait for another thread or for approval, and do not end your turn to report progress.',
+    'If something truly blocks you, or you find that nothing needs to change, reply with first line BLOCKED or NEEDS_CONTEXT and say why.',
   ].join('\n'));
   assert.ok(msg.split('\n').length <= 6);
 });

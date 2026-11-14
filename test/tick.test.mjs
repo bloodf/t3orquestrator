@@ -581,3 +581,46 @@ test('R1: the first gate verdict of each launch is recorded for its model, once;
   const setup = { a: { running: false, result: { verdict: 'fail', failures: ['setup failed (exit 1)'], flags: [], headSha: B, setupFailed: true } } };
   assert.deepEqual(results(go([launched('a'), ended('a'), gateStarted('a')], { gates: setup })), []);
 });
+
+// A turn that ends with nothing committed is unfinished work, not a verdict: the same thread is told to go on.
+const startedAtBase = (u, attempt = 1) => ({ ...gateStarted(u, attempt), headSha: A }); // nothing committed: the head is the base
+const noCommit = { a: { running: false, result: { verdict: 'fail', failures: ['no commits on top of aaaaaaaaaaaa'], flags: [], headSha: A } } };
+
+test('unfinished: a thread that ended without a commit is nudged once, with no verdict and no rung used', () => {
+  const r = go([launched('a'), ended('a'), startedAtBase('a')], { gates: noCommit });
+  assert.deepEqual(evTypes(r), ['unfinished:a']);
+  assert.deepEqual(r.actions, [
+    { type: 'send-feedback', unit: 'a', attempt: 1, threadId: 't-a', failures: ['no commits on top of aaaaaaaaaaaa'], key: 'a::m2', instance: 'a', model: 'm2' },
+  ]);
+  assert.equal(r.report.inFlight, 1); // still in flight: wait keeps polling
+  // the nudge waits for a slot like feedback does
+  const full = go([launched('a'), ended('a'), startedAtBase('a')], { gates: noCommit, cap: 1, leases: [lease('other')] });
+  assert.deepEqual(evTypes(full), ['unfinished:a']);
+  assert.deepEqual(full.actions, []);
+});
+
+test('unfinished: the second empty turn of the same thread is a gate failure; a new thread is nudged again', () => {
+  const nudged = [launched('a'), ended('a'), startedAtBase('a'),
+    { type: 'unfinished', unit: 'a', at: 5, failures: ['no commits on top of aaaaaaaaaaaa'], headSha: A },
+    { type: 'feedback-sent', unit: 'a', at: 6, attempt: 1, threadId: 't-a' }, ended('a'), startedAtBase('a')];
+  const again = go(nudged, { gates: noCommit });
+  assert.deepEqual(evTypes(again), ['gated:a']);
+  assert.equal(again.events[0].attempt, 1);
+  assert.deepEqual(again.actions.map((x) => `${x.type}:${x.attempt ?? ''}`), ['record-result:', 'send-feedback:2']);
+  const relaunched = [...nudged, gatedEv('a', 'fail'), { type: 'feedback-sent', unit: 'a', at: 7, attempt: 2, threadId: 't-a' }, ended('a'),
+    startedAtBase('a', 2), gatedEv('a', 'fail', 2), launched('a', { attempt: 3, threadId: 't-a3', key: 'a::m3', model: 'm3', tier: 3 }), ended('a'), startedAtBase('a', 3)];
+  const third = go(relaunched, { gates: noCommit });
+  assert.deepEqual(evTypes(third), ['unfinished:a']); // not "gate failed 3 times"
+  assert.equal(third.actions[0].attempt, 3);
+  assert.equal(third.actions[0].threadId, 't-a3');
+});
+
+test('unfinished: only a result that is nothing but "no commits" counts', () => {
+  const mixed = { a: { running: false, result: { verdict: 'fail', failures: ['no new commit after feedback', 'no commits on top of aaaaaaaaaaaa'], flags: [], headSha: A } } };
+  assert.deepEqual(evTypes(go([launched('a'), ended('a'), startedAtBase('a')], { gates: mixed })), ['gated:a']);
+});
+
+test('gate could not complete is marked for a re-gate', () => {
+  const r = go([launched('a'), ended('a'), gateStarted('a'), gateStarted('a')], { gates: { a: { running: false, result: null, error: 'boom' } } });
+  assert.deepEqual(r.events.map((e) => [e.type, e.reason, e.regate]), [['needs-judgment', 'gate could not complete: boom', true]]);
+});

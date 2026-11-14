@@ -87,17 +87,19 @@ A running thread with no update for `stallMinutes` (default 20) is reported as `
 
 Feedback can also go unseen. If the thread still shows its run from before the failures were sent, `orq wait` reports it as stalled after 2 minutes. It treats it as a provider failure after `stallMinutes`.
 
+**Unfinished turn.** A thread whose turn ends with nothing committed (`no commits on top of <sha>` and no other failure) has not been judged. The unit goes back to `queued` on the same attempt and the same thread is told once: its turn ended with nothing committed, it is the implementer, it must do the work, commit it and then report, and reply `BLOCKED` or `NEEDS_CONTEXT` if something blocks it or nothing needs to change. This takes a slot, like feedback. No verdict is recorded for the model and no rung of the ladder below is used. Each new thread of a unit gets one such message; a second turn that ends the same way is a gate failure (`no new commit after feedback`).
+
 **Gate failure.** The work was judged and rejected.
 
 | Attempt that failed | Next |
 |---|---|
-| 1 | The failures are sent back to the same thread: "The gate rejected this work: … Fix it, commit, and report." When the worker committed nothing (`no commits on top of <sha>`), the message says so plainly instead: it is the implementer, it must do the work in its worktree and commit it, not wait for another thread or for approval, and reply `BLOCKED` or `NEEDS_CONTEXT` only if something truly blocks it. This takes a slot. |
+| 1 | The failures are sent back to the same thread: "The gate rejected this work: … Fix it, commit, and report." When the failure is that nothing was committed, the message is the one described under "Unfinished turn". This takes a slot. |
 | 2 | A fresh thread on a different model, at least one tier up (at most 4). The failures go at the top of its work order. |
 | 3 | `failed` with `gate failed 3 times: <failures>` |
 
-A gate directory left in `.orq/gate/<unit>` by a gate killed mid-run is cleared before the next gate of that unit; a path outside `.orq/gate/`, or reached through a symlink, is refused.
+A gate directory left in `.orq/gate/<unit>` by a gate killed mid-run is cleared before the next gate of that unit; a path outside `.orq/gate/`, or reached through a symlink, is refused. When it cannot be cleared, or comes back at once because a step the killed gate started still writes into it, the gate runs in `.orq/gate/<unit>.gate-<pid>` instead and leaves the old directory alone. `orq plan archive` removes both.
 
-A gate that started twice without producing a result goes to `failed` with `gate could not complete`, followed by `: <last line the gate process logged>` when it logged one.
+A gate that started twice without producing a result goes to `failed` with `gate could not complete`, followed by `: <last line the gate process logged>` when it logged one. `orq unit retry <unit>` then gates the same commit again without starting a worker; with `--tier` it starts a new worker instead.
 
 **Setup failure.** `checks.setup` is retried once like the other steps; a pass on the retry adds a `flaky` flag. When it still fails, that is a fact about the project, not the unit: the unit goes straight to `failed` with `setup failed (exit <n>)[: <last output line>]`, or `setup timed out[: <last output line>]`. Nothing is sent to the worker, nothing is relaunched, and no attempt is counted. Fix the setup, then `orq unit retry <id>` gates the unit's branch again (its current head; no new worker runs, so `--tier` is refused). The final gate works the same way: `judgment: integration: setup failed …`, then `orq unit retry integration`.
 

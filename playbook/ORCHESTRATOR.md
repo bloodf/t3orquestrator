@@ -55,6 +55,7 @@ Write `.orq/plan.json` (shape: `~/.t3orq/kit/playbook/templates/plan.example.jso
 - List what is still open after the intake answers and would change behaviour (formats, limits, error cases, naming the user will see). Settle all of it with one `orq ask` (see "Questions") before you write `decisions`. Do not guess, and do not go back to the user.
 - Settle every question two units would both face in `decisions`, and copy the ones that apply into each work order, before fan-out. Two workers deciding the same question differently is what breaks merges.
 - When other units build on shared code, make that a foundational unit and list it in their `deps`.
+- A dep makes a unit wait. List one only where the unit needs what the other commits; `orq plan check` prints how many units can run at once.
 - Cut vertical slices (one feature end to end), not layers.
 - Units with no dependency path between them run in parallel and must own disjoint `paths`.
 - Put the tests that `evidence` relies on in `forbidden`, unless writing them is the unit's job. A worker that can edit its own check can pass by weakening it.
@@ -82,7 +83,7 @@ Call `orq wait`. It returns one line. Act on it, then call `orq wait` again, unt
 | `judgment: <unit>: setup failed …` or `setup timed out …` | `checks.setup` fails in a clean checkout. That is the project, not the worker: correct it with `orq config set checks.setup "<cmd>"` or tell the user, then `orq unit retry <unit>`. |
 | `judgment: <unit>: merge conflict: <files>` or `integrate failed: …` | Another unit changed the same files first. Say so in the work order and run `orq unit retry <unit>`; the new worker starts from the merged code. Then fix the `paths` overlap in the plan. |
 | `judgment: <unit>: depends on dropped unit <id>` | Drop it too, or remove that entry from its `deps` in `plan.json` when it can stand alone. Then call `orq wait`. |
-| `judgment: <unit>: gate could not start: …`, `gate could not complete[: …]` or `final gate could not complete[: …]` | The gate process died; any text after the colon is why, and the `.log` file beside the gate result has the rest. Correct what it names, then `orq unit retry <unit>` (`orq unit retry integration` for the final gate). |
+| `judgment: <unit>: gate could not start: …`, `gate could not complete[: …]` or `final gate could not complete[: …]` | The gate process died; any text after the colon is why, and the `.log` file beside the gate result has the rest. Correct what it names, then `orq unit retry <unit>` (`orq unit retry integration` for the final gate). After `gate could not complete` the same commit is gated again and no new worker starts; add `--tier N` only when you want a new worker. |
 | `blocked: <unit> waiting on a request in thread <id>` | Read the request with `t3_pending_request`, settle it as "Questions" says, and answer it yourself. The user never answers in the worker's thread. |
 | `idle: … retry at <time>` | Models are cooling down. Tell the user why and the time, and call `orq wait` again at that time. |
 | any other `idle:` | Calling `orq wait` again changes nothing. Run `orq status`, then change the plan (`orq unit retry`, `orq unit drop`, or edit `plan.json`) or tell the user. |

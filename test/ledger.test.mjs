@@ -246,3 +246,29 @@ test('continuation: a provider failure remembers the failed launch; launched rec
   assert.equal(unitOf(old, 'u').continues, null);
   assert.equal(unitOf(old, 'u').state, 'running');
 });
+
+test('unfinished: back to queued on the same attempt, awaiting a nudge; each launch may be nudged once', () => {
+  let s = run(launched('u'), ev('thread-ended', 'u', { status: 'completed' }), ev('gate-started', 'u', { attempt: 1, headSha: A }));
+  s = apply(s, ev('unfinished', 'u', { failures: ['no commits on top of x'], headSha: A }));
+  assert.deepEqual([unitOf(s, 'u').state, unitOf(s, 'u').attempt, unitOf(s, 'u').nudge, unitOf(s, 'u').nudges, unitOf(s, 'u').judged], ['queued', 1, true, 1, false]);
+  assert.deepEqual(unitOf(s, 'u').lastFailure, ['no commits on top of x']);
+  s = apply(s, ev('feedback-sent', 'u', { attempt: 1, threadId: 't1' }));
+  assert.deepEqual([unitOf(s, 'u').state, unitOf(s, 'u').nudge, unitOf(s, 'u').nudges], ['running', false, 1]);
+  s = apply(apply(s, ev('thread-ended', 'u', { status: 'failed' })), launched('u', { threadId: 't2' }));
+  assert.deepEqual([unitOf(s, 'u').nudge, unitOf(s, 'u').nudges], [false, 0]);
+  assert.throws(() => apply(run(launched('u')), ev('unfinished', 'u', { failures: [] })), /illegal transition/);
+  // an old ledger never has the event: its units replay with no nudge
+  assert.deepEqual([unitOf(run(launched('u')), 'u').nudge, unitOf(run(launched('u')), 'u').nudges], [false, 0]);
+});
+
+test('retry after "gate could not complete" gates the same commit again; --tier starts a new worker', () => {
+  const judged = run(launched('u'), ev('thread-ended', 'u', { status: 'completed' }), ev('gate-started', 'u', { attempt: 1, headSha: B }),
+    ev('gate-started', 'u', { attempt: 1, headSha: B }), ev('needs-judgment', 'u', { reason: 'gate could not complete', regate: true }));
+  const again = unitOf(apply(judged, ev('retried', 'u')), 'u');
+  assert.deepEqual([again.state, again.attempt, again.gateStarts, again.regate, again.reason, again.threadId], ['gating', 1, 0, false, null, 't1']);
+  const fresh = unitOf(apply(judged, ev('retried', 'u', { tier: 3 })), 'u');
+  assert.deepEqual([fresh.state, fresh.attempt, fresh.minTier, fresh.regate], ['queued', 0, 3, false]);
+  // without the mark (an older ledger) a retry is a new start, as before
+  const old = apply(run(launched('u'), ev('thread-ended', 'u', { status: 'completed' })), ev('needs-judgment', 'u', { reason: 'gate could not complete' }));
+  assert.equal(unitOf(apply(old, ev('retried', 'u')), 'u').state, 'queued');
+});

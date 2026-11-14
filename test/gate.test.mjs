@@ -392,6 +392,24 @@ test('a leftover directory in .orq/gate/ (a gate killed mid-run) is cleared and 
   await assert.rejects(fs.stat(workDir));
 });
 
+test('a leftover in .orq/gate/ that cannot be cleared (an orphaned step still owns it) is left alone and the gate runs beside it', async (t) => {
+  const w = await realWork(t, { 'lib/a.mjs': 'x\n' });
+  const workDir = path.join(w.repo, '.orq', 'gate', 'u1');
+  const locked = path.join(workDir, 'locked');
+  await fs.mkdir(locked, { recursive: true });
+  await fs.writeFile(path.join(locked, 'busy.txt'), 'in use');
+  await fs.chmod(locked, 0o555); // its content cannot be removed
+  try {
+    const r = await real(w, 'test -f lib/a.mjs && test ! -d locked && pwd', { workDir });
+    assert.equal(r.verdict, 'pass', JSON.stringify(r));
+    assert.match(r.steps[0].tail, new RegExp(`/\\.orq/gate/u1\\.gate-${process.pid}$`));
+    await fs.stat(path.join(locked, 'busy.txt')); // the old directory was not fought over
+    await assert.rejects(fs.stat(`${workDir}.gate-${process.pid}`)); // its own checkout is removed
+  } finally {
+    await fs.chmod(locked, 0o755); // or the temporary directory cannot be removed
+  }
+});
+
 test('a leftover in .orq/gate/ that is a symlink to elsewhere is refused and its target left alone', async (t) => {
   const w = await realWork(t, { 'lib/a.mjs': 'x\n' });
   const elsewhere = path.join(path.dirname(w.repo), 'elsewhere');
