@@ -9,6 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - A worker whose turn ends with nothing committed is told to continue in the same thread, once per thread, before anything counts as a gate failure. In two real runs one gate in four failed only for this reason, and almost every such worker committed on its next turn. The ledger records it as `unfinished`; `orq stats` counts it under `no-commit`.
 - `orq plan check` says how parallel the units still to run are, and warns when they form a single chain.
+- The worktrees of a unit's threads are removed as soon as the unit is integrated, instead of at `orq plan archive`. Branches are kept, and a worktree with uncommitted or untracked files is never removed. In one real run 162 worktrees (13 GB) had piled up inside a single plan.
+- `orq init` says when a pnpm or bun project has no `node_modules` in its root (`share: none (node_modules is not installed in the project root: …)`), and detects sharing again on the next `orq init` once it is installed. An empty `share` list is no longer kept as if it were a choice; `share null` still turns sharing off.
 
 ### Changed
 

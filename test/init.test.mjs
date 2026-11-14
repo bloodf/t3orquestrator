@@ -56,7 +56,7 @@ test('init: prints facts, writes config, hints at sync', async () => {
   assert.equal(lines[1], 'slots: judge=self memory=file code-index=search git-host=gh');
   assert.equal(lines[2], 'checks: setup=pnpm install --frozen-lockfile full=pnpm run test');
   assert.equal(lines[3], 'autonomy=unset questions=auto');
-  assert.equal(lines[4], 'share: none');
+  assert.equal(lines[4], 'share: none (node_modules is not installed in the project root: install there once, then run "orq init" again)');
   assert.equal(lines[5], 'registry: 0 instances, 0 models, synced never');
   assert.equal(lines[6], 'providers: 0 usable; 0 disabled in T3; 0 disabled by you; 0 cooling');
   assert.equal(lines[7], 'next: pipe orchestrator_capabilities JSON to "orq sync"');

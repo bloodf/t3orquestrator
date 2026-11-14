@@ -269,3 +269,26 @@ test('E1: init and config set report unbalanced markers instead of rewriting', a
   // every user line kept (init's own `.orq/` line is appended at the end, as always)
   assert.ok((await fs.readFile(file, 'utf8')).startsWith('# user\n# orq share begin\n/user-secret-ignore\n'));
 });
+
+test('nothing installed in the root of a pnpm or bun project: init says so, and detects again once it is installed', async (t) => {
+  const r = await repo(t);
+  for (const d of ['node_modules', 'apps/shop/node_modules']) await fs.rm(path.join(r.dir, d), { recursive: true });
+  const hint = 'node_modules is not installed in the project root: install there once, then run "orq init" again';
+  assert.deepEqual(detectShares(r.dir, git), { paths: [], why: hint });
+  const home = path.join(r.root, 'home');
+  await fs.mkdir(home);
+  const first = await orqIn(r.dir, home, ['init']);
+  assert.ok(first.out.split('\n').includes(`share: none (${hint})`), first.out);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(r.dir, '.orq', 'config.json'), 'utf8')).share, []);
+  await fs.mkdir(path.join(r.dir, 'node_modules', 'x'), { recursive: true }); // the install ran
+  const second = await orqIn(r.dir, home, ['init']);
+  assert.ok(second.out.split('\n').includes('share: node_modules'), second.out); // the empty list was not a choice
+  // turned off by the user: no hint, and never detected again
+  assert.equal((await orqIn(r.dir, home, ['config', 'set', 'share', 'null'])).code, 0);
+  await fs.rm(path.join(r.dir, 'node_modules'), { recursive: true });
+  assert.ok((await orqIn(r.dir, home, ['init'])).out.split('\n').includes('share: none'));
+  // an npm project gets no such hint: it would not be shared anyway
+  const npm = await repo(t, { lock: 'package-lock.json' });
+  for (const d of ['node_modules', 'apps/shop/node_modules']) await fs.rm(path.join(npm.dir, d), { recursive: true });
+  assert.deepEqual(detectShares(npm.dir, git), { paths: [], why: null });
+});
