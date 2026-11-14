@@ -9,11 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- A project can hold a standing goal: `orq config set goal "<sentence>"` in the project, `null` to clear it, stored in `.orq/config.json`. The text is cut to one line, control characters are removed, and it is at most 500 characters. While it is set, `orq wait` (on `done`, and on exit 4 when there is no valid plan) and `orq plan archive` add `goal: <text>` and a `next:` line saying the goal is still open and what to do, and `orq status` prints `goal: <text>` after the `plan:` line. With no goal set the output does not change. Real orchestrator threads finished one plan, reported and ended their turn although the user's goal was much larger; nothing told them the goal was still open.
+- A project can hold a standing goal: `orq config set goal "<sentence>"` in the project, `null` to clear it, stored in `.orq/config.json`. The text is cut to one line, control characters (including C1, zero-width and bidi ones) are removed, and it is at most 500 characters; `config set goal` prints the stored value, and `"goal": null` in the file reads as no goal. While it is set, `orq wait` (on `done`, and on exit 4 when there is no plan file) and `orq plan archive` add `goal: <text>` and a `next:` line saying the goal is still open and what to do, and `orq status` prints `goal: <text>` after the `plan:` line (the `plan:` line itself is the running plan's goal). If the config cannot be read after an archive, `orq plan archive` adds `note: config unreadable: <why>` and still exits 0. With no goal set the output does not change. Real orchestrator threads finished one plan, reported and ended their turn although the user's goal was much larger; nothing told them the goal was still open.
 
 ### Changed
 
-- The playbook tells the orchestrator to store a goal larger than one plan, and not to end its turn at Finish while `orq` prints a `goal:` line.
+- The playbook tells the orchestrator to store a goal larger than one plan, to ask the user once whether a stale goal still stands, to send the open points of later parts to `orq ask`, and not to end its turn at Finish while `orq` prints a `goal:` line: it plans the biggest gaps next, from the previous integration branch in a mode that does not merge.
 
 ## [0.4.0] - 2026-11-14
 

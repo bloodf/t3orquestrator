@@ -68,6 +68,18 @@ test('archive with a standing goal adds the goal: and next: lines; without one t
   assert.equal(r.out.split('\n').length, 6);
 });
 
+test('archive with an unreadable config still exits 0 and says so after its normal lines', async (t) => {
+  const { p } = await finished(t);
+  const file = orqPath(p, 'config.json');
+  await fs.writeFile(file, JSON.stringify({ ...JSON.parse(await fs.readFile(file, 'utf8')), goal: 5 }));
+  const r = await orq(['plan', 'archive'], p);
+  assert.equal(r.code, 0, r.err);
+  const lines = r.out.split('\n');
+  assert.equal(lines[0].startsWith('archived: plan p1'), true);
+  assert.match(lines.at(-2), /^note: config unreadable: invalid config .*goal must be one clean line/);
+  assert.equal(lines.length, 5);
+});
+
 test('archive moves the plan state, keeps config and the branch, removes the worktree', async (t) => {
   const { p } = await finished(t);
   const r = await orq(['plan', 'archive'], p);

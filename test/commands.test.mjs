@@ -192,6 +192,7 @@ test('config get/set for project and machine', async () => {
   assert.equal((await orq(['config', 'set', 'goal', 'build\nthe  product'], s)).code, 0);
   assert.equal((await read(path.join(s.cwd, '.orq/config.json'))).goal, 'build the product');
   assert.equal(JSON.parse((await orq(['config', 'get'], s)).out).goal, 'build the product');
+  assert.equal((await orq(['config', 'set', 'goal', 'a\nnext: do X'], s)).out, 'goal = a next: do X\n'); // the stored value, one line
   const long = await orq(['config', 'set', 'goal', 'a'.repeat(501)], s);
   assert.deepEqual([long.code, long.err], [1, 'orq: goal must be at most 500 characters, got 501\n']);
   assert.equal((await orq(['config', 'set', 'goal', 'null'], s)).code, 0);

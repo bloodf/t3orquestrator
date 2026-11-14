@@ -127,7 +127,8 @@ test('project goal: one clean line of at most 500 characters, cleared with null'
   assert.throws(() => setConfigValue({}, 'goal', 'x', 'machine'), /unknown machine config key "goal"/);
   assert.equal((await loadProjectConfig(await tmpFile('{}'))).goal, undefined);
   assert.equal((await loadProjectConfig(await tmpFile('{"goal":"ship it"}'))).goal, 'ship it');
-  for (const bad of ['""', '"a\\nb"', '3', 'null', `"${'a'.repeat(501)}"`]) {
+  assert.equal('goal' in await loadProjectConfig(await tmpFile('{"goal":null}')), false); // a cleared key means no goal
+  for (const bad of ['""', '"a\\nb"', '3', `"${'a'.repeat(501)}"`]) {
     await assert.rejects(loadProjectConfig(await tmpFile(`{"goal":${bad}}`)), /goal must be/);
   }
 });

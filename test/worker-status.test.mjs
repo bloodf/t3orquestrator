@@ -41,3 +41,8 @@ test('parseStatusLine: any status set, the same tolerance, and the lines after t
   assert.equal(parseStatusLine('I think yes', S).status, 'I THINK YES');
   assert.equal(parseStatusLine(`ANSWER: ${'x'.repeat(600)}`, S, 400).detail.length, 400);
 });
+
+test('hidden characters in a worker report are replaced; ordinary text is unchanged', () => {
+  assert.deepEqual(parseWorkerStatus('DONE: all\u202egood\u200bdone'), { status: 'DONE', detail: 'all good done' });
+  assert.deepEqual(parseWorkerStatus('DONE: ça va – ok'), { status: 'DONE', detail: 'ça va – ok' });
+});

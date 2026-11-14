@@ -211,6 +211,9 @@ test('wait: refuses without a valid plan or a usable t3', async (t) => {
   assert.equal(noPlan.err, 'orq: no valid plan; run "orq plan check"\n');
   const cfg = path.join(p.repo, '.orq', 'config.json');
   await fs.writeFile(cfg, JSON.stringify({ ...JSON.parse(await fs.readFile(cfg, 'utf8')), goal: 'ship it' }));
+  const invalid = await orq(['wait'], p, sim); // a plan that exists but is invalid: not told to plan its next part
+  assert.equal(invalid.err, 'orq: no valid plan; run "orq plan check"\n');
+  await fs.rm(path.join(p.repo, '.orq', 'plan.json'));
   const withGoal = await orq(['wait'], p, sim);
   assert.equal(withGoal.code, 4);
   assert.equal(withGoal.err, 'orq: no valid plan; run "orq plan check"\ngoal: ship it\nnext: the goal is still open: plan its next part, run "orq plan check", then call "orq wait"\n');
