@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-14
+
+### Changed
+
+- A unit's `paths` no longer fence the worker in. The gate fails only a change under the unit's `forbidden` globs (`forbidden paths: <files>`). A changed file outside `paths` that nothing forbids passes with the new `outside-paths` flag, which the orchestrator reviews before Finish like the other flags. The work order template and the message sent to a stopped worker now say that such a file is the worker's to edit and to name in its report, and that it must not stop to ask for it. In one real plan of 61 units, 22 of the 30 times the orchestrator was woken were a worker asking to edit one file outside its `paths`; every request was granted. A plan that relied on `paths` alone to keep a worker out of a file must now list that file in `forbidden`.
+
+### Fixed
+
+- The `playbook:` line no longer says `the kit was updated (unknown -> ...)` to a session that has no record of reading the playbook. It now says `playbook: this session has no record of reading the playbook; read <file> now, then run "orq init"`, and the `(old -> new)` part is printed only when both kit commits are known.
+
 ## [0.5.1] - 2026-11-14
 
 ### Changed

@@ -62,7 +62,7 @@ Write `.orq/plan.json` (shape: `~/.t3orq/kit/playbook/templates/plan.example.jso
 - A dep makes a unit wait. List one only where the unit needs what the other commits; `orq plan check` prints how many units can start now.
 - Cut vertical slices (one feature end to end), not layers.
 - Every unit changes files in the repository (code, tests or docs). Plan a unit whose only output is a report only when the user asked for that report.
-- Units with no dependency path between them run in parallel and must own disjoint `paths`.
+- Units with no dependency path between them run in parallel and must own disjoint `paths`. `paths` is where a unit works, not a fence: a worker may edit another file its goal needs, and the gate passes it with `flags=outside-paths`. The fence is `forbidden`: list there what the unit must never change.
 - Put the tests that `evidence` relies on in `forbidden`, unless writing them is the unit's job. A worker that can edit its own check can pass by weakening it.
 - `evidence` runs what is in the repository at the worker's commit: the project's test runner on files in the repository. Never write a check script yourself. A check that does not exist yet is a unit of its own (`job: "test"`) that later units depend on and list in `forbidden`.
 - A unit that needs no dependency install (documentation, plain text) sets `"setup": false`; its gate then skips `checks.setup`.
@@ -101,6 +101,7 @@ After any return, when the output has a `settle:` line, settle each thread id on
 Passed units merge on their own, so before Finish run `orq status` and act on every `flags=` it shows (details in the unit's last gate file):
 - `test-weakened`, `deleted-test`, `evidence-target-changed`: inspect that file's diff. If the check was made easier, append a `fix` unit that restores it.
 - `skipped-test`, `placeholder`: confirm the lines are not unfinished work; if they are, append a `fix` unit.
+- `outside-paths`: the worker changed files outside its `paths`, which is allowed. If a change does not serve the unit's goal, append a `fix` unit that reverts it.
 - `flaky`: report it.
 
 ## Finish

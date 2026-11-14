@@ -15,7 +15,7 @@ The agent follows `playbook/ORCHESTRATOR.md`. It never writes product code itsel
 ## The life of one request
 
 1. **Intake.** The orchestrator recalls memory once and sizes the work. The default is one unit. It fans out only for three or more independent, substantial units.
-2. **Plan.** It writes `.orq/plan.json` and a work order per unit under `.orq/orders/` (at most 40 lines each). Units that could run in parallel must own disjoint `paths`. `orq plan check` validates the plan.
+2. **Plan.** It writes `.orq/plan.json` and a work order per unit under `.orq/orders/` (at most 40 lines each). Units that could run in parallel must own disjoint `paths`. `paths` says where a unit works; `forbidden` is what the gate refuses. `orq plan check` validates the plan.
 3. **Start.** The first `orq wait` resolves `base` (from the plan, else project config, default `main`) to a commit. It records a plan id and creates the integration branch `orq/<planId>/integration`, checked out at `.orq/integration`.
 4. **Launch.** Each ready unit is routed to a model and started as a T3 thread. The thread runs in a new worktree on branch `orq/<planId>/<unit>-a<attempt>` (plus `-l<n>` on a relaunch), based on the current integration head, so it sees the work its dependencies merged. The work order is the thread's first message.
 5. **Gate.** When the thread completes, a detached gate process checks the commits on the worker's branch. See [The gate](#the-gate).
@@ -112,7 +112,7 @@ Workers and the orchestrator hit questions the plan does not settle. By default 
 The gate judges the committed bytes between the unit's base and the worker's branch head. Uncommitted work does not count.
 
 1. There must be at least one commit on top of the base.
-2. Every changed file must match the unit's `paths` and none of its `forbidden` globs.
+2. No changed file may match the unit's `forbidden` globs. A changed file outside the unit's `paths` that nothing forbids does not fail the gate: it adds the `outside-paths` flag.
 3. A fresh detached checkout of the head runs `checks.setup` (skipped for a unit whose plan entry has `"setup": false`), then the unit's `evidence` command, then `checks.unit` if it is set. Each step has 20 minutes. A failed step is run once more. If it passes the second time, the gate passes with a `flaky` flag. A setup step that fails twice is not held against the unit: it goes to the orchestrator as `setup failed`, because the worker cannot fix the project's install step.
 
 The evidence belongs in the repository: `orq plan check` warns (never fails) when a unit's evidence runs a file outside the project or under `.orq/`, since such a check is not in the worker's commit or the pull request.
@@ -129,6 +129,7 @@ Flags never fail the gate. They tell the orchestrator what to read before it acc
 | `test-weakened` | An existing test file lost lines |
 | `evidence-target-changed` | The evidence command names a file that the unit modified, deleted, renamed or replaced. A file the unit added itself is not flagged |
 | `flaky` | Setup, evidence or checks failed once and passed on the retry |
+| `outside-paths` | The unit changed files outside its `paths` that its `forbidden` list does not name; the detail lists them |
 | `no-evidence` | The unit passed with no evidence command and no `checks.unit` |
 
 A test file is any path under `test/`, `tests/`, `__tests__/` or `spec/`, or a name ending in `.test.*`, `.spec.*` or `_test.*`.

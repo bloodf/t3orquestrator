@@ -246,7 +246,7 @@ test('P1: each orchestrator thread has its own playbook record; at most 10 are k
   await orq(['init'], s, as('orch-b')); // b read the new playbook; a did not
   assert.match((await orq(['status'], s, as('orch-a'))).out, /^playbook: the kit was updated/m);
   assert.doesNotMatch((await orq(['status'], s, as('orch-b'))).out, /playbook:/);
-  assert.match((await orq(['status'], s, as('orch-new'))).out, /^playbook: the kit was updated \(unknown -> unknown\)/m);
+  assert.match((await orq(['status'], s, as('orch-new'))).out, /^playbook: this session has no record of reading the playbook; read \S+ now, then run "orq init"$/m);
   for (let i = 0; i < 12; i += 1) await orq(['init'], s, { ...as(`t${i}`), now: () => NOW + i });
   const cfg = await read(path.join(s.cwd, '.orq/config.json'));
   assert.equal(Object.keys(cfg.playbooks).length, 10);

@@ -78,10 +78,11 @@ test('zero commits ahead fails and stops before anything else', async () => {
   assert.equal(r.headSha, HEAD);
 });
 
-test('files outside writable paths fail, listing at most 5', async () => {
+test('files outside writable paths pass with one outside-paths flag, listing at most 5', async () => {
   const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((n) => ({ status: 'A', path: `x/${n}` }));
-  const r = await gate({ git: fakeGit({ changedFiles: () => files }) });
-  assert.deepEqual(r.failures, ['outside writable paths: x/a, x/b, x/c, x/d, x/e +2 more']);
+  const r = await gate({ git: fakeGit({ changedFiles: () => [...files, { status: 'M', path: 'lib/ok.mjs' }] }) });
+  assert.deepEqual([r.verdict, r.failures], ['pass', []]);
+  assert.deepEqual(r.flags, [{ kind: 'outside-paths', path: 'x/a', detail: 'x/a, x/b, x/c, x/d, x/e +2 more' }]);
 });
 
 test('forbidden globs fail even inside writable paths', async () => {
@@ -89,14 +90,17 @@ test('forbidden globs fail even inside writable paths', async () => {
     unit: unit({ forbidden: ['lib/secret/**'] }),
     git: fakeGit({ changedFiles: () => [{ status: 'M', path: 'lib/secret/k.mjs' }, { status: 'M', path: 'lib/ok.mjs' }] }),
   });
-  assert.deepEqual(r.failures, ['outside writable paths: lib/secret/k.mjs']);
+  assert.deepEqual(r.failures, ['forbidden paths: lib/secret/k.mjs']);
+  assert.deepEqual(r.flags, []);
 });
 
-test('a rename needs both old and new path allowed', async () => {
+test('a forbidden file outside the writable paths is a failure, not a flag; a rename counts both of its paths', async () => {
   const r = await gate({
-    git: fakeGit({ changedFiles: () => [{ status: 'R', path: 'lib/new.mjs' }, { status: 'D', path: 'docs/old.md' }] }),
+    unit: unit({ forbidden: ['docs/**'] }),
+    git: fakeGit({ changedFiles: () => [{ status: 'R', path: 'lib/new.mjs' }, { status: 'D', path: 'docs/old.md' }, { status: 'A', path: 'x/a' }] }),
   });
-  assert.deepEqual(r.failures, ['outside writable paths: docs/old.md']);
+  assert.deepEqual(r.failures, ['forbidden paths: docs/old.md']);
+  assert.deepEqual(r.flags.map((f) => [f.kind, f.detail]), [['outside-paths', 'x/a']]);
 });
 
 test('path failures skip the worktree and all commands but keep scan flags', async () => {
@@ -106,12 +110,13 @@ test('path failures skip the worktree and all commands but keep scan flags', asy
       changedFiles: () => [{ status: 'A', path: 'x/a' }],
       addedLines: () => [{ path: 'x/a', line: '// TODO' }],
     }),
+    unit: unit({ forbidden: ['x/**'] }),
   });
   assert.equal(r.verdict, 'fail');
   assert.equal(r.calls.length, 0);
   assert.deepEqual(r.steps, []);
   assert.deepEqual(r.gitCalls.map((c) => c[0]), ['commitsAhead']);
-  assert.match(r.failures[0], /outside writable paths/);
+  assert.match(r.failures[0], /^forbidden paths: x\/a$/);
   assert.deepEqual(r.flags.map((f) => f.kind), ['placeholder']);
 });
 
@@ -346,12 +351,11 @@ test('end to end: a gitignored file cannot satisfy the evidence either', async (
   assert.equal(r.verdict, 'fail');
 });
 
-test('end to end: a change outside writable paths fails without running evidence', async (t) => {
+test('end to end: a change outside writable paths runs the evidence and passes with a flag', async (t) => {
   const w = await realWork(t, { 'lib/a.mjs': 'x\n', 'docs/n.md': 'y\n' });
-  const r = await real(w, 'node -e "process.exit(0)"');
-  assert.equal(r.verdict, 'fail');
-  assert.deepEqual(r.failures, ['outside writable paths: docs/n.md']);
-  assert.deepEqual(r.steps, []);
+  const r = await real(w, 'test -f docs/n.md');
+  assert.deepEqual([r.verdict, r.failures], ['pass', []]);
+  assert.deepEqual(r.flags.filter((f) => f.kind === 'outside-paths'), [{ kind: 'outside-paths', path: 'docs/n.md', detail: 'docs/n.md' }]);
 });
 
 const gitAt = (w, ...args) => sh(w.repo, ...args);

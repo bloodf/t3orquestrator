@@ -228,7 +228,7 @@ async function waitForResult(fx, unit, attempt) {
 
 test('gate start and collect through a real detached gate-run, then the final gate', async (t) => {
   const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-  const s = await setup(t, [unitSpec('a'), unitSpec('b')], { fx: { isAlive: alive }, cap: 3 });
+  const s = await setup(t, [unitSpec('a'), unitSpec('b', { forbidden: ['other.txt'] })], { fx: { isAlive: alive }, cap: 3 });
   await s.act(launchA());
   await s.act(launchA('b'));
   const st0 = await readState(s.p.repo);
@@ -247,7 +247,7 @@ test('gate start and collect through a real detached gate-run, then the final ga
   assert.equal(ra.headSha, aSha);
   const rb = await waitForResult(s.fx, 'b', 1);
   assert.equal(rb.verdict, 'fail');
-  assert.match(rb.failures.join(), /outside writable paths: other\.txt/);
+  assert.match(rb.failures.join(), /forbidden paths: other\.txt/);
 
   await append(s, { type: 'gated', unit: 'a', attempt: 1, verdict: 'pass', failures: [], flags: [], headSha: aSha },
     { type: 'dropped', unit: 'b' });
@@ -607,6 +607,7 @@ test('feedback: a worker that stopped is quoted and told that unfinished work is
   assert.equal(msg, [
     'You stopped with: "BLOCKED: implementation incomplete".',
     'Unfinished work is not a blocker: you are the implementer, so continue the work order in this worktree, commit it, then report.',
+    'A file outside "You may write" that the goal needs and that "You must not touch" does not list is yours to edit: edit it and name it in your report. Do not ask for it.',
     'If you truly cannot go on without something you do not have, reply again with first line BLOCKED (or NEEDS_CONTEXT) and name the one specific thing you need and where you looked for it.',
   ].join('\n'));
 });

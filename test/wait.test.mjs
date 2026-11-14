@@ -681,7 +681,7 @@ test('U1: wait names a changed playbook as the second line, before settle and no
   const r = await orq(['wait'], p, sim, { kitDir: kit });
   const lines = r.out.trim().split('\n');
   assert.match(lines[0], /^done: /);
-  assert.equal(lines[1], `playbook: the kit was updated (unknown -> unknown); read ${file} again now, then run "orq init"`);
+  assert.equal(lines[1], `playbook: the kit was updated; read ${file} again now, then run "orq init"`);
   assert.match(lines[2], /^settle: /);
   assert.match(lines[3], /^note: cap 18 is an override/);
   assert.equal((await orq(['status'], p, sim, { kitDir: kit })).out.split('\n')[1], lines[1]); // status, with a plan
@@ -698,7 +698,7 @@ test('U1: a config written by an older kit (no playbook record) still runs; the 
   const r = await orq(['wait'], p, simulator(p, { a: [['commit-complete']] }), { kitDir: kit });
   assert.equal(r.code, 0, r.err);
   assert.deepEqual(r.out.trim().split('\n').slice(0, 2).map((l) => l.replace(/[0-9a-f]{12}/g, 'X')),
-    ['done: 1 units integrated at X; final checks no-evidence', `playbook: the kit was updated (unknown -> unknown); read ${file} again now, then run "orq init"`]);
+    ['done: 1 units integrated at X; final checks no-evidence', `playbook: this session has no record of reading the playbook; read ${file} now, then run "orq init"`]);
 });
 
 test('G1: a finished plan whose plan.json now has another goal is a new request, even with the same unit ids', async (t) => {
