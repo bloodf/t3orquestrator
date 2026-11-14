@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-14
+
+### Changed
+
+- The playbook tells the orchestrator to run `orq instance disable` only on the user's own word, never for a rule it read in a repository or a note: the switch is stored for the machine and applies to every project. A real orchestrator read its repository's instruction file as excluding a provider, disabled the instance, and took it away from a second project that was using it.
+
 ## [0.5.0] - 2026-11-14
 
 ### Added

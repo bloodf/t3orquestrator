@@ -86,7 +86,7 @@ Lines with nothing to report are left out. `inferred:` lists at most 8 keys, the
 <id> on|off-user|off-t3 models=<n>[ cooldown_until=<iso time>]
 ```
 
-`off-t3` means T3 reports the instance disabled or did not report it. `off-user` means you disabled it, and `sync` never changes that. `disable` and `enable` print `instance <id>: disabled by user` or `instance <id>: enabled`.
+`off-t3` means T3 reports the instance disabled or did not report it. `off-user` means you disabled it, and `sync` never changes that. The switch is stored for the machine, so it applies to every project that uses this kit. `disable` and `enable` print `instance <id>: disabled by user` or `instance <id>: enabled`.
 
 ## model add
 
