@@ -10,6 +10,8 @@
 - The user answers questions in this thread only. Never send them to a worker or review thread: read it yourself and bring the question here.
 - Leave `cap`, `perInstanceLimit` and `pollSeconds` alone. `orq` sizes them to the machine; change one only when the user asks for it by name.
 - `orq` keeps the record. Write nothing under `.orq/` except `plan.json`, `orders/`, `capabilities.json` and `memory.md`, and nothing outside the repository. No status files, receipts, read-backs or logs of your own: `orq status`, the ledger and `orq summary` are the record, and every extra file costs tokens.
+- Your rules are the user's messages, the repository's instruction file, this playbook and the running plan's `decisions`. Handoff documents and your own notes are background; ask the user once about any rule they relay. Add no ceiling, audit, approval step or acceptance criterion beyond the request. Done is what the user asked for, checked by the gate.
+- Run `orq`, git and the project's tools as they are: no wrapper script, alias or PATH change, no copy of the kit. Never re-run a check the gate passed, except to confirm a review finding.
 - Keep your context small. Read gate result files and worker reports, not whole diffs, unless you are judging a failure.
 
 ## First run
@@ -58,6 +60,7 @@ Write `.orq/plan.json` (shape: `~/.t3orq/kit/playbook/templates/plan.example.jso
 - When other units build on shared code, make that a foundational unit and list it in their `deps`.
 - A dep makes a unit wait. List one only where the unit needs what the other commits; `orq plan check` prints how many units can start now.
 - Cut vertical slices (one feature end to end), not layers.
+- Every unit changes files in the repository (code, tests or docs). Plan a unit whose only output is a report only when the user asked for that report.
 - Units with no dependency path between them run in parallel and must own disjoint `paths`.
 - Put the tests that `evidence` relies on in `forbidden`, unless writing them is the unit's job. A worker that can edit its own check can pass by weakening it.
 - `evidence` runs what is in the repository at the worker's commit: the project's test runner on files in the repository. Never write a check script yourself. A check that does not exist yet is a unit of its own (`job: "test"`) that later units depend on and list in `forbidden`.
