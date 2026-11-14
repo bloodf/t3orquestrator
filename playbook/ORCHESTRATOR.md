@@ -62,13 +62,13 @@ Write `.orq/plan.json` (shape: `~/.t3orq/kit/playbook/templates/plan.example.jso
 - A dep makes a unit wait. List one only where the unit needs what the other commits; `orq plan check` prints how many units can start now.
 - Cut vertical slices (one feature end to end), not layers.
 - Every unit changes files in the repository (code, tests or docs). Plan a unit whose only output is a report only when the user asked for that report.
-- Units with no dependency path between them run in parallel and must own disjoint `paths`. `paths` is where a unit works, not a fence: a worker may edit another file its goal needs, and the gate passes it with `flags=outside-paths`. The fence is `forbidden`: list there what the unit must never change.
+- Units with no dependency path between them run in parallel and must own disjoint `paths`. `paths` is where a unit works, not a fence: a worker may edit another file its goal needs, and the gate passes it with `flags=outside-paths`. The fence is `forbidden`: list there what the unit must never change, and write exactly that list under "You must not touch" in its order.
 - Put the tests that `evidence` relies on in `forbidden`, unless writing them is the unit's job. A worker that can edit its own check can pass by weakening it.
 - `evidence` runs what is in the repository at the worker's commit: the project's test runner on files in the repository. Never write a check script yourself. A check that does not exist yet is a unit of its own (`job: "test"`) that later units depend on and list in `forbidden`.
 - A unit that needs no dependency install (documentation, plain text) sets `"setup": false`; its gate then skips `checks.setup`.
 - `evidence` is one deterministic command that exits 0 only when the unit is done. It runs in a clean checkout of the worker's commit, after `checks.setup`, with no services running. Make it as narrow and fast as possible.
 - Pick the lowest `job` class that can do the work. `orq` gives the unit the cheapest enabled model at or above that class's tier, and moves it up by itself when a gate fails, so start low: that is what spreads work across providers and saves the strongest models. Smallest: `mechanical`, `docs`, `explore`, `summarize` (reading, surveying and reporting are `explore`, however large). Then `implement`, `test` (the default for building). Then `implement-complex` (many files or subtle state). Strongest: `plan`, `architecture`, `debug-hard`, only for a design decision other units depend on or a failure two attempts did not find. If more than a third of a plan is in the strongest classes, reclass it. `fix` gets at least the author's tier. `review` is for the reviewer only.
-- A unit that adds or changes a dependency lists the manifest and the lockfile in `paths`. Two such units never run in parallel: make one depend on the other.
+- A unit that adds or changes a dependency lists the manifest and the lockfile in `paths`: the gate fails one changed outside `paths`. Two such units never run in parallel: make one depend on the other.
 - For units on the smallest tiers, write the Do section as numbered steps with explicit "Do not" lines. Small models follow steps, not intent.
 - A work order is at most 40 lines: paths and decisions, never pasted file contents.
 
@@ -86,7 +86,7 @@ Call `orq wait`. It returns one line. Act on it, then call `orq wait` again, unt
 | `judgment: <unit>: worker reported <STATUS>: …` | The worker stopped and said why. Read its reply (`t3_thread_read`), settle its question as "Questions" says, put the answer into the work order, and run `orq unit retry <unit>`. |
 | `judgment: <unit>: <n> provider failures` or `no model available: …` | The providers failed, not the work. Run `orq unit retry <unit>` and call `orq wait`; `orq` steers away from the instances that failed. If it returns the same judgment again, tell the user which instances `orq status` shows as cooling or disabled and stop. |
 | `judgment: <unit>: setup failed …` or `setup timed out …` | `checks.setup` fails in a clean checkout. That is the project, not the worker: correct it with `orq config set checks.setup "<cmd>"` or tell the user, then `orq unit retry <unit>`. |
-| `judgment: <unit>: merge conflict: <files>` or `integrate failed: …` | Another unit changed the same files first. Say so in the work order and run `orq unit retry <unit>`; the new worker starts from the merged code. Then fix the `paths` overlap in the plan. |
+| `judgment: <unit>: merge conflict: <files>` or `integrate failed: …` | Another unit changed the same files first. Say so in the work order and run `orq unit retry <unit>`; the new worker starts from the merged code. Then fix the `paths` overlap in the plan; if the files were outside both units' `paths`, add them to one unit's `forbidden` or make one unit a dep of the other. |
 | `judgment: <unit>: depends on dropped unit <id>` | Drop it too, or remove that entry from its `deps` in `plan.json` when it can stand alone. Then call `orq wait`. |
 | `judgment: <unit>: gate could not start: …`, `gate could not complete[: …]` or `final gate could not complete[: …]` | The gate process died; any text after the colon is why, and the `.log` file beside the gate result has the rest. Correct what it names, then `orq unit retry <unit>` (`orq unit retry integration` for the final gate). After `gate could not complete` the same commit is gated again and no new worker starts; add `--tier N` only when you want a new worker. |
 | `blocked: <unit> waiting on a request in thread <id>` | Read the request with `t3_pending_request`, settle it as "Questions" says, and answer it yourself. The user never answers in the worker's thread. |
@@ -101,7 +101,7 @@ After any return, when the output has a `settle:` line, settle each thread id on
 Passed units merge on their own, so before Finish run `orq status` and act on every `flags=` it shows (details in the unit's last gate file):
 - `test-weakened`, `deleted-test`, `evidence-target-changed`: inspect that file's diff. If the check was made easier, append a `fix` unit that restores it.
 - `skipped-test`, `placeholder`: confirm the lines are not unfinished work; if they are, append a `fix` unit.
-- `outside-paths`: the worker changed files outside its `paths`, which is allowed. If a change does not serve the unit's goal, append a `fix` unit that reverts it.
+- `outside-paths`: the worker changed files outside its `paths`, which is allowed. Inspect a changed test file as for `test-weakened`. If a change does not serve the unit's goal, append a `fix` unit that reverts it.
 - `flaky`: report it.
 
 ## Finish

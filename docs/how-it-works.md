@@ -112,7 +112,7 @@ Workers and the orchestrator hit questions the plan does not settle. By default 
 The gate judges the committed bytes between the unit's base and the worker's branch head. Uncommitted work does not count.
 
 1. There must be at least one commit on top of the base.
-2. No changed file may match the unit's `forbidden` globs. A changed file outside the unit's `paths` that nothing forbids does not fail the gate: it adds the `outside-paths` flag.
+2. No changed file may match the unit's `forbidden` globs. A changed file outside the unit's `paths` that nothing forbids does not fail the gate: it adds the `outside-paths` flag. The exception is a package manifest or lockfile (the files listed under shared dependencies below): changed outside `paths`, it fails the gate, because the worktree's linked dependencies are valid only while those files are unchanged.
 3. A fresh detached checkout of the head runs `checks.setup` (skipped for a unit whose plan entry has `"setup": false`), then the unit's `evidence` command, then `checks.unit` if it is set. Each step has 20 minutes. A failed step is run once more. If it passes the second time, the gate passes with a `flaky` flag. A setup step that fails twice is not held against the unit: it goes to the orchestrator as `setup failed`, because the worker cannot fix the project's install step.
 
 The evidence belongs in the repository: `orq plan check` warns (never fails) when a unit's evidence runs a file outside the project or under `.orq/`, since such a check is not in the worker's commit or the pull request.

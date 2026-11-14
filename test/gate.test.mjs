@@ -460,6 +460,17 @@ test('a unit without a forbidden list is gated as if the list were empty', async
   const { forbidden, ...bare } = unit();
   const r = await gate({ unit: bare });
   assert.equal(r.verdict, 'pass');
+  const out = await gate({ unit: bare, git: fakeGit({ changedFiles: () => [{ status: 'A', path: 'x/a' }] }) });
+  assert.deepEqual([out.verdict, out.flags.map((f) => f.kind)], ['pass', ['outside-paths']]);
+});
+
+test('a package manifest or lockfile outside the writable paths fails; inside them it passes', async () => {
+  const files = [{ status: 'M', path: 'package.json' }, { status: 'M', path: 'apps/web/pnpm-lock.yaml' }, { status: 'A', path: 'x/a' }];
+  const r = await gate({ git: fakeGit({ changedFiles: () => files }) });
+  assert.deepEqual(r.failures, ['dependency files outside paths: package.json, apps/web/pnpm-lock.yaml']);
+  assert.deepEqual(r.flags.map((f) => [f.kind, f.detail]), [['outside-paths', 'x/a']]);
+  const own = await gate({ unit: unit({ paths: ['lib/**', 'package.json', 'apps/web/pnpm-lock.yaml'] }), git: fakeGit({ changedFiles: () => files.slice(0, 2) }) });
+  assert.deepEqual([own.verdict, own.failures, own.flags], ['pass', [], []]);
 });
 
 test('S: the gate checkout links shared dependencies before its steps; removing it leaves them alone', async (t) => {

@@ -607,7 +607,7 @@ test('feedback: a worker that stopped is quoted and told that unfinished work is
   assert.equal(msg, [
     'You stopped with: "BLOCKED: implementation incomplete".',
     'Unfinished work is not a blocker: you are the implementer, so continue the work order in this worktree, commit it, then report.',
-    'A file outside "You may write" that the goal needs and that "You must not touch" does not list is yours to edit: edit it and name it in your report. Do not ask for it.',
+    'A file outside "You may write" that the goal needs and that "You must not touch" does not list is yours to edit, unless it is a package manifest or lockfile: edit it and name it in your report. Do not ask for it.',
     'If you truly cannot go on without something you do not have, reply again with first line BLOCKED (or NEEDS_CONTEXT) and name the one specific thing you need and where you looked for it.',
   ].join('\n'));
 });

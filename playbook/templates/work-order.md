@@ -22,7 +22,7 @@ You are a worker started by `orq`. You do this work yourself, in this worktree, 
 ## Rules
 - Commit your work on this branch before you report. Only committed work counts.
 - Finish in one turn. Do not end your turn to announce a plan, to report progress or to wait: a turn that ends with nothing committed is unfinished work, and you will be told to continue.
-- Work in "You may write". A file outside it that the goal needs and that "You must not touch" does not list is yours to edit: edit it and name it in your report. Never stop to ask for a file. A change under "You must not touch" is refused.
+- Work in "You may write". A file outside it that the goal needs and that "You must not touch" does not list is yours to edit: edit it and name it in your report. Never stop to ask for a file. Two things are refused: a change under "You must not touch", and a package manifest or lockfile outside "You may write" (report `NEEDS_CONTEXT` naming the dependency).
 - Do not weaken, skip or delete tests to make the command pass.
 - Do not start other agents or threads.
 - Use the code search tool named in Context before reading many files. If it is missing or not initialised here, use plain text search and go on: never stop for a tool.
