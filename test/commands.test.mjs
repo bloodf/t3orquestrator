@@ -189,6 +189,13 @@ test('config get/set for project and machine', async () => {
   assert.deepEqual([zero.code, zero.err], [1, 'orq: cap must be a positive integer, got 0\n']);
   assert.equal((await orq(['config', 'set', 'cap', 'null'], s)).code, 0);
   assert.equal('cap' in (await read(path.join(s.cwd, '.orq/config.json'))), false);
+  assert.equal((await orq(['config', 'set', 'goal', 'build\nthe  product'], s)).code, 0);
+  assert.equal((await read(path.join(s.cwd, '.orq/config.json'))).goal, 'build the product');
+  assert.equal(JSON.parse((await orq(['config', 'get'], s)).out).goal, 'build the product');
+  const long = await orq(['config', 'set', 'goal', 'a'.repeat(501)], s);
+  assert.deepEqual([long.code, long.err], [1, 'orq: goal must be at most 500 characters, got 501\n']);
+  assert.equal((await orq(['config', 'set', 'goal', 'null'], s)).code, 0);
+  assert.equal('goal' in (await read(path.join(s.cwd, '.orq/config.json'))), false);
   const bad = await orq(['config', 'set', 'nope', '1'], s);
   assert.equal(bad.code, 1);
   assert.match(bad.err, /valid keys: autonomy, base/);

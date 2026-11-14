@@ -63,6 +63,17 @@ test('status: plan line, counts, one line per unit, and the note', async (t) => 
   assert.deepEqual(json.units.map((u) => [u.id, u.state]), [['a', 'running'], ['b', 'blocked'], ['c', 'failed']]);
 });
 
+test('status: a standing goal is one goal: line after the plan: line, no next:', async (t) => {
+  const p = await project(t);
+  const file = path.join(p.repo, '.orq', 'config.json');
+  await fs.writeFile(file, JSON.stringify({ ...JSON.parse(await fs.readFile(file, 'utf8')), goal: 'ship it' }));
+  const lines = (await orq(['status'], p)).out.split('\n');
+  assert.deepEqual(lines.slice(0, 2), ['plan: test goal (p1)', 'goal: ship it']);
+  assert.equal(lines.filter((l) => l.startsWith('goal:') || l.startsWith('next:')).length, 1);
+  await fs.rm(path.join(p.repo, '.orq', 'plan.json'));
+  assert.deepEqual((await orq(['status'], p)).out.split('\n').slice(0, 2), ['plan: none', 'goal: ship it']);
+});
+
 test('status: a project cap is shown with this project\'s leases, and named when it is the limit in force', async (t) => {
   const p = await project(t);
   const file = path.join(p.repo, '.orq', 'config.json');

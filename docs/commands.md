@@ -116,16 +116,18 @@ Lists the eligible models in the order `orq` would use them:
 
 `orq config get [--machine] | orq config set [--machine] <key> <value>`
 
-`get` prints the config as JSON. `set` prints `<key> = <value>`. The value `null` clears `autonomy`, `cap` (machine or project), a check, or a scheduler key (`pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`: back to its default). `pollSeconds` is at least 5. `share` is a comma list of repository-relative dependency directories (`node_modules, apps/shop/node_modules`) that worktrees link from the main checkout, or `null` to turn sharing off; `orq init` detects it when the key is absent or an empty list (so a project whose dependencies were not installed yet is detected once they are; the `share:` line then reads `none (node_modules is not installed in the project root: install there once, then run "orq init" again)`): every git-ignored `node_modules` up to 4 levels deep, not inside another one, whose lockfile (next to it or at the root) is pnpm's or bun's; npm, yarn and lockfile-less projects are never shared, whatever `share` says, and `.venv`/`vendor` only when listed explicitly. The init line then reads `share: <paths>`, or `share: none (<why>)` when a `node_modules` was found but cannot be shared. Setting it rewrites `orq`'s block of anchored lines (`/node_modules`) in the repository's `info/exclude`, so a link is ignored even where `.gitignore` says `node_modules/` (a pattern that matches directories only, not symlinks); only paths git already ignores get a line, and a path git tracks files under is refused (`share: "<p>" has tracked files; only untracked, ignored directories can be shared`). See [Shared dependency directories](how-it-works.md#shared-dependency-directories). `questions` is `auto` (the default: `orq ask` lets the strongest enabled model decide) or `user` (every question goes to the user).
+`get` prints the config as JSON. `set` prints `<key> = <value>`. The value `null` clears `autonomy`, `cap` (machine or project), `goal`, a check, or a scheduler key (`pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`: back to its default). `pollSeconds` is at least 5. `share` is a comma list of repository-relative dependency directories (`node_modules, apps/shop/node_modules`) that worktrees link from the main checkout, or `null` to turn sharing off; `orq init` detects it when the key is absent or an empty list (so a project whose dependencies were not installed yet is detected once they are; the `share:` line then reads `none (node_modules is not installed in the project root: install there once, then run "orq init" again)`): every git-ignored `node_modules` up to 4 levels deep, not inside another one, whose lockfile (next to it or at the root) is pnpm's or bun's; npm, yarn and lockfile-less projects are never shared, whatever `share` says, and `.venv`/`vendor` only when listed explicitly. The init line then reads `share: <paths>`, or `share: none (<why>)` when a `node_modules` was found but cannot be shared. Setting it rewrites `orq`'s block of anchored lines (`/node_modules`) in the repository's `info/exclude`, so a link is ignored even where `.gitignore` says `node_modules/` (a pattern that matches directories only, not symlinks); only paths git already ignores get a line, and a path git tracks files under is refused (`share: "<p>" has tracked files; only untracked, ignored directories can be shared`). See [Shared dependency directories](how-it-works.md#shared-dependency-directories). `questions` is `auto` (the default: `orq ask` lets the strongest enabled model decide) or `user` (every question goes to the user).
 
 | Scope | Keys |
 |---|---|
-| project (`.orq/config.json`) | `autonomy`, `base`, `cap`, `checks.setup`, `checks.unit`, `checks.full`, `pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`, `questions`, `share` |
+| project (`.orq/config.json`) | `autonomy`, `base`, `cap`, `checks.setup`, `checks.unit`, `checks.full`, `pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`, `questions`, `share`, `goal` |
 | machine (`~/.t3orq/config.json`) | `cap`, `perInstanceLimit` |
 
 `checks.unit` runs in every unit's gate after the evidence. `checks.full` runs once on the integration head.
 
 `cap` exists in both scopes. With `--machine` it is the machine-wide cap, as before. Without it, it is this project's own optional limit (a positive integer; `null` removes it): the project's threads (units, reviews, decisions) never exceed it, and the machine cap still applies to all projects together. A value that is not a positive integer is refused (`orq: cap must be a positive integer, got <value>`, exit 1). See [The cap](scheduling.md#the-cap).
+
+`goal` is the project's standing goal, for work larger than one plan. Set it with `orq config set goal "<sentence>"`; `null` clears it. The value is cut to one line (whitespace runs, including newlines, become one space) and control characters are removed. It must not be empty and is at most 500 characters (`orq: goal must be at most 500 characters, got <n>`, exit 1). While it is set, `orq wait`, `orq plan archive` and `orq status` print it (see below).
 
 ## plan check
 
@@ -146,13 +148,15 @@ archived: plan <planId> (<n> integrated, <m> not) -> .orq/archive/<planId>/
 integration branch kept: <branch>
 ```
 
+When a standing goal is set (see [config](#config)), two lines follow the others: `goal: <text>` and `next: the goal is still open: plan its next part now and call "orq wait"; run "orq config set goal null" only when nothing of it is left to build`.
+
 While an archive is in progress the project is frozen: it writes `.orq/archiving.json` first, and every other command that touches plan state refuses until the archive finishes. If it was interrupted, run it again; nothing is deleted until the archived ledger matches the live one. If it can never finish, its error says how to unfreeze: deleting `.orq/archiving.json` keeps whatever plan state is still under `.orq/` in use.
 
 ## wait
 
 `orq wait [--max-seconds N]`
 
-This runs the scheduler for up to `N` seconds (default 480). The first line it prints is one of `done:`, `final-fail:`, `judgment:`, `blocked:`, `idle:` or `timeout:`. It exits 0 for each of them. When the running kit's playbook differs from the one recorded (`orq update` moved the kit, or the project was set up by an older kit), the second line is `playbook: the kit was updated (<old kit12|unknown> -> <new kit12|unknown>); read <path of the running kit's playbook/ORCHESTRATOR.md> again now, then run "orq init"`. When threads orq started are done for good and still unsettled in T3, the next line is `settle: <threadId> <threadId> …` (at most 20 ids, then `+<n> more`); notes and detail lines follow. See [Scheduling](scheduling.md#what-orq-wait-returns). Exit 4 when the plan is invalid or uses the reserved unit id `integration`. Exit 1 when no usable `t3` is recorded. Exit 5 when another `orq wait` holds this project.
+This runs the scheduler for up to `N` seconds (default 480). The first line it prints is one of `done:`, `final-fail:`, `judgment:`, `blocked:`, `idle:` or `timeout:`. It exits 0 for each of them. When the running kit's playbook differs from the one recorded (`orq update` moved the kit, or the project was set up by an older kit), the second line is `playbook: the kit was updated (<old kit12|unknown> -> <new kit12|unknown>); read <path of the running kit's playbook/ORCHESTRATOR.md> again now, then run "orq init"`. When threads orq started are done for good and still unsettled in T3, the next line is `settle: <threadId> <threadId> …` (at most 20 ids, then `+<n> more`); notes and detail lines follow. See [Scheduling](scheduling.md#what-orq-wait-returns). When a standing goal is set (see [config](#config)), the `done:` line is followed by `goal: <text>` and `next: the goal is still open: finish this plan as the playbook says, run "orq plan archive", then plan the next part and call "orq wait" again in this same turn`. Exit 4 when the plan is invalid or uses the reserved unit id `integration`; with a goal set, the error on stderr is followed by `goal: <text>` and `next: the goal is still open: plan its next part, run "orq plan check", then call "orq wait"`. Exit 1 when no usable `t3` is recorded. Exit 5 when another `orq wait` holds this project.
 
 ## status
 
@@ -160,6 +164,7 @@ This runs the scheduler for up to `N` seconds (default 480). The first line it p
 
 ```
 plan: <goal> (<planId>|not started)
+goal: <text>   (only when a standing goal is set)
 playbook: the kit was updated (…); read <file> again now, then run "orq init"   (only after a kit update)
 integration: <branch> head=<sha> base=<sha>
 cap=<n> active=<n> blocked=<n> gates=<n> machine_leases=<n>[ expired_leases=<n>][ project_cap=<n> project_leases=<n>]

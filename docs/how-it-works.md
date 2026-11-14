@@ -23,6 +23,8 @@ The agent follows `playbook/ORCHESTRATOR.md`. It never writes product code itsel
 7. **Final checks.** When every unit is integrated or dropped, `checks.full` runs on the integration head. `orq wait` then returns `done` with `pass` or `no-evidence`, or `final-fail` with the failures.
 8. **Finish.** The orchestrator runs `orq summary`, pushes the integration branch, and opens a draft pull request with the git-host slot. In the review modes it reviews first (see [Autonomy modes](#autonomy-modes)).
 
+A request can be larger than one plan. The orchestrator then stores a standing goal with `orq config set goal "<sentence>"`. While a goal is set, `orq wait` (on `done` and when there is no valid plan), `orq plan archive` and `orq status` print it, and all but `orq status` add a `next:` line telling the orchestrator to plan the next part instead of ending its turn. It clears the goal with `orq config set goal null` when nothing of it is left to build. With no goal set, none of this output changes.
+
 A plan can grow. Append units to `plan.json` after `done` and call `orq wait` again. The new units run, and the final checks run again on the new head.
 
 ## Where state lives

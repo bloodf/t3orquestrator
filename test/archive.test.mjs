@@ -57,6 +57,17 @@ async function finished(t) {
   return { p, head };
 }
 
+test('archive with a standing goal adds the goal: and next: lines; without one the output is unchanged', async (t) => {
+  const { p } = await finished(t);
+  const file = orqPath(p, 'config.json');
+  await fs.writeFile(file, JSON.stringify({ ...JSON.parse(await fs.readFile(file, 'utf8')), goal: 'ship it' }));
+  const r = await orq(['plan', 'archive'], p);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out.split('\n').slice(-3).join('\n'),
+    'goal: ship it\nnext: the goal is still open: plan its next part now and call "orq wait"; run "orq config set goal null" only when nothing of it is left to build\n');
+  assert.equal(r.out.split('\n').length, 6);
+});
+
 test('archive moves the plan state, keeps config and the branch, removes the worktree', async (t) => {
   const { p } = await finished(t);
   const r = await orq(['plan', 'archive'], p);

@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-14
+
+### Added
+
+- A project can hold a standing goal: `orq config set goal "<sentence>"` in the project, `null` to clear it, stored in `.orq/config.json`. The text is cut to one line, control characters are removed, and it is at most 500 characters. While it is set, `orq wait` (on `done`, and on exit 4 when there is no valid plan) and `orq plan archive` add `goal: <text>` and a `next:` line saying the goal is still open and what to do, and `orq status` prints `goal: <text>` after the `plan:` line. With no goal set the output does not change. Real orchestrator threads finished one plan, reported and ended their turn although the user's goal was much larger; nothing told them the goal was still open.
+
+### Changed
+
+- The playbook tells the orchestrator to store a goal larger than one plan, and not to end its turn at Finish while `orq` prints a `goal:` line.
+
 ## [0.4.0] - 2026-11-14
 
 ### Added

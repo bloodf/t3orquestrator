@@ -50,6 +50,7 @@ The `slots:` line names the tool for each role: `judge`, `memory`, `code-index` 
    - anything destructive, paid or public the work would need.
    Each question states the answer you will assume and why, so the user can reply "go" to accept them all. Never ask what the request, the code or memory already answers; never ask about style, tools or models; ask nothing when nothing qualifies or the user said not to ask. These questions always go to the user: the `questions` setting only governs what comes up after the work starts. Record the answers in `decisions`. This is the only time you ask: after it, open points go to `orq ask`.
 5. Size the work. Default to ONE unit. Fan out only for three or more independent, substantial units. One or two files, or tightly coupled work, is one unit: every extra unit costs a thread, a gate and a merge.
+6. A goal larger than one plan (a roadmap, a handoff, "keep going until it is finished"): store it in one sentence with `orq config set goal "<sentence>"`, then plan its first part.
 
 ## Plan
 
@@ -113,6 +114,7 @@ Finish only after a `done` line. `final checks no-evidence` on it means no full 
 | `review-fix-merge` | As `review-fix`. If an accepted finding is still open, stop there and tell the user: never merge over it. Otherwise wait for the host's checks on the pull request, mark it ready, and merge it. |
 
 In every mode: never force-push, never delete a branch, never bypass a required check or branch protection, never merge in `draft` or `review-fix`.
+While `orq` prints a `goal:` line, Finish does not end your turn: do what its `next:` line says. Each next plan is the biggest gap between the goal and what the base branch does today. Clear the goal only when nothing of it is left to build; end your turn before that only for what must stay with the user.
 
 ## Memory and judge
 

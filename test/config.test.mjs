@@ -117,3 +117,17 @@ test('share: a list of repository-relative directories, set as a comma list, nul
   await assert.rejects(loadProjectConfig(await tmpFile('{"share":["/abs"]}')), /share must be null or a list of relative paths/);
   await assert.rejects(loadProjectConfig(await tmpFile('{"share":".orq"}')), /share must be null or a list of relative paths/);
 });
+
+test('project goal: one clean line of at most 500 characters, cleared with null', async () => {
+  assert.deepEqual(setConfigValue({ base: 'main' }, 'goal', '  build\n\tthe   product\u0007  ', 'project'), { base: 'main', goal: 'build the product' });
+  assert.deepEqual(setConfigValue({ base: 'main', goal: 'x' }, 'goal', 'null', 'project'), { base: 'main' });
+  assert.equal(setConfigValue({}, 'goal', 'a'.repeat(500), 'project').goal.length, 500);
+  assert.throws(() => setConfigValue({}, 'goal', 'a'.repeat(501), 'project'), /goal must be at most 500 characters/);
+  for (const bad of ['', '   ', '\n\t']) assert.throws(() => setConfigValue({}, 'goal', bad, 'project'), /goal must not be empty/);
+  assert.throws(() => setConfigValue({}, 'goal', 'x', 'machine'), /unknown machine config key "goal"/);
+  assert.equal((await loadProjectConfig(await tmpFile('{}'))).goal, undefined);
+  assert.equal((await loadProjectConfig(await tmpFile('{"goal":"ship it"}'))).goal, 'ship it');
+  for (const bad of ['""', '"a\\nb"', '3', 'null', `"${'a'.repeat(501)}"`]) {
+    await assert.rejects(loadProjectConfig(await tmpFile(`{"goal":${bad}}`)), /goal must be/);
+  }
+});

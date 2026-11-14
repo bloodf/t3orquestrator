@@ -191,6 +191,17 @@ test('wait: a second wait in the same project fails at once', async (t) => {
   assert.equal(r.err, `orq: another orq wait is running (pid ${process.pid})\n`);
 });
 
+test('wait: done with a standing goal adds goal: and next:; without one the done line stands alone', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')], { checks: { full: 'test -f a.txt' } });
+  const cfg = path.join(p.repo, '.orq', 'config.json');
+  await fs.writeFile(cfg, JSON.stringify({ ...JSON.parse(await fs.readFile(cfg, 'utf8')), goal: 'ship it' }));
+  const r = await orq(['wait'], p, simulator(p, { a: [['commit-complete']] }));
+  assert.equal(r.code, 0, r.err);
+  const [done, goal, next, ...rest] = r.out.split('\n');
+  assert.match(done, /^done: 1 units integrated at [0-9a-f]{12}; final checks pass$/);
+  assert.deepEqual([goal, next, rest], ['goal: ship it', 'next: the goal is still open: finish this plan as the playbook says, run "orq plan archive", then plan the next part and call "orq wait" again in this same turn', ['']]);
+});
+
 test('wait: refuses without a valid plan or a usable t3', async (t) => {
   const p = await makeProject(t, [unitSpec('a')]);
   const sim = simulator(p, {});
@@ -198,6 +209,11 @@ test('wait: refuses without a valid plan or a usable t3', async (t) => {
   const noPlan = await orq(['wait'], p, sim);
   assert.equal(noPlan.code, 4);
   assert.equal(noPlan.err, 'orq: no valid plan; run "orq plan check"\n');
+  const cfg = path.join(p.repo, '.orq', 'config.json');
+  await fs.writeFile(cfg, JSON.stringify({ ...JSON.parse(await fs.readFile(cfg, 'utf8')), goal: 'ship it' }));
+  const withGoal = await orq(['wait'], p, sim);
+  assert.equal(withGoal.code, 4);
+  assert.equal(withGoal.err, 'orq: no valid plan; run "orq plan check"\ngoal: ship it\nnext: the goal is still open: plan its next part, run "orq plan check", then call "orq wait"\n');
   await fs.writeFile(path.join(p.repo, '.orq', 'plan.json'), JSON.stringify({ goal: 'g', units: [unitSpec('a')] }));
   await fs.writeFile(path.join(p.repo, '.orq', 'config.json'), JSON.stringify({ t3: null }));
   const noT3 = await orq(['wait'], p, sim);
