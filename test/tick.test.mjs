@@ -413,20 +413,41 @@ test('a completed thread marks its instance alive', () => {
 
 const replied = (status, detail, over = {}) => ({ 't-a': thread('t-a', { status: 'completed', report: { status, detail }, ...over }) });
 
-test('worker status: NEEDS_CONTEXT after the first run goes to judgment without a gate', () => {
+// A stop report is answered once per launch from the same nudge budget as an empty turn; the second one is judged.
+test('worker status: a first NEEDS_CONTEXT is answered in the same thread with its reason, no judgment and no gate', () => {
   const r = go([launched('a')], { threads: replied('NEEDS_CONTEXT', 'which answer is right?') });
-  assert.deepEqual(evTypes(r), ['thread-ended:a', 'needs-judgment:a']);
-  assert.equal(r.events[1].reason, 'worker reported NEEDS_CONTEXT: which answer is right?');
-  assert.deepEqual(types(r).filter((x) => x !== 'launch'), ['lease-remove', 'mark-alive']);
-  assert.deepEqual(r.report.judgment, [{ unit: 'a', reason: 'worker reported NEEDS_CONTEXT: which answer is right?' }]);
+  assert.deepEqual(evTypes(r), ['thread-ended:a', 'unfinished:a']);
+  assert.deepEqual([r.events[1].stop, r.events[1].failures], ['NEEDS_CONTEXT', ['worker reported NEEDS_CONTEXT: which answer is right?']]);
+  assert.deepEqual(r.actions.filter((x) => x.type !== 'lease-remove' && x.type !== 'mark-alive'), [{
+    type: 'send-feedback', unit: 'a', attempt: 1, threadId: 't-a', failures: ['worker reported NEEDS_CONTEXT: which answer is right?'], key: 'a::m2', instance: 'a', model: 'm2',
+  }]);
+  assert.deepEqual(r.report.judgment, []);
 });
 
-test('worker status: BLOCKED after feedback goes to judgment; DONE and unknown replies are gated', () => {
+test('worker status: a second stop report on the same launch goes to judgment with the second reason', () => {
+  const r = go([launched('a'), ended('a'),
+    { type: 'unfinished', unit: 'a', at: 4, failures: ['worker reported BLOCKED: not done yet'], headSha: null, stop: 'BLOCKED' },
+    { type: 'feedback-sent', unit: 'a', at: NOW - MIN, attempt: 1, threadId: 't-a' }], { threads: replied('BLOCKED', 'need the API key in .env', { updatedAt: NOW }) });
+  assert.deepEqual(evTypes(r), ['thread-ended:a', 'needs-judgment:a']);
+  assert.equal(r.events[1].reason, 'worker reported BLOCKED: need the API key in .env');
+  assert.deepEqual(r.report.judgment, [{ unit: 'a', reason: 'worker reported BLOCKED: need the API key in .env' }]);
+});
+
+test('worker status: a launch already nudged for an empty turn that then reports BLOCKED is judged at once', () => {
+  const r = go([launched('a'), ended('a'), { ...gateStarted('a'), headSha: A },
+    { type: 'unfinished', unit: 'a', at: 5, failures: ['no commits on top of aaaaaaaaaaaa'], headSha: A },
+    { type: 'feedback-sent', unit: 'a', at: NOW - MIN, attempt: 1, threadId: 't-a' }], { threads: replied('BLOCKED', 'x', { updatedAt: NOW }) });
+  assert.deepEqual(evTypes(r), ['thread-ended:a', 'needs-judgment:a']);
+  assert.equal(r.events[1].reason, 'worker reported BLOCKED: x');
+});
+
+test('worker status: BLOCKED after gate feedback is nudged once (a new turn); DONE and unknown replies are gated', () => {
   const afterFeedback = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail'),
     { type: 'feedback-sent', unit: 'a', at: NOW - MIN, attempt: 2, threadId: 't-a' }];
   const r = go(afterFeedback, { threads: replied('BLOCKED', '', { updatedAt: NOW }) });
-  assert.deepEqual(evTypes(r), ['thread-ended:a', 'needs-judgment:a']);
-  assert.equal(r.events[1].reason, 'worker reported BLOCKED: ');
+  assert.deepEqual(evTypes(r), ['thread-ended:a', 'unfinished:a']);
+  assert.equal(r.events[1].headSha, B); // the gated commit stays recorded
+  assert.deepEqual(r.actions.find((x) => x.type === 'send-feedback').attempt, 2);
   for (const report of [{ status: 'DONE', detail: '' }, { status: 'I FINISHED', detail: '' }, null]) {
     const ok = go([launched('a')], { threads: { 't-a': thread('t-a', { status: 'completed', report }) } });
     assert.ok(types(ok).includes('gate-start'), JSON.stringify(report));

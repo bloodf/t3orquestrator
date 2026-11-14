@@ -261,6 +261,14 @@ test('unfinished: back to queued on the same attempt, awaiting a nudge; each lau
   assert.deepEqual([unitOf(run(launched('u')), 'u').nudge, unitOf(run(launched('u')), 'u').nudges], [false, 0]);
 });
 
+test('unfinished after a stop report: same transition; a ledger without the stop field replays to the same state', () => {
+  const ended = run(launched('u'), ev('thread-ended', 'u', { status: 'completed' }));
+  const stop = apply(ended, ev('unfinished', 'u', { failures: ['worker reported BLOCKED: x'], headSha: null, stop: 'BLOCKED' }));
+  const old = apply(ended, ev('unfinished', 'u', { failures: ['worker reported BLOCKED: x'], headSha: null }));
+  assert.deepEqual(stop, old); // the field is read by stats only: older and newer orq derive the same state
+  assert.deepEqual([unitOf(stop, 'u').state, unitOf(stop, 'u').nudge, unitOf(stop, 'u').nudges, unitOf(stop, 'u').gateStarts], ['queued', true, 1, 0]);
+});
+
 test('retry after "gate could not complete" gates the same commit again; --tier starts a new worker', () => {
   const judged = run(launched('u'), ev('thread-ended', 'u', { status: 'completed' }), ev('gate-started', 'u', { attempt: 1, headSha: B }),
     ev('gate-started', 'u', { attempt: 1, headSha: B }), ev('needs-judgment', 'u', { reason: 'gate could not complete', regate: true }));

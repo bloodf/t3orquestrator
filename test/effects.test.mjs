@@ -6,7 +6,7 @@ import os from 'node:os';
 import fsSync from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createGit, defaultExec } from '../lib/git.mjs';
-import { perform } from '../lib/effects.mjs';
+import { perform, feedbackMessage } from '../lib/effects.mjs';
 import { ensurePlanStarted } from '../lib/launch.mjs';
 import { collectGate, spawnGateRun } from '../lib/gaterun.mjs';
 import { commit, readState, unitOf } from '../lib/ledger.mjs';
@@ -586,6 +586,15 @@ test('feedback: a gate that found no commits tells the worker plainly to do the 
     'If something truly blocks you, or you find that nothing needs to change, reply with first line BLOCKED or NEEDS_CONTEXT and say why.',
   ].join('\n'));
   assert.ok(msg.split('\n').length <= 6);
+});
+
+test('feedback: a worker that stopped is quoted and told that unfinished work is no blocker', () => {
+  const msg = feedbackMessage(['worker reported BLOCKED: implementation incomplete'], 'ignored gate text');
+  assert.equal(msg, [
+    'You stopped with: "BLOCKED: implementation incomplete".',
+    'Unfinished work is not a blocker: you are the implementer, so continue the work order in this worktree, commit it, then report.',
+    'If you truly cannot go on without something you do not have, reply again with first line BLOCKED (or NEEDS_CONTEXT) and name the one specific thing you need and where you looked for it.',
+  ].join('\n'));
 });
 
 // A launch that committed work, then died on its provider.

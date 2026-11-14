@@ -5,6 +5,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- A worker that reports `BLOCKED` or `NEEDS_CONTEXT` is told once, in the same thread, that unfinished work is not a blocker, with its own reason quoted: continue and commit, or report again and name the one thing it needs and where it looked. Only a second report reaches the orchestrator as a judgment. In two real runs 30 of 38 judgments were such reports, and many were only unfinished work. The message shares the one-per-launch budget of the "nothing committed" message. The ledger records it as `unfinished` with a new `stop` field; `orq stats` counts it under `stopped`, and work that passes afterwards is not a first pass.
+
 ## [0.3.2] - 2026-11-14
 
 ### Changed

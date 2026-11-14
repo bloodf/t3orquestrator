@@ -38,7 +38,7 @@ function simulator(p, scripts) {
     if (args[1] === 'send') {
       const t = sim.threads.get(args[2]);
       sim.sends = [...(sim.sends ?? []), t.id];
-      Object.assign(t, { status: 'running', updatedAt: sim.now + 1, step: 0, script: [sim.stubborn ? 'complete' : 'commit-complete'] });
+      Object.assign(t, { status: 'running', updatedAt: sim.now + 1, step: 0, script: [sim.afterSend ?? (sim.stubborn ? 'complete' : 'commit-complete')] });
       return ok({ threadId: t.id, runId: 'r', status: 'queued', delivery: 'queued' });
     }
     const unit = /^orq (\S+):/.exec(opt(args, '--title'))[1];
@@ -68,6 +68,8 @@ function simulator(p, scripts) {
       if (step === 'unblock') t.pending = 0;
       if (step === 'fail') t.status = 'failed';
       if (step === 'needs-context') Object.assign(t, { status: 'completed', reply: 'NEEDS_CONTEXT\nThe work order says 41 but the test wants 42.' });
+      if (step === 'blocked') Object.assign(t, { status: 'completed', reply: 'BLOCKED: implementation incomplete, nothing committed' });
+      if (step === 'blocked-again') Object.assign(t, { status: 'completed', reply: 'BLOCKED\nneed the staging password; looked in .env and README' });
       if (step === 'commit-fail') { // committed its work, then its provider died
         await commitOn(p.repo, t.branch, { [`${t.unit}.txt`]: `${t.unit}\n` }, t.unit);
         t.status = 'failed';
@@ -308,17 +310,38 @@ test('wait: one dying instance cools down and waits instead of burning all three
   assert.equal(later.out, 'judgment: a: 3 provider failures\n');
 });
 
-test('wait: a worker asking for context returns for judgment without a gate', async (t) => {
+test('wait: a worker asking for context is told once to go on in the same thread, then returns for judgment without a gate', async (t) => {
   const p = await makeProject(t, [unitSpec('a')]);
   const gates = [];
   const sim = simulator(p, { a: [['needs-context']] });
+  sim.afterSend = 'needs-context';
   const r = await orq(['wait'], p, sim, { spawnGate: async () => { gates.push(1); return 1; } });
   assert.equal(r.code, 0, r.err);
   assert.equal(r.out, 'judgment: a: worker reported NEEDS_CONTEXT: The work order says 41 but the test wants 42.\n');
   assert.equal(gates.length, 0);
+  assert.deepEqual(sim.sends, ['th1']);
   assert.deepEqual(await listLeases(path.join(p.home, 'leases')), []);
   const u = unitOf(await readState(p.repo), 'a');
-  assert.deepEqual([u.state, u.providerFailures], ['failed', 0]);
+  assert.deepEqual([u.state, u.providerFailures, u.nudges], ['failed', 0, 1]);
+});
+
+test('wait: a worker that answers BLOCKED every time ends in a judgment with its second reason: one message, never a loop', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['blocked'], ['blocked'], ['blocked']] });
+  sim.afterSend = 'blocked-again';
+  const r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out, 'judgment: a: worker reported BLOCKED: need the staging password; looked in .env and README\n');
+  assert.deepEqual(sim.sends, ['th1']);
+  assert.equal(sim.byUnit.a.length, 1);
+  const sent = (await readLines(path.join(p.repo, '.orq', 'ledger.jsonl'))).filter((e) => e.type === 'unfinished');
+  assert.deepEqual(sent.map((e) => [e.stop, e.failures]), [['BLOCKED', ['worker reported BLOCKED: implementation incomplete, nothing committed']]]);
+  const u = unitOf(await readState(p.repo), 'a');
+  assert.deepEqual([u.state, u.launches, u.nudges], ['failed', 1, 1]);
+  assert.deepEqual(await listLeases(path.join(p.home, 'leases')), []);
+  const again = await orq(['wait', '--max-seconds', '20'], p, sim); // and it stays there
+  assert.match(again.out, /^judgment: a: worker reported BLOCKED/);
+  assert.deepEqual([sim.sends.length, sim.byUnit.a.length], [1, 1]);
 });
 
 test('wait: after archiving, the next request runs a fresh plan cut from the base', async (t) => {
