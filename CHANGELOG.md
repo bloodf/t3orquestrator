@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-14
+
 ### Added
 
 - A worker whose turn ends with nothing committed is told to continue in the same thread, once per thread, before anything counts as a gate failure. In two real runs one gate in four failed only for this reason, and almost every such worker committed on its next turn. The ledger records it as `unfinished`; `orq stats` counts it under `no-commit`.
