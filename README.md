@@ -48,7 +48,7 @@ Read [How it works](docs/how-it-works.md) for the full sequence.
 - The gate runs project code as you; it is not a sandbox. See [SECURITY.md](SECURITY.md).
 - There is no token-usage accounting, because T3's CLI does not expose token usage.
 - The machine-wide thread cap counts only threads `orq` started. Threads you start by hand are not counted.
-- A unit's worker worktrees are removed when the unit is integrated; its branches stay. Review and decision worktrees, and whatever was kept, are removed at `orq plan archive`. A worktree with uncommitted or untracked files is always kept; files git ignores go with the worktree.
+- A unit's worker worktrees are removed when the unit is integrated; its branches stay. `orq worktree prune` does the same for units integrated earlier. Review and decision worktrees, and whatever was kept, are removed at `orq plan archive`. A worktree with uncommitted or untracked files is always kept; files git ignores go with the worktree.
 - A shared `node_modules` is a symlink into your main checkout: a thread can write through it. npm and yarn projects are never shared. Turn sharing off with `orq config set share null`. See [SECURITY.md](SECURITY.md).
 - T3's CLI cannot set a model's reasoning effort, so every thread runs at the provider's default.
 - A thread that stays silent for twice `stallMinutes` (default 20) is given up. Raise it for projects with single commands that run longer.

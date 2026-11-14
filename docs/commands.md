@@ -21,6 +21,7 @@ Run `orq` as `node ~/.t3orq/kit/bin/orq.mjs`. Project commands act on the curren
 | [`stats`](#stats) | Which model did well: launches, gates, first passes |
 | [`summary`](#summary) | Write the pull request body |
 | [`settle`](#settle) | List finished threads to settle in T3 |
+| [`worktree prune`](#worktree-prune) | Remove the worktrees integrated units left behind |
 | [`probe`](#probe) | Print the machine cap and why |
 | [`version`](#version) | Print the `orq` and kit versions |
 | [`update`](#update) | Move the kit to a release |
@@ -209,6 +210,12 @@ The decision thread routes job `decide`: tier 4, strongest first. When no tier-4
 `orq settle [--all]`
 
 Lists the threads `orq` started that are done for good and that T3 reports as not settled, one per line: `<threadId> unit <id> integrated|dropped|replaced`, `<threadId> review <n>` or `<threadId> decision <n>`. It prints `nothing to settle` when there are none, and exits 0. `--all` also covers the archived plans under `.orq/archive/`. T3 has no CLI command to settle a thread: the orchestrator settles each listed id with its `t3_thread_organize` tool (`action: "settle"`). It calls `t3 thread list` once, outside any lock. `orq plan archive` prints `settle: run "orq settle --all"` when archived plans leave such threads.
+
+## worktree prune
+
+`orq worktree prune [--dry-run]`
+
+Removes the worker worktrees of every integrated unit of the running plan: the same removal `orq wait` starts when a unit is integrated, done one worktree at a time and waited for. Use it for units an older `orq` integrated (before 0.3.0 nothing was removed until `orq plan archive`), or when a removal at integration did not happen. It runs a plain `git worktree remove`, with no time limit: a worktree with uncommitted or untracked files, or a locked one, is kept and reported in a `note: kept worktree <path>: <git's message>` line, files git ignores go with the worktree, and no branch is deleted. It picks worktrees by branch: every worktree checked out on a launch branch of an integrated unit, wherever it is. Worktrees of units that are not integrated, of a thread that still holds a lease, the integration worktree and gate checkouts are not touched. It prints `removed <n> worktrees of integrated units`, or `nothing to prune`, and exits 0. `--dry-run` prints one `would remove <path>` line per worktree and removes nothing. It takes no lock; a worktree that `orq wait` is removing at the same moment may be reported as kept, and is gone on the next run. Exit 3 inside a worker thread, as for `init`; exit 4 while an archive is unfinished.
 
 ## summary
 
