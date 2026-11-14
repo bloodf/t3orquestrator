@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-14
+
+### Added
+
+- `orq worktree prune [--dry-run]` removes the worker worktrees of units that are already integrated in the running plan. Since 0.3.0 that happens at integration; this covers units an older `orq` integrated, and a removal that did not happen. Same limits: a plain `git worktree remove`, so a worktree with uncommitted or untracked files is kept, and no branch is deleted.
+
+### Fixed
+
+- The removal of an integrated unit's worktrees (0.3.0) let git decide what is untracked from the repository's own config. With `status.showUntrackedFiles=no` set there, by the user or by a worker, a worktree holding untracked files was removed with them. Untracked files now always count, as they already did at `orq plan archive`.
+
 ## [0.3.0] - 2026-11-14
 
 ### Added
