@@ -10,7 +10,7 @@ import { perform, feedbackMessage } from '../lib/effects.mjs';
 import { ensurePlanStarted } from '../lib/launch.mjs';
 import { collectGate, spawnGateRun } from '../lib/gaterun.mjs';
 import { commit, readState, unitOf } from '../lib/ledger.mjs';
-import { listLeases, writeLease } from '../lib/leases.mjs';
+import { listLeases, removeLease, writeLease } from '../lib/leases.mjs';
 import { loadProjectConfig } from '../lib/config.mjs';
 import { readLines } from '../lib/store.mjs';
 import { gateFile } from '../lib/paths.mjs';
@@ -148,6 +148,20 @@ test('launch: a relaunch gets a fresh branch; attempt 3 prepends the previous fa
   assert.equal(o.message, 'Previous attempt failed the gate:\n- evidence failed (exit 1)\n- outside writable paths: x\n\nWork order for a.\n');
   assert.match(o.branch, /\/a-a3-l3$/);
   assert.equal(o.model, 'm3');
+});
+
+test('launch: the project cap is re-checked under the machine lock too (only this project\'s leases count)', async (t) => {
+  const s = await setup(t, [unitSpec('a')], { cap: 3 });
+  const file = path.join(s.p.repo, '.orq', 'config.json');
+  await fs.writeFile(file, JSON.stringify({ ...JSON.parse(await fs.readFile(file, 'utf8')), cap: 1 }));
+  const dir = path.join(s.p.home, 'leases');
+  await writeLease(dir, { threadId: 'x1', project: '/other', unit: 'z', instance: 'pb', model: 'm2', startedAt: 1, heartbeatAt: NOW, blocked: false });
+  await writeLease(dir, { threadId: 'r1', project: s.p.repo, unit: 'review-1', instance: 'pb', model: 'm2', startedAt: 1, heartbeatAt: NOW, blocked: false, kind: 'review', review: 1 });
+  assert.deepEqual(await s.act(launchA()), { skipped: 'cap reached' }); // the machine has a slot, the project has none
+  assert.equal(s.t3.calls.length, 0);
+  await removeLease(dir, 'r1');
+  await s.act(launchA());
+  assert.equal(s.t3.calls.length, 1);
 });
 
 test('launch: cap is re-checked under the machine lock (leases of other projects count)', async (t) => {

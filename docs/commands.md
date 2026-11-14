@@ -116,14 +116,16 @@ Lists the eligible models in the order `orq` would use them:
 
 `orq config get [--machine] | orq config set [--machine] <key> <value>`
 
-`get` prints the config as JSON. `set` prints `<key> = <value>`. The value `null` clears `autonomy`, `cap`, a check, or a scheduler key (`pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`: back to its default). `pollSeconds` is at least 5. `share` is a comma list of repository-relative dependency directories (`node_modules, apps/shop/node_modules`) that worktrees link from the main checkout, or `null` to turn sharing off; `orq init` detects it when the key is absent or an empty list (so a project whose dependencies were not installed yet is detected once they are; the `share:` line then reads `none (node_modules is not installed in the project root: install there once, then run "orq init" again)`): every git-ignored `node_modules` up to 4 levels deep, not inside another one, whose lockfile (next to it or at the root) is pnpm's or bun's; npm, yarn and lockfile-less projects are never shared, whatever `share` says, and `.venv`/`vendor` only when listed explicitly. The init line then reads `share: <paths>`, or `share: none (<why>)` when a `node_modules` was found but cannot be shared. Setting it rewrites `orq`'s block of anchored lines (`/node_modules`) in the repository's `info/exclude`, so a link is ignored even where `.gitignore` says `node_modules/` (a pattern that matches directories only, not symlinks); only paths git already ignores get a line, and a path git tracks files under is refused (`share: "<p>" has tracked files; only untracked, ignored directories can be shared`). See [Shared dependency directories](how-it-works.md#shared-dependency-directories). `questions` is `auto` (the default: `orq ask` lets the strongest enabled model decide) or `user` (every question goes to the user).
+`get` prints the config as JSON. `set` prints `<key> = <value>`. The value `null` clears `autonomy`, `cap` (machine or project), a check, or a scheduler key (`pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`: back to its default). `pollSeconds` is at least 5. `share` is a comma list of repository-relative dependency directories (`node_modules, apps/shop/node_modules`) that worktrees link from the main checkout, or `null` to turn sharing off; `orq init` detects it when the key is absent or an empty list (so a project whose dependencies were not installed yet is detected once they are; the `share:` line then reads `none (node_modules is not installed in the project root: install there once, then run "orq init" again)`): every git-ignored `node_modules` up to 4 levels deep, not inside another one, whose lockfile (next to it or at the root) is pnpm's or bun's; npm, yarn and lockfile-less projects are never shared, whatever `share` says, and `.venv`/`vendor` only when listed explicitly. The init line then reads `share: <paths>`, or `share: none (<why>)` when a `node_modules` was found but cannot be shared. Setting it rewrites `orq`'s block of anchored lines (`/node_modules`) in the repository's `info/exclude`, so a link is ignored even where `.gitignore` says `node_modules/` (a pattern that matches directories only, not symlinks); only paths git already ignores get a line, and a path git tracks files under is refused (`share: "<p>" has tracked files; only untracked, ignored directories can be shared`). See [Shared dependency directories](how-it-works.md#shared-dependency-directories). `questions` is `auto` (the default: `orq ask` lets the strongest enabled model decide) or `user` (every question goes to the user).
 
 | Scope | Keys |
 |---|---|
-| project (`.orq/config.json`) | `autonomy`, `base`, `checks.setup`, `checks.unit`, `checks.full`, `pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`, `questions`, `share` |
+| project (`.orq/config.json`) | `autonomy`, `base`, `cap`, `checks.setup`, `checks.unit`, `checks.full`, `pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`, `questions`, `share` |
 | machine (`~/.t3orq/config.json`) | `cap`, `perInstanceLimit` |
 
 `checks.unit` runs in every unit's gate after the evidence. `checks.full` runs once on the integration head.
+
+`cap` exists in both scopes. With `--machine` it is the machine-wide cap, as before. Without it, it is this project's own optional limit (a positive integer; `null` removes it): the project's threads (units, reviews, decisions) never exceed it, and the machine cap still applies to all projects together. A value that is not a positive integer is refused (`orq: cap must be a positive integer, got <value>`, exit 1). See [The cap](scheduling.md#the-cap).
 
 ## plan check
 
@@ -160,7 +162,7 @@ This runs the scheduler for up to `N` seconds (default 480). The first line it p
 plan: <goal> (<planId>|not started)
 playbook: the kit was updated (…); read <file> again now, then run "orq init"   (only after a kit update)
 integration: <branch> head=<sha> base=<sha>
-cap=<n> active=<n> blocked=<n> gates=<n> machine_leases=<n>[ expired_leases=<n>]
+cap=<n> active=<n> blocked=<n> gates=<n> machine_leases=<n>[ expired_leases=<n>][ project_cap=<n> project_leases=<n>]
 providers: … (as for init)
 <unit> <state>[ attempt=<n>][ model=<key>][ tier=<n>][ wanted_tier=<n>][ continued][ thread=<id>][ flags=<kinds>][ <reason>]
 authors: max_tier=<n> family=<family>
@@ -168,7 +170,7 @@ cooling: <instance> until <iso time>, …
 note: cap covers threads orq started; threads started by hand are not counted
 ```
 
-When the machine `cap` is an override above what the machine computes, a line `note: cap <n> is an override; this machine computes <m> (<reasons>)` comes before the last note; `orq wait` prints the same note once per call. A line `ask: decision <n> running thread=<id> model=<key>` follows the `authors:` line for each decision thread still running, then `abandoned: thread <id> of unit <u> holds a slot until it ends` for each thread `orq` gave up on whose lease still counts against the cap. The `integration:`, `authors:`, `ask:` and `cooling:` lines appear only when they apply. `wanted_tier` appears when the unit was launched below its minimum tier because no model at that tier was usable.
+When the machine `cap` is an override above what the machine computes, a line `note: cap <n> is an override; this machine computes <m> (<reasons>)` comes before the last note; `orq wait` prints the same note once per call. When the project sets its own `cap`, the cap line ends with `project_cap=<n> project_leases=<n>` (this project's live leases), and when that cap leaves fewer free slots than the machine cap does, a line `note: project cap <n> is the limit in force: <k> slots free for this project, <m> under the machine cap <c>` comes before the last note. `--json` has `projectCap` (null when unset) and `projectLeases`. A line `ask: decision <n> running thread=<id> model=<key>` follows the `authors:` line for each decision thread still running, then `abandoned: thread <id> of unit <u> holds a slot until it ends` for each thread `orq` gave up on whose lease still counts against the cap. The `integration:`, `authors:`, `ask:` and `cooling:` lines appear only when they apply. `wanted_tier` appears when the unit was launched below its minimum tier because no model at that tier was usable.
 
 ## unit
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withNotes, evidenceNote } from '../lib/commands/wait-report.mjs';
+import { withNotes, evidenceNote, timeoutLines } from '../lib/commands/wait-report.mjs';
 
 const notes = (n) => Array.from({ length: n }, (_, i) => `note: n${i}`);
 
@@ -25,4 +25,12 @@ test('evidenceNote: one note for every unit whose evidence runs outside the repo
   assert.equal(evidenceNote([w('a')]), 'note: 1 units run evidence outside the repository (a); run "orq plan check" for the list');
   assert.equal(evidenceNote(['a', 'b', 'c'].map(w)), 'note: 3 units run evidence outside the repository (a, b, c); run "orq plan check" for the list');
   assert.equal(evidenceNote(['a', 'b', 'c', 'd', 'e'].map(w)), 'note: 5 units run evidence outside the repository (a, b, c +2 more); run "orq plan check" for the list');
+});
+
+test('timeoutLines: the waiting line names the limit in force', () => {
+  const plan = { units: [{ id: 'a' }] };
+  const state = { plan: {}, units: {} };
+  const report = { noSlots: true, slotWaiting: ['a'], stalled: [] };
+  assert.equal(timeoutLines(plan, state, report, 4)[1], 'waiting: 1 ready units wait for a free slot (machine cap 4, or a provider instance limit)');
+  assert.equal(timeoutLines(plan, state, { ...report, capBy: 'project' }, 4, 2)[1], 'waiting: 1 ready units wait for a free slot (project cap 2 of this project, machine cap 4, or a provider instance limit)');
 });

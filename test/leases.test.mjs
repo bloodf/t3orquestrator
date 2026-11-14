@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  writeLease, removeLease, listLeases, runningByInstance, hasLease, setLeaseBlocked, countActive, liveLeases,
+  writeLease, removeLease, listLeases, runningByInstance, hasLease, setLeaseBlocked, countActive, liveLeases, freeSlots,
 } from '../lib/leases.mjs';
 
 const lease = (threadId, instance = 'a') => ({
@@ -68,4 +68,19 @@ test('leases whose heartbeat is older than the TTL do not count', () => {
   assert.deepEqual(runningByInstance([fresh, old, legacy], now, ttl), { a: 1 });
   assert.deepEqual(liveLeases([fresh, old], now, ttl), [fresh]);
   assert.equal(countActive([fresh, old, legacy]), 3);
+});
+
+test('freeSlots: the smaller of the machine cap and the project cap, each less its own active leases', () => {
+  const own = (id, over = {}) => ({ ...lease(id), project: '/p', ...over });
+  const other = (id) => ({ ...lease(id), project: '/q' });
+  // no project cap: the machine cap alone, as before
+  assert.deepEqual(freeSlots({ cap: 4, leases: [own('1'), other('2')], project: '/p' }), { slots: 2, by: 'machine' });
+  assert.deepEqual(freeSlots({ cap: 4, projectCap: null, leases: [], project: '/p' }), { slots: 4, by: 'machine' });
+  // a project cap below the machine's binds this project only
+  assert.deepEqual(freeSlots({ cap: 4, projectCap: 2, leases: [own('1')], project: '/p' }), { slots: 1, by: 'project' });
+  assert.deepEqual(freeSlots({ cap: 4, leases: [own('1')], project: '/q' }), { slots: 3, by: 'machine' });
+  // another project's leases use the machine cap, not this project's cap; blocked leases count for neither
+  assert.deepEqual(freeSlots({ cap: 4, projectCap: 2, leases: [other('2'), other('3'), other('4')], project: '/p' }), { slots: 1, by: 'machine' });
+  assert.deepEqual(freeSlots({ cap: 4, projectCap: 1, leases: [own('1', { blocked: true }), other('2')], project: '/p' }), { slots: 1, by: 'project' });
+  assert.deepEqual(freeSlots({ cap: 4, projectCap: 3, leases: [other('2')], project: '/p' }), { slots: 3, by: 'machine' }); // a tie: the machine's
 });

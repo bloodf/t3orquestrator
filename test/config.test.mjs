@@ -72,7 +72,16 @@ test('setConfigValue: machine keys and unknown keys', () => {
   assert.equal(setConfigValue({ perInstanceLimit: 2 }, 'perInstanceLimit', '3', 'machine').perInstanceLimit, 3);
   assert.throws(() => setConfigValue({}, 'cap', 'x', 'machine'), /positive integer/);
   assert.throws(() => setConfigValue({}, 'nope', '1', 'machine'), /valid keys: cap, perInstanceLimit/);
-  assert.throws(() => setConfigValue({}, 'cap', '1', 'project'), /valid keys: autonomy, base, checks\.setup, checks\.unit, checks\.full/);
+  assert.throws(() => setConfigValue({}, 'perInstanceLimit', '1', 'project'), /valid keys: autonomy, base, cap, checks\.setup, checks\.unit, checks\.full/);
+});
+
+test('project cap: optional, a positive integer, cleared with null; the machine cap is a separate key', async () => {
+  assert.deepEqual(setConfigValue({ base: 'main' }, 'cap', '2', 'project'), { base: 'main', cap: 2 });
+  assert.deepEqual(setConfigValue({ base: 'main', cap: 2 }, 'cap', 'null', 'project'), { base: 'main' });
+  for (const bad of ['0', '-1', '1.5', 'x', '']) assert.throws(() => setConfigValue({}, 'cap', bad, 'project'), /cap must be a positive integer/);
+  assert.equal((await loadProjectConfig(await tmpFile('{}'))).cap, undefined);
+  assert.equal((await loadProjectConfig(await tmpFile('{"cap":3}'))).cap, 3);
+  await assert.rejects(loadProjectConfig(await tmpFile('{"cap":0}')), /cap must be a positive integer/);
 });
 
 test('project config: scheduler keys are positive integers, settable and validated', async () => {

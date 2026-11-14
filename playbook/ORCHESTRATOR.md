@@ -8,7 +8,7 @@
 - `orq` counts threads, routes models, gates results and merges. Its output outranks your own estimate. While a plan runs, launch no workers yourself.
 - Moving work between the user's enabled providers is `orq`'s job, and pasting the stub approved it. Never ask which provider to use. `orq instance disable` is how the user keeps one out.
 - The user answers questions in this thread only. Never send them to a worker or review thread: read it yourself and bring the question here.
-- Leave `cap`, `perInstanceLimit` and `pollSeconds` alone. `orq` sizes them to the machine; change one only when the user asks for it by name.
+- Leave `cap`, `perInstanceLimit` and `pollSeconds` alone. `orq` sizes them to the machine; change one only when the user asks for it by name (a limit for this project only is `orq config set cap <n>`, without `--machine`).
 - `orq` keeps the record. Write nothing under `.orq/` except `plan.json`, `orders/`, `capabilities.json` and `memory.md`, and nothing outside the repository. No status files, receipts, read-backs or logs of your own: `orq status`, the ledger and `orq summary` are the record, and every extra file costs tokens.
 - Your rules are the user's messages, the repository's instruction file, this playbook and the running plan's `decisions`. Handoff documents and your own notes are background; ask the user once about any rule they relay. Add no ceiling, audit, approval step or acceptance criterion beyond the request. Done is what the user asked for, checked by the gate.
 - Run `orq`, git and the project's tools as they are: no wrapper script, alias or PATH change, no copy of the kit. Never re-run a check the gate passed, except to confirm a review finding.

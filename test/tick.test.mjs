@@ -58,6 +58,20 @@ const types = (r) => r.actions.map((a) => a.type);
 const evTypes = (r) => r.events.map((e) => `${e.type}:${e.unit}`);
 const launches = (r) => r.actions.filter((a) => a.type === 'launch');
 
+test('project cap: a project cap below the machine cap limits this project; other projects use only the machine cap', () => {
+  assert.deepEqual(launches(go(doneA)).map((x) => x.unit), ['b', 'c']); // no project cap: as before
+  const capped = go(doneA, { projectCap: 1, project: '/p' });
+  assert.deepEqual(launches(capped).map((x) => x.unit), ['b']);
+  assert.deepEqual([capped.report.slotWaiting, capped.report.capBy], [['c'], 'project']);
+  const mine = go(doneA, { projectCap: 2, project: '/p', leases: [lease('t-x', { project: '/p' })] });
+  assert.deepEqual(launches(mine).map((x) => x.unit), ['b']);
+  // two other projects' threads leave the machine 2 slots: this project's cap of 2 is untouched by them
+  const others = go(doneA, { projectCap: 2, project: '/p', leases: [lease('t-x'), lease('t-y')] });
+  assert.deepEqual([launches(others).map((x) => x.unit), others.report.capBy], [['b', 'c'], 'machine']);
+  const full = go(doneA, { projectCap: 2, project: '/p', leases: [lease('t-x'), lease('t-y'), lease('t-z'), lease('t-w')] });
+  assert.deepEqual([launches(full).map((x) => x.unit), full.report.capBy], [[], 'machine']);
+});
+
 test('rule 1: pending > 0 blocks once; back to 0 unblocks', () => {
   const r = go([launched('a')], { threads: { 't-a': thread('t-a', { pending: 1 }) } });
   assert.deepEqual(evTypes(r), ['blocked:a']);

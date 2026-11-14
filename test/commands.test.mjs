@@ -182,6 +182,13 @@ test('config get/set for project and machine', async () => {
   assert.equal((await read(path.join(s.cwd, '.orq/config.json'))).autonomy, 'review-fix');
   assert.equal((await orq(['config', 'set', '--machine', 'cap', '3'], s)).code, 0);
   assert.deepEqual(JSON.parse((await orq(['config', 'get', '--machine'], s)).out), { cap: 3, perInstanceLimit: 2 });
+  assert.equal((await orq(['config', 'set', 'cap', '1'], s)).code, 0); // the project's own cap
+  assert.equal((await read(path.join(s.cwd, '.orq/config.json'))).cap, 1);
+  assert.deepEqual(JSON.parse((await orq(['config', 'get', '--machine'], s)).out), { cap: 3, perInstanceLimit: 2 });
+  const zero = await orq(['config', 'set', 'cap', '0'], s);
+  assert.deepEqual([zero.code, zero.err], [1, 'orq: cap must be a positive integer, got 0\n']);
+  assert.equal((await orq(['config', 'set', 'cap', 'null'], s)).code, 0);
+  assert.equal('cap' in (await read(path.join(s.cwd, '.orq/config.json'))), false);
   const bad = await orq(['config', 'set', 'nope', '1'], s);
   assert.equal(bad.code, 1);
   assert.match(bad.err, /valid keys: autonomy, base/);

@@ -4,7 +4,7 @@
 
 | The orchestrating agent | `orq` |
 |---|---|
-| Reads the request and recalls memory | Counts active threads against a machine-wide cap |
+| Reads the request and recalls memory | Counts active threads against a machine-wide cap (and a project's own cap, when set) |
 | Decides how many units, their paths, evidence and job class | Routes each unit to a model by job class and tier |
 | Writes the plan and one work order per unit | Launches worker threads in their own git worktrees |
 | Judges failures `orq` cannot resolve | Gates every result in a clean checkout |
@@ -34,7 +34,7 @@ A plan can grow. Append units to `plan.json` after `done` and call `orq wait` ag
 | `~/.t3orq/leases/` | machine | One file per thread `orq` started; the cap counts these |
 | `~/.t3orq/config.json` | machine | `cap`, `perInstanceLimit` |
 | `~/.t3orq/tools.json` | machine | Your own tool catalog, tried before the kit's |
-| `.orq/config.json` | project | `autonomy`, `questions`, `base`, `checks`, resolved slots, scheduler settings, the orchestrator's own model |
+| `.orq/config.json` | project | `autonomy`, `questions`, `base`, `cap` (optional), `checks`, resolved slots, scheduler settings, the orchestrator's own model |
 | `.orq/plan.json`, `.orq/orders/` | project | The plan and its work orders |
 | `.orq/ledger.jsonl` | project | Append-only event log; unit states are derived from it |
 | `.orq/units/<id>/gate-<n>.json` | project | Gate result per attempt, with `.log` beside it |

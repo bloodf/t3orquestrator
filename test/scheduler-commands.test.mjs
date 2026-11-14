@@ -63,6 +63,21 @@ test('status: plan line, counts, one line per unit, and the note', async (t) => 
   assert.deepEqual(json.units.map((u) => [u.id, u.state]), [['a', 'running'], ['b', 'blocked'], ['c', 'failed']]);
 });
 
+test('status: a project cap is shown with this project\'s leases, and named when it is the limit in force', async (t) => {
+  const p = await project(t);
+  const file = path.join(p.repo, '.orq', 'config.json');
+  await fs.writeFile(file, JSON.stringify({ ...JSON.parse(await fs.readFile(file, 'utf8')), cap: 1 }));
+  const r = await orq(['status'], p);
+  assert.equal(r.code, 0, r.err);
+  const lines = r.out.split('\n');
+  assert.equal(lines[2], 'cap=3 active=1 blocked=1 gates=0 machine_leases=3 expired_leases=1 project_cap=1 project_leases=2');
+  assert.equal(lines.at(-3), 'note: project cap 1 is the limit in force: 0 slots free for this project, 1 under the machine cap 3');
+  const json = JSON.parse((await orq(['status', '--json'], p)).out);
+  assert.deepEqual([json.cap, json.projectCap, json.projectLeases], [3, 1, 2]);
+  await fs.writeFile(file, JSON.stringify({ ...JSON.parse(await fs.readFile(file, 'utf8')), cap: 2 }));
+  assert.doesNotMatch((await orq(['status'], p)).out, /limit in force/); // 1 free either way: the machine's
+});
+
 test('status: a plan that has not started', async (t) => {
   const p = await makeProject(t, [unitSpec('a')]);
   const r = await orq(['status'], p);

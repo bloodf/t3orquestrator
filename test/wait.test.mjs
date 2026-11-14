@@ -714,6 +714,26 @@ test('G1: a goal edit while the plan still runs is allowed; a ledger without a r
   assert.equal((await orq(['plan', 'check'], q, simulator(q, {}))).code, 0);
 });
 
+async function setProjectCap(p, cap) {
+  const file = path.join(p.repo, '.orq', 'config.json');
+  await fs.writeFile(file, JSON.stringify({ ...JSON.parse(await fs.readFile(file, 'utf8')), cap }));
+}
+
+test('wait: a project cap below the machine cap bounds this project\'s threads and is named when it binds', async (t) => {
+  const p = await makeProject(t, [unitSpec('a'), unitSpec('b'), unitSpec('c')], { cap: 3 });
+  await setProjectCap(p, 1);
+  const sim = simulator(p, { a: [['commit-complete']], b: [['idle']], c: [['commit-complete']] });
+  const r = await orq(['wait', '--max-seconds', '120'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^timeout: 1 running, 0 blocked, 0 gating, 1 queued, 0 passed\nwaiting: 1 ready units wait for a free slot \(project cap 1 of this project, machine cap 3, or a provider instance limit\)\n/);
+  assert.ok(sim.polls.every((n) => n <= 1), `project cap exceeded: ${sim.polls}`);
+  assert.equal(sim.byUnit.c, undefined);
+  await setProjectCap(p, null); // cleared by hand: the machine cap alone again
+  sim.byUnit.b[0].script = ['commit-complete'];
+  const done = await orq(['wait'], p, sim);
+  assert.match(done.out, /^done: 3 units integrated/);
+});
+
 test('wait: a worker whose turn ends with nothing committed is told to go on in the same thread; its work passes as attempt 1', async (t) => {
   const p = await makeProject(t, [unitSpec('a')]);
   const sim = simulator(p, { a: [['complete']] }); // the turn ends with no commit; after a message the thread commits
