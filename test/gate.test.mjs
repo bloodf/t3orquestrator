@@ -441,11 +441,9 @@ test('a unit without a forbidden list is gated as if the list were empty', async
 });
 
 test('S: the gate checkout links shared dependencies before its steps; removing it leaves them alone', async (t) => {
-  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'pnpm-lock.yaml': 'lockfileVersion: 1\n' });
-  const { excludeShares } = await import('../lib/share.mjs');
+  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'pnpm-lock.yaml': 'lockfileVersion: 1\n', '.gitignore': 'node_modules/\n' });
   await fs.mkdir(path.join(w.repo, 'node_modules', 'x'), { recursive: true });
   await fs.writeFile(path.join(w.repo, 'node_modules', 'x', 'y.js'), '1\n');
-  excludeShares(w.repo, ['node_modules'], w.git);
   const evidence = 'test -f node_modules/x/y.js && test -z "$(git status --porcelain)"';
   const without = await real(w, evidence);
   assert.equal(without.verdict, 'fail');
@@ -455,5 +453,14 @@ test('S: the gate checkout links shared dependencies before its steps; removing 
   const withSetup = await real(w, 'test ! -e node_modules', { checks: { setup: 'true', unit: null }, share: { paths: ['node_modules'], unit: null } });
   assert.equal(withSetup.verdict, 'pass', JSON.stringify(withSetup.failures));
   await fs.stat(path.join(w.repo, 'node_modules', 'x', 'y.js'));
+  assert.equal(fsSync.existsSync(w.workDir), false);
+});
+
+test('S2: a linking error never kills the gate or leaves its checkout behind', async (t) => {
+  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'pnpm-lock.yaml': 'lockfileVersion: 1\n' });
+  await fs.mkdir(path.join(w.repo, 'node_modules'), { recursive: true });
+  const git = { ...w.git, ignored: () => { throw new Error('git check-ignore failed (exit 128)'); } };
+  const r = await real(w, 'test ! -e node_modules', { git, share: { paths: ['node_modules'], unit: null } });
+  assert.equal(r.verdict, 'pass', JSON.stringify(r.failures));
   assert.equal(fsSync.existsSync(w.workDir), false);
 });

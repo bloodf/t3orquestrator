@@ -657,3 +657,35 @@ test('U1: a config written by an older kit (no playbook record) still runs; the 
   assert.deepEqual(r.out.trim().split('\n').slice(0, 2).map((l) => l.replace(/[0-9a-f]{12}/g, 'X')),
     ['done: 1 units integrated at X; final checks no-evidence', `playbook: the kit was updated (unknown -> unknown); read ${file} again now, then run "orq init"`]);
 });
+
+test('G1: a finished plan whose plan.json now has another goal is a new request, even with the same unit ids', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['commit-complete'], ['commit-complete']] });
+  assert.match((await orq(['wait'], p, sim)).out, /^done: /);
+  assert.equal((await readState(p.repo)).plan.goal, 'test goal');
+  const planFile = path.join(p.repo, '.orq', 'plan.json');
+  await fs.writeFile(planFile, JSON.stringify({ goal: 'another request', units: [unitSpec('a')] }));
+  const msg = 'plan.json has a new goal ("another request", was "test goal") but the ledger\'s plan is finished; this looks like a new request: restore plan.json or run "orq plan archive" first';
+  assert.deepEqual(await orq(['plan', 'check'], p, sim).then((r) => [r.code, r.out]), [4, `error: ${msg}\n`]);
+  assert.deepEqual(await orq(['wait'], p, sim).then((r) => [r.code, r.err]), [4, `orq: ${msg}\n`]);
+  sim.now += 60_000;
+  const archived = await orq(['plan', 'archive'], p, sim);
+  assert.ok(archived.out.split('\n').includes('note: plan.json did not match the ledger; archived the ledger and kept plan.json for the next request'), archived.out);
+  assert.match((await orq(['wait'], p, sim)).out, /^done: 1 units integrated/);
+  assert.equal((await readState(p.repo)).plan.goal, 'another request');
+});
+
+test('G1: a goal edit while the plan still runs is allowed; a ledger without a recorded goal is not checked', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['idle']] });
+  assert.match((await orq(['wait', '--max-seconds', '20'], p, sim)).out, /^timeout: 1 running/);
+  await fs.writeFile(path.join(p.repo, '.orq', 'plan.json'), JSON.stringify({ goal: 'clearer goal', units: [unitSpec('a')] }));
+  assert.equal((await orq(['plan', 'check'], p, sim)).code, 0);
+  const q = await makeProject(t, [unitSpec('a')]);
+  await commit(q.repo, () => [
+    { type: 'plan-started', unit: null, at: NOW, planId: 'p1', baseSha: q.baseSha, integrationBranch: 'orq/p1/integration' },
+    { type: 'dropped', unit: 'a', at: NOW },
+  ]);
+  await fs.writeFile(path.join(q.repo, '.orq', 'plan.json'), JSON.stringify({ goal: 'whatever', units: [unitSpec('a')] }));
+  assert.equal((await orq(['plan', 'check'], q, simulator(q, {}))).code, 0);
+});

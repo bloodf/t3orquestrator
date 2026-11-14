@@ -19,7 +19,9 @@ async function setup({ git = false, files = {} } = {}) {
   return { root, home, cwd, git };
 }
 
-async function orq(args, s, { env = {}, deps = {}, stdin = '' } = {}) {
+async function orq(args, s, {
+  env = {}, deps = {}, stdin = '', now = () => NOW,
+} = {}) {
   const out = [];
   const err = [];
   const code = await run(args, {
@@ -27,7 +29,7 @@ async function orq(args, s, { env = {}, deps = {}, stdin = '' } = {}) {
     stderr: { write: (x) => err.push(x) },
     env: { T3ORQ_HOME: s.home, ...env },
     cwd: s.cwd,
-    now: () => NOW,
+    now,
     stdin: async () => stdin,
     deps: {
       exec: (bin) => {
@@ -216,8 +218,8 @@ test('U1: init records the playbook it points at; status names a kit update unti
   const deps = { kitDir: kit };
   assert.equal((await orq(['init'], s, { deps })).code, 0);
   const cfg = await read(path.join(s.cwd, '.orq/config.json'));
-  assert.equal(cfg.playbook.kit, one);
-  assert.match(cfg.playbook.hash, /^[0-9a-f]{16}$/);
+  assert.equal(cfg.playbooks._.kit, one);
+  assert.match(cfg.playbooks._.hash, /^[0-9a-f]{16}$/);
   assert.doesNotMatch((await orq(['status'], s, { deps })).out, /playbook:/);
   assert.equal((await orq(['config', 'set', 'autonomy', 'draft'], s, { deps })).code, 0);
   await fs.writeFile(file, 'v2\n');
@@ -228,5 +230,28 @@ test('U1: init records the playbook it points at; status names a kit update unti
   assert.equal((await orq(['init'], s, { deps })).code, 0);
   assert.doesNotMatch((await orq(['status'], s, { deps })).out, /playbook:/);
   const after = await read(path.join(s.cwd, '.orq/config.json'));
-  assert.deepEqual([after.autonomy, after.playbook.kit], ['draft', two]);
+  assert.deepEqual([after.autonomy, after.playbooks._.kit], ['draft', two]);
+});
+
+test('P1: each orchestrator thread has its own playbook record; at most 10 are kept; an old single record still loads', async () => {
+  const s = await setup();
+  const kit = path.join(s.root, 'kit');
+  await fs.mkdir(path.join(kit, 'playbook'), { recursive: true });
+  const file = path.join(kit, 'playbook', 'ORCHESTRATOR.md');
+  await fs.writeFile(file, 'v1\n');
+  const as = (id) => ({ deps: { kitDir: kit }, env: id ? { T3CODE_THREAD_ID: id } : {} });
+  await orq(['init'], s, as('orch-a'));
+  await orq(['init'], s, as('orch-b'));
+  await fs.writeFile(file, 'v2\n');
+  await orq(['init'], s, as('orch-b')); // b read the new playbook; a did not
+  assert.match((await orq(['status'], s, as('orch-a'))).out, /^playbook: the kit was updated/m);
+  assert.doesNotMatch((await orq(['status'], s, as('orch-b'))).out, /playbook:/);
+  assert.match((await orq(['status'], s, as('orch-new'))).out, /^playbook: the kit was updated \(unknown -> unknown\)/m);
+  for (let i = 0; i < 12; i += 1) await orq(['init'], s, { ...as(`t${i}`), now: () => NOW + i });
+  const cfg = await read(path.join(s.cwd, '.orq/config.json'));
+  assert.equal(Object.keys(cfg.playbooks).length, 10);
+  // a config from the previous version: one record, no thread ids; it is the record of a thread-less caller
+  const { playbooks: _drop, ...old } = cfg;
+  await fs.writeFile(path.join(s.cwd, '.orq/config.json'), JSON.stringify({ ...old, playbook: { hash: cfg.playbooks.t11.hash } }));
+  assert.doesNotMatch((await orq(['status'], s, as(null))).out, /playbook:/);
 });

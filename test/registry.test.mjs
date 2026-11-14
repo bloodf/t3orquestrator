@@ -173,7 +173,7 @@ test('recordFailure: model backoff, instance cooldown from the second consecutiv
   assert.equal(reg.models[key].failures, 1);
   assert.equal(reg.models[key].cooldownUntil, 1000 + 10 * MIN);
   assert.equal(reg.instances['provider-e'].cooldownUntil, null);
-  assert.deepEqual(reg.models[key].outcomes.implement, { attempts: 1, firstPass: 0 });
+  assert.equal(reg.models[key].outcomes.implement, undefined); // a provider failure says nothing about the work
   reg = recordFailure(reg, key, { now: 2000, kind: 'provider' });
   assert.equal(reg.models[key].cooldownUntil, 2000 + 20 * MIN);
   assert.equal(reg.instances['provider-e'].cooldownUntil, 2000 + 10 * MIN);
@@ -237,7 +237,7 @@ test('recordFailure kinds', () => {
   const r = recordFailure(base, key, { now: 1, jobClass: 'x', kind: 'model-rejected' });
   assert.deepEqual([r.models[key].available, r.models[key].failures, r.models[key].cooldownUntil], [false, 1, null]);
   assert.equal(r.instances['provider-e'].failures, 0);
-  assert.equal(r.models[key].outcomes.x.attempts, 1);
+  assert.equal(r.models[key].outcomes.x, undefined);
   const p = recordFailure(base, key, { now: 1, kind: 'provider' });
   assert.deepEqual([p.models[key].cooldownUntil, p.instances['provider-e'].failures], [1 + 10 * MIN, 1]);
   const u = recordFailure(base, key, { now: 1 });
@@ -330,4 +330,14 @@ test('M4: model options from capabilities are recorded (orq cannot pass them to 
   assert.deepEqual(merge(registry, changed).registry.models['provider-e::model-small'].options, { reasoningEffort: { values: ['low', 'high'], default: 'high' } });
   const plain = merge(emptyRegistry(), { ...caps, providers: [{ providerInstanceId: 'x', models: ['m1'] }] }).registry;
   assert.deepEqual(plain.models['x::m1'].options, {});
+});
+
+test('R1: recordResult keeps the last 10 gate results per job class, newest last', async () => {
+  const { recordResult } = await import('../lib/health.mjs');
+  let reg = deepFreeze(synced());
+  const key = 'provider-e::model-small';
+  for (let i = 0; i < 12; i += 1) reg = recordResult(reg, key, { now: i, jobClass: 'implement', pass: i % 2 === 0 });
+  assert.equal(reg.models[key].results.implement.length, 10);
+  assert.deepEqual(reg.models[key].results.implement.at(-1), { at: 11, pass: false });
+  assert.deepEqual(reg.models[key].results.implement[0], { at: 2, pass: true });
 });

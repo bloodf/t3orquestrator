@@ -324,13 +324,14 @@ test('plan check prints a warning per unit whose evidence runs a file outside th
 
 test('route explains the outcome record: score and attempts, and demoted', async () => {
   const s = await setup();
-  const m = (instance, model, outcomes) => ({
-    instance, model, family: 'f', tier: 2, tierSource: 'user', available: true, confirmedAt: null, failures: 0, cooldownUntil: null, lastUsedAt: null, outcomes,
+  const results = (n, pass) => Array.from({ length: n }, (_, i) => ({ at: NOW, pass: i < pass }));
+  const m = (instance, model, implement) => ({
+    instance, model, family: 'f', tier: 2, tierSource: 'user', available: true, confirmedAt: null, failures: 0, cooldownUntil: null, lastUsedAt: null, outcomes: {}, results: { implement },
   });
   const inst = { enabled: true, constraints: [], limit: null, failures: 0, cooldownUntil: null };
   await fs.writeFile(regFile(s), JSON.stringify({
     version: 1, syncedAt: NOW, instances: { a: inst, b: inst },
-    models: { 'a::x': m('a', 'x', { implement: { attempts: 6, firstPass: 5 } }), 'b::y': m('b', 'y', { implement: { attempts: 6, firstPass: 1 } }) },
+    models: { 'a::x': m('a', 'x', results(6, 5)), 'b::y': m('b', 'y', results(6, 1)) },
   }));
   const r = await orq(['route', '--job', 'implement'], s);
   assert.equal(r.out, '1 a x tier=2 family=f unconfirmed score=0.83 n=6\n2 b y tier=2 family=f unconfirmed score=0.17 n=6 demoted\n');
@@ -342,5 +343,5 @@ test('U1: sync re-records the playbook its session read', async () => {
   const cfgFile = path.join(s.cwd, '.orq/config.json');
   await fs.writeFile(cfgFile, JSON.stringify({ ...(await read(cfgFile)), playbook: { hash: 'stale' } }));
   assert.equal((await orq(['sync'], s, { stdin: capsFixture })).code, 0);
-  assert.notEqual((await read(cfgFile)).playbook.hash, 'stale');
+  assert.match((await read(cfgFile)).playbooks._.hash, /^[0-9a-f]{16}$/); // a session without a thread id: the shared record
 });

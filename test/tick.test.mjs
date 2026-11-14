@@ -97,6 +97,7 @@ test('rule 2: pass records success (first pass) and integrates', () => {
   });
   assert.deepEqual(evTypes(r), ['gated:a']);
   assert.deepEqual(r.actions, [
+    { type: 'record-result', unit: 'a', key: 'a::m2', job: 'implement', pass: true },
     { type: 'record-success', unit: 'a', key: 'a::m2', job: 'implement', firstPass: true },
     { type: 'integrate', unit: 'a' },
     { type: 'launch', unit: 'c', attempt: 1, key: 'a::m2', instance: 'a', model: 'm2', tier: 2, family: 'f', job: 'implement', failures: null },
@@ -109,7 +110,7 @@ test('rule 2: no-evidence passes with a flag', () => {
   });
   assert.equal(r.events[0].verdict, 'no-evidence');
   assert.deepEqual(r.events[0].flags.map((f) => f.kind), ['no-evidence']);
-  assert.deepEqual(types(r), ['record-success', 'integrate', 'launch']);
+  assert.deepEqual(types(r), ['record-result', 'record-success', 'integrate', 'launch']);
 });
 
 test('rule 2: a lost gate is restarted once, then needs judgment; concurrency limits starts', () => {
@@ -157,6 +158,7 @@ test('rule 4: the full quality ladder across three attempts', () => {
   const one = go([launched('a'), ended('a'), gateStarted('a')], { gates: failGate(1) });
   assert.deepEqual(evTypes(one), ['gated:a']);
   assert.deepEqual(one.actions, [
+    { type: 'record-result', unit: 'a', key: 'a::m2', job: 'implement', pass: false },
     { type: 'send-feedback', unit: 'a', attempt: 2, threadId: 't-a', failures: ['f1'], key: 'a::m2', instance: 'a', model: 'm2' },
   ]);
   const at2 = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail'),
@@ -180,7 +182,7 @@ test('rule 4: feedback waits for a free slot and is retried on later polls until
     gates: { a: { running: false, result: { verdict: 'fail', failures: ['x'], flags: [], headSha: B } } },
   });
   assert.deepEqual(evTypes(r), ['gated:a']);
-  assert.deepEqual(r.actions, []);
+  assert.deepEqual(types(r), ['record-result']); // no slot: no feedback yet
   const awaiting = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail')];
   const retry = go(awaiting);
   assert.deepEqual(retry.events, []);
@@ -558,4 +560,24 @@ test('F4: judgments for provider reasons are marked as such; others are not', ()
   assert.equal(three.events.find((e) => e.type === 'needs-judgment').provider, true);
   const dropped = go([{ type: 'dropped', unit: 'a', at: 7 }]);
   assert.equal(dropped.events.find((e) => e.type === 'needs-judgment').provider, undefined);
+});
+
+test('R1: the first gate verdict of each launch is recorded for its model, once; feedback, continuations and setup failures are not', () => {
+  const verdict = (v, attempt = 1) => ({ a: { running: false, result: { verdict: v, failures: v === 'fail' ? ['x'] : [], flags: [], headSha: B } } });
+  const results = (r) => r.actions.filter((x) => x.type === 'record-result').map(({ key, job, pass }) => [key, job, pass]);
+  assert.deepEqual(results(go([launched('a'), ended('a'), gateStarted('a')], { gates: verdict('pass') })), [['a::m2', 'implement', true]]);
+  assert.deepEqual(results(go([launched('a'), ended('a'), gateStarted('a')], { gates: verdict('fail') })), [['a::m2', 'implement', false]]);
+  // attempt 2 (feedback on the same thread): already counted at attempt 1
+  const fb = [launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail'),
+    { type: 'feedback-sent', unit: 'a', at: 6, attempt: 2, threadId: 't-a' }, { ...ended('a'), at: 7 }, gateStarted('a', 2)];
+  assert.deepEqual(results(go(fb, { gates: verdict('pass') })), []);
+  // attempt 3 is a new launch on another model: its first verdict counts for that model
+  const a3 = [...fb, gatedEv('a', 'fail', 2), launched('a', { attempt: 3, threadId: 't-a3', key: 'b::m4', instance: 'b', model: 'm4', tier: 4 }),
+    { ...ended('a'), at: 9 }, gateStarted('a', 3)];
+  assert.deepEqual(results(go(a3, { gates: verdict('pass') })), [['b::m4', 'implement', true]]);
+  // a continued launch passed on work another model began; a setup failure is not the model's
+  const cont = [launched('a'), ended('a', 'failed'), launched('a', { threadId: 't-a2', key: 'b::m4', instance: 'b', continues: B }), ended('a'), gateStarted('a')];
+  assert.deepEqual(results(go(cont, { gates: verdict('pass') })), []);
+  const setup = { a: { running: false, result: { verdict: 'fail', failures: ['setup failed (exit 1)'], flags: [], headSha: B, setupFailed: true } } };
+  assert.deepEqual(results(go([launched('a'), ended('a'), gateStarted('a')], { gates: setup })), []);
 });

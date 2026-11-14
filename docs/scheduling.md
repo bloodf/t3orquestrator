@@ -59,14 +59,14 @@ Until some unit has passed its gate, only one unit is in flight. A plan with a b
 Among enabled, available models at or above the minimum tier, candidates are ordered by:
 
 1. lowest tier first (highest first for `decide`, the job `orq ask` routes: it wants the strongest model, and when every tier-4 model is cooling down or at its limit it takes the strongest free model rather than wait);
-2. then the better record for this job class: the model's first-pass rate once it has at least 3 attempts (fewer attempts count as neutral, 0.5, so a new model is not starved);
+2. then the better record for this job class: the share of the model's last 10 recorded results that passed, once it has at least 3 (fewer count as neutral, 0.5, so a new model is not starved);
 3. then fewest running threads on that instance;
 4. then least recently used;
 5. then key order.
 
 For `review`, models from the author's family, and models whose family is unknown, move to the end. If no model reaches the minimum tier, the best available tier is used and `orq route` marks it `below-tier`. A unit launched that way, including a `fix` unit that cannot get the author's tier, gets a `note: unit <id> wanted tier <n>; launched on <key> (tier <m>), the best available` line from `orq wait`, and `wanted_tier=<n>` in `orq status`.
 
-A model with at least 4 attempts and a first-pass rate under 0.34 for the job class is demoted: it is tried only after every other eligible model, at any adequate tier, and stays usable when it is all there is. `orq route` prints `score=<rate> n=<attempts>` and `demoted`. `review` and `decide` are never scored: their threads are not gated. A completed review and an answered decision count as a first-pass success for their job; a decision that escalates or replies without a status line counts as an attempt without one.
+A result is recorded once per worker launch: the first gate verdict after the launch, pass or fail, for the model and job class of that launch. Later verdicts of the same launch (attempt 2, after feedback on the same thread) are not recorded. Attempt 3 is a new launch, so its first verdict is recorded for its own model. Not recorded: a launch that continued another worker's commits, a setup failure, and provider failures (they only drive cooldowns). A model with at least 4 recorded results of which under 34% passed is demoted: it is tried only after every other eligible model, at any adequate tier, and stays usable when it is all there is. A demotion lapses 24 hours after the model's last recorded result for that job class, so the model gets another chance. `orq route` prints `score=<rate> n=<results>` and `demoted`. `review` and `decide` are never scored: their threads are not gated. Records kept before this version (`outcomes` in the registry) are not read for scoring.
 
 A model is skipped while it or its instance is cooling down, or while its instance is at its limit. A model whose work failed the gate twice for this unit is excluded for that unit (the quality ladder's third attempt). A model or instance on which this unit hit a provider failure moves to the end of the order, a failed model behind a failed instance, but it is not excluded: when nothing else is eligible it is used again once its cooldown has passed.
 

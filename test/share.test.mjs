@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createGit, defaultExec } from '../lib/git.mjs';
 import {
-  validSharePath, detectShares, eligibleShares, linkShares, shareLine, excludeShares,
+  validSharePath, detectShares, eligibleShares, linkShares, shareLine, syncShareExclude,
 } from '../lib/share.mjs';
 import { sh } from './support/project.mjs';
 
@@ -67,19 +67,12 @@ test('eligibleShares: only when the target exists and the governing manifests ma
   }), ['.venv']); // the root lock governs every node_modules
 });
 
-test('linkShares: a symlink only where nothing exists and git ignores the path; never replaces', async (t) => {
+test('linkShares: a symlink only where git ignores the path (its exclude entry is made first); never replaces', async (t) => {
   const r = await repo(t, { gitignore: 'node_modules/\n' });
   const wt = path.join(r.root, 'wt');
   sh(r.dir, 'worktree', 'add', '-q', '--detach', wt, r.sha);
-  // `node_modules/` (directories only) does not ignore a symlink: without the exclude entry nothing is linked
-  assert.deepEqual(linkShares({
-    dir: wt, cwd: r.dir, paths: ['node_modules'], git,
-  }), []);
-  excludeShares(r.dir, ['node_modules', 'apps/shop/node_modules'], git);
-  excludeShares(r.dir, ['node_modules'], git); // idempotent
-  const exclude = await fs.readFile(path.join(r.dir, '.git', 'info', 'exclude'), 'utf8');
-  assert.equal(exclude.split('\n').filter((l) => l === '/node_modules').length, 1);
   await fs.mkdir(path.join(wt, 'apps', 'shop', 'node_modules')); // something is already there
+  // `node_modules/` (directories only) does not ignore a symlink: linkShares adds the anchored entry itself (S3)
   assert.deepEqual(linkShares({
     dir: wt, cwd: r.dir, paths: ['node_modules', 'apps/shop/node_modules', 'gone/node_modules'], git,
   }), ['node_modules']);
@@ -89,9 +82,54 @@ test('linkShares: a symlink only where nothing exists and git ignores the path; 
   assert.equal(shareLine(['node_modules']), 'Dependencies: node_modules are linked from the main checkout. Do not install, delete or modify them; if you must change dependencies, report NEEDS_CONTEXT.');
 });
 
+test('S1: orq manages its exclude entries in a marked block: only ignored, untracked paths; rewritten, never touching other lines', async (t) => {
+  const r = await repo(t);
+  await fs.writeFile(path.join(r.dir, 'vendor', 'v', 'kept.txt'), 'tracked\n');
+  sh(r.dir, 'add', '-f', 'vendor/v/kept.txt');
+  sh(r.dir, 'commit', '-q', '-m', 'tracked vendor');
+  const file = path.join(r.dir, '.git', 'info', 'exclude');
+  await fs.writeFile(file, '# mine\n/build\n');
+  syncShareExclude(r.dir, ['node_modules', 'apps/shop/node_modules', 'vendor', 'not/there'], git, { prune: true });
+  assert.equal(await fs.readFile(file, 'utf8'), '# mine\n/build\n# orq share begin\n/node_modules\n/apps/shop/node_modules\n# orq share end\n');
+  const before = fsSync.statSync(file).mtimeMs;
+  await new Promise((res) => { setTimeout(res, 20); });
+  syncShareExclude(r.dir, ['node_modules'], git); // linking time: adds what is missing, never removes
+  assert.equal(fsSync.statSync(file).mtimeMs, before); // nothing to change: not written
+  syncShareExclude(r.dir, ['node_modules'], git, { prune: true });
+  assert.equal(await fs.readFile(file, 'utf8'), '# mine\n/build\n# orq share begin\n/node_modules\n# orq share end\n');
+  syncShareExclude(r.dir, [], git, { prune: true });
+  assert.equal(await fs.readFile(file, 'utf8'), '# mine\n/build\n');
+});
+
+test('S2: never through a symlinked parent, never a throw; the lockfile and manifest it relies on must exist', async (t) => {
+  const r = await repo(t);
+  // the commit makes `deps` a symlink to apps/shop: deps/node_modules lies beyond it
+  await fs.symlink('apps/shop', path.join(r.dir, 'deps'));
+  sh(r.dir, 'add', 'deps');
+  sh(r.dir, 'commit', '-q', '-m', 'symlinked dir');
+  const head = sh(r.dir, 'rev-parse', 'HEAD');
+  await fs.mkdir(path.join(r.dir, 'apps', 'shop', '.venv'));
+  assert.deepEqual(eligibleShares({
+    cwd: r.dir, commit: head, paths: ['deps/node_modules', 'deps/.venv', 'node_modules'], git,
+  }), ['node_modules']); // deps/.venv has no governing files: only the symlink rule stops it
+  const wt = path.join(r.root, 'wt');
+  sh(r.dir, 'worktree', 'add', '-q', '--detach', wt, head);
+  assert.deepEqual(linkShares({
+    dir: wt, cwd: r.dir, paths: ['deps/node_modules'], git,
+  }), []); // refused, not thrown (git check-ignore exits 128 "beyond a symbolic link" there)
+  const broken = { ...git, ignored: () => { throw new Error('git check-ignore failed (exit 128)'); } };
+  assert.deepEqual(linkShares({
+    dir: wt, cwd: r.dir, paths: ['node_modules'], git: broken,
+  }), []);
+  // no package.json next to the node_modules, in the commit or the main checkout: nothing says what it holds
+  await fs.mkdir(path.join(r.dir, 'libs', 'x', 'node_modules'), { recursive: true });
+  assert.deepEqual(eligibleShares({
+    cwd: r.dir, commit: head, paths: ['libs/x/node_modules'], git,
+  }), []);
+});
+
 test('removing a worktree or a gate directory with links never touches the shared directory', async (t) => {
   const r = await repo(t);
-  excludeShares(r.dir, ['node_modules'], git);
   const keep = path.join(r.dir, 'node_modules', 'x', 'y.js');
   const linked = (name) => {
     const wt = path.join(r.root, name);
@@ -179,4 +217,22 @@ test('init explains a node_modules it will not share', async (t) => {
   await fs.mkdir(home);
   const out = (await orqIn(r.dir, home, ['init'])).out.split('\n');
   assert.ok(out.includes('share: none (npm projects are not shared: "npm ci" empties a linked node_modules)'), out.join('\n'));
+});
+
+test('S1: config set share refuses a directory git tracks files under; init drops it with a note', async (t) => {
+  const r = await repo(t);
+  const home = path.join(r.root, 'home');
+  await fs.mkdir(home);
+  await fs.writeFile(path.join(r.dir, 'vendor', 'v', 'kept.txt'), 'tracked\n');
+  sh(r.dir, 'add', 'vendor/v/kept.txt');
+  sh(r.dir, 'commit', '-q', '-m', 'tracked vendor');
+  const set = await orqIn(r.dir, home, ['config', 'set', 'share', 'node_modules,vendor']);
+  assert.deepEqual([set.code, set.err], [1, 'orq: share: "vendor" has tracked files; only untracked, ignored directories can be shared\n']);
+  const cfgFile = path.join(r.dir, '.orq', 'config.json');
+  assert.equal(fsSync.existsSync(cfgFile), false); // refused before anything was written
+  await fs.mkdir(path.dirname(cfgFile), { recursive: true });
+  await fs.writeFile(cfgFile, JSON.stringify({ share: ['node_modules', 'vendor'] })); // written by hand
+  const init = await orqIn(r.dir, home, ['init']);
+  assert.ok(init.out.split('\n').includes('note: share: "vendor" has tracked files; only untracked, ignored directories can be shared'), init.out);
+  assert.doesNotMatch(await fs.readFile(path.join(r.dir, '.git', 'info', 'exclude'), 'utf8'), /\/vendor/);
 });

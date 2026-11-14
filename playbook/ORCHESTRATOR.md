@@ -45,7 +45,7 @@ The `slots:` line names the tool for each role: `judge`, `memory`, `code-index` 
    - what is out of scope;
    - constraints the code does not show: compatibility, existing data, dependencies they do or do not want;
    - anything destructive, paid or public the work would need.
-   Each question states the answer you will assume and why, so the user can reply "go" to accept them all. Never ask what the request, the code or memory already answers; never ask about style, tools or models; ask nothing when nothing qualifies or the user said not to ask. Record the answers in `decisions`. This is the only time you ask: after it, open points go to `orq ask`.
+   Each question states the answer you will assume and why, so the user can reply "go" to accept them all. Never ask what the request, the code or memory already answers; never ask about style, tools or models; ask nothing when nothing qualifies or the user said not to ask. These questions always go to the user: the `questions` setting only governs what comes up after the work starts. Record the answers in `decisions`. This is the only time you ask: after it, open points go to `orq ask`.
 5. Size the work. Default to ONE unit. Fan out only for three or more independent, substantial units. One or two files, or tightly coupled work, is one unit: every extra unit costs a thread, a gate and a merge.
 
 ## Plan

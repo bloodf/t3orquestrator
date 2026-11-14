@@ -27,7 +27,7 @@ test('absent unit is queued with attempt 0', () => {
 test('plan-started sets plan fields and the integration head', () => {
   const s = run();
   assert.deepEqual(s.plan, {
-    planId: 'p1', baseSha: A, integrationBranch: 'orq/p1/integration', integrationHead: A, final: null, finalGateStarts: 0,
+    planId: 'p1', baseSha: A, integrationBranch: 'orq/p1/integration', integrationHead: A, final: null, finalGateStarts: 0, goal: null,
   });
   assert.throws(() => apply(s, started), /plan already started/);
 });

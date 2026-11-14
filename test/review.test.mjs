@@ -46,7 +46,9 @@ async function integratedProject(t, opts = {}) {
   const p = await makeProject(t, [unitSpec('a')], opts);
   if (opts.lockfile) { // a pnpm project: its node_modules may be shared (the head must hold the lockfile)
     await fs.writeFile(path.join(p.repo, 'pnpm-lock.yaml'), 'lockfileVersion: 1\n');
-    sh(p.repo, 'add', 'pnpm-lock.yaml');
+    await fs.writeFile(path.join(p.repo, 'package.json'), '{}\n');
+    await fs.writeFile(path.join(p.repo, '.gitignore'), 'node_modules/\n');
+    sh(p.repo, 'add', 'pnpm-lock.yaml', 'package.json', '.gitignore');
     sh(p.repo, 'commit', '-q', '-m', 'lock');
     p.baseSha = sh(p.repo, 'rev-parse', 'HEAD');
   }
@@ -268,11 +270,8 @@ test('show: a failed review is replaced on another model (same order, same head)
 
 test('S: a review thread is told about linked dependencies and its worktree is linked (here T3 never shows it: a note)', async (t) => {
   const p = await integratedProject(t, { lockfile: true });
-  const { createGit, defaultExec } = await import('../lib/git.mjs');
-  const { excludeShares } = await import('../lib/share.mjs');
   await fs.mkdir(path.join(p.repo, 'node_modules', 'x'), { recursive: true });
   await fs.writeFile(path.join(p.repo, '.git', 'info', 'exclude'), '.orq/\n');
-  excludeShares(p.repo, ['node_modules'], createGit({ exec: defaultExec }));
   const cfgFile = path.join(p.repo, '.orq', 'config.json');
   await fs.writeFile(cfgFile, JSON.stringify({ ...await readJson(cfgFile), share: ['node_modules'] }));
   const r = await orq(['review', 'start'], p);

@@ -338,7 +338,9 @@ test('lease and registry actions', async (t) => {
   await s.act({ type: 'record-success', unit: 'a', key: 'pa::m2', job: 'implement', firstPass: true });
   const m = (await registryOf(s.p)).models['pa::m2'];
   assert.equal(m.failures, 0);
-  assert.deepEqual(m.outcomes.implement, { attempts: 2, firstPass: 1 });
+  assert.deepEqual(m.outcomes.implement, { attempts: 1, firstPass: 1 }); // the provider failure counted no outcome
+  await s.act({ type: 'record-result', unit: 'a', key: 'pa::m2', job: 'implement', pass: false });
+  assert.deepEqual((await registryOf(s.p)).models['pa::m2'].results.implement, [{ at: NOW, pass: false }]);
   await assert.rejects(s.act({ type: 'nope' }), /unknown action "nope"/);
 });
 
@@ -727,8 +729,6 @@ async function withDeps(t, over = {}) {
   sh(s.p.repo, 'commit', '-q', '-m', 'deps');
   await fs.mkdir(path.join(s.p.repo, 'node_modules', 'x'), { recursive: true });
   await fs.writeFile(path.join(s.p.repo, 'node_modules', 'x', 'y.js'), '1\n');
-  const { excludeShares } = await import('../lib/share.mjs');
-  excludeShares(s.p.repo, ['node_modules'], git);
   s.run.config = { ...s.run.config, share: ['node_modules'] };
   return { s, world };
 }

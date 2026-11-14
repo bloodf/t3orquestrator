@@ -232,31 +232,48 @@ test('strongest: when every top-tier model is cooling or at its limit, the stron
   assert.equal(go(r, { job: 'plan', running: { b: 1 } }).candidates.length, 0);
 });
 
-const rec = (attempts, firstPass) => ({ implement: { attempts, firstPass } });
+// the last results for the job, oldest first (`results` is the scored record; old `outcomes` rows are ignored)
+const rec = (attempts, firstPass, at = 900) => ({ implement: Array.from({ length: attempts }, (_, i) => ({ at, pass: i < firstPass })) });
 
 test('M2: within a tier, a better first-pass record goes first; few attempts are neutral; equal scores still spread load', () => {
   const r = reg({ a: inst(), b: inst(), c: inst() }, [
-    mod('a', 'm2', 2, { outcomes: rec(10, 4) }), mod('b', 'm2', 2, { outcomes: rec(6, 5) }), mod('c', 'm2', 2, { outcomes: rec(2, 0) }), mod('a', 'm3', 3),
+    mod('a', 'm2', 2, { results: rec(10, 4) }), mod('b', 'm2', 2, { results: rec(6, 5) }), mod('c', 'm2', 2, { results: rec(2, 0) }), mod('a', 'm3', 3),
   ]);
   const got = go(r);
   assert.deepEqual(keys(got), ['b::m2', 'c::m2', 'a::m2', 'a::m3']); // 0.83, neutral 0.5 (only 2 attempts), 0.4; tier first
   assert.deepEqual(got.candidates.slice(0, 3).map((c) => [c.score, c.n]), [[0.83, 6], [null, 2], [0.4, 10]]);
   // two models with the same record: load, then least recently used, decide
-  const same = reg({ a: inst(), b: inst() }, [mod('a', 'm2', 2, { outcomes: rec(4, 3), lastUsedAt: 9 }), mod('b', 'm2', 2, { outcomes: rec(8, 6), lastUsedAt: 1 })]);
+  const same = reg({ a: inst(), b: inst() }, [mod('a', 'm2', 2, { results: rec(4, 3), lastUsedAt: 9 }), mod('b', 'm2', 2, { results: rec(8, 6), lastUsedAt: 1 })]);
   assert.deepEqual(keys(go(same)), ['b::m2', 'a::m2']);
   assert.deepEqual(keys(go(same, { running: { b: 1 } })), ['a::m2', 'b::m2']);
 });
 
 test('M2: a model with a poor record for the job is tried after every other adequate model, but stays usable', () => {
-  const r = reg({ a: inst(), b: inst() }, [mod('a', 'm2', 2, { outcomes: rec(6, 1) }), mod('b', 'm4', 4), mod('a', 'm3', 3, { outcomes: rec(3, 0) })]);
+  const r = reg({ a: inst(), b: inst() }, [mod('a', 'm2', 2, { results: rec(6, 1) }), mod('b', 'm4', 4), mod('a', 'm3', 3, { results: rec(3, 0) })]);
   const got = go(r);
   assert.deepEqual(keys(got), ['a::m3', 'b::m4', 'a::m2']); // a::m3 has only 3 attempts: not demoted yet
   assert.deepEqual(got.candidates.map((c) => Boolean(c.demoted)), [false, false, true]);
-  const alone = reg({ a: inst() }, [mod('a', 'm2', 2, { outcomes: rec(9, 0) })]);
+  const alone = reg({ a: inst() }, [mod('a', 'm2', 2, { results: rec(9, 0) })]);
   assert.deepEqual(keys(go(alone)), ['a::m2']);
   // records of other jobs, and of review and decide (never gated), do not count
-  const other = reg({ a: inst(), b: inst() }, [mod('a', 'm2', 2, { outcomes: { docs: { attempts: 9, firstPass: 0 } } }), mod('b', 'm2', 2, { lastUsedAt: 5 })]);
+  const other = reg({ a: inst(), b: inst() }, [mod('a', 'm2', 2, { results: { docs: rec(9, 0).implement } }), mod('b', 'm2', 2, { lastUsedAt: 5 })]);
   assert.deepEqual(keys(go(other)), ['a::m2', 'b::m2']);
-  const rv = reg({ a: inst() }, [mod('a', 'm2', 2, { family: 'x', outcomes: { review: { attempts: 9, firstPass: 0 } } })]);
+  const rv = reg({ a: inst() }, [mod('a', 'm2', 2, { family: 'x', results: { review: rec(9, 0).implement } })]);
   assert.equal(go(rv, { job: 'review', authorTier: 2, authorFamily: 'y' }).candidates[0].demoted, undefined);
+});
+
+test('R1: only the last 10 results count, old outcome counts are ignored, and a demotion lapses after 24 h', () => {
+  const DAY = 24 * 3600_000;
+  // 10 recent passes after 5 old failures: the failures fell out of the window
+  const window = { implement: [...rec(5, 0).implement, ...rec(10, 10).implement] };
+  assert.deepEqual(go(reg({ a: inst() }, [mod('a', 'm2', 2, { results: window })])).candidates.map((c) => [c.score, c.n]), [[1, 10]]);
+  // counts from before this version (outcomes) say nothing
+  const old = go(reg({ a: inst() }, [mod('a', 'm2', 2, { outcomes: { implement: { attempts: 9, firstPass: 0 } } })]));
+  assert.deepEqual([old.candidates[0].score, old.candidates[0].n, old.candidates[0].demoted], [undefined, undefined, undefined]);
+  // demoted while its last result is recent; neutral again 24 h after it, so it gets another chance
+  const r = (at) => reg({ a: inst(), b: inst() }, [mod('a', 'm2', 2, { results: rec(6, 0, at) }), mod('b', 'm2', 2, { lastUsedAt: 5 })]);
+  assert.deepEqual(keys(go(r(900))), ['b::m2', 'a::m2']);
+  const lapsed = go(r(900), { now: 900 + DAY + 1 });
+  assert.deepEqual(keys(lapsed), ['a::m2', 'b::m2']);
+  assert.equal(lapsed.candidates[0].demoted, undefined);
 });
