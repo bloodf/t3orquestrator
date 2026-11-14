@@ -87,7 +87,7 @@ A running thread with no update for `stallMinutes` (default 20) is reported as `
 
 Feedback can also go unseen. If the thread still shows its run from before the failures were sent, `orq wait` reports it as stalled after 2 minutes. It treats it as a provider failure after `stallMinutes`.
 
-**Unfinished turn.** A thread whose turn ends with nothing committed (`no commits on top of <sha>` and no other failure) has not been judged. The unit goes back to `queued` on the same attempt and the same thread is told once: its turn ended with nothing committed, it is the implementer, it must do the work, commit it and then report, and reply `BLOCKED` or `NEEDS_CONTEXT` if something blocks it or nothing needs to change. This takes a slot, like feedback. No verdict is recorded for the model and no rung of the ladder below is used. Each new thread of a unit gets one such message; a second turn that ends the same way is a gate failure (`no new commit after feedback`).
+**Unfinished turn.** A thread whose turn ends with nothing committed (`no commits on top of <sha>` and no other failure) has not been judged. The unit goes back to `queued` on the same attempt and the same thread is told once: its turn ended with nothing committed, it is the implementer, it must do the work, commit it and then report, and reply `BLOCKED` or `NEEDS_CONTEXT` if something blocks it or nothing needs to change. This takes a slot, like feedback. No verdict is recorded for the model and no rung of the ladder below is used. Each new thread of a unit gets one such message. A second turn that ends the same way is a gate failure like any other, with one difference on attempt 1: the feedback rung is skipped, because that thread has already been told, and the unit goes straight to a fresh thread one tier up.
 
 **Gate failure.** The work was judged and rejected.
 
@@ -97,7 +97,7 @@ Feedback can also go unseen. If the thread still shows its run from before the f
 | 2 | A fresh thread on a different model, at least one tier up (at most 4). The failures go at the top of its work order. |
 | 3 | `failed` with `gate failed 3 times: <failures>` |
 
-A gate directory left in `.orq/gate/<unit>` by a gate killed mid-run is cleared before the next gate of that unit; a path outside `.orq/gate/`, or reached through a symlink, is refused. When it cannot be cleared, or comes back at once because a step the killed gate started still writes into it, the gate runs in `.orq/gate/<unit>.gate-<pid>` instead and leaves the old directory alone. `orq plan archive` removes both.
+A gate directory left in `.orq/gate/<unit>` by a gate killed mid-run is cleared before the next gate of that unit; a path outside `.orq/gate/`, or reached through a symlink, is refused. When it cannot be cleared, or comes back at once because a step the killed gate started still writes into it, the gate runs in `.orq/gate/<unit>.gate-<pid>-<time>` instead and leaves the old directory alone. `orq plan archive` removes both.
 
 A gate that started twice without producing a result goes to `failed` with `gate could not complete`, followed by `: <last line the gate process logged>` when it logged one. `orq unit retry <unit>` then gates the same commit again without starting a worker; with `--tier` it starts a new worker instead.
 

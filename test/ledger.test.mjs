@@ -272,3 +272,11 @@ test('retry after "gate could not complete" gates the same commit again; --tier 
   const old = apply(run(launched('u'), ev('thread-ended', 'u', { status: 'completed' })), ev('needs-judgment', 'u', { reason: 'gate could not complete' }));
   assert.equal(unitOf(apply(old, ev('retried', 'u')), 'u').state, 'queued');
 });
+
+test('gated with unanswered at attempt 1 skips the feedback rung: attempt 3, one tier up, on another model', () => {
+  let s = run(launched('u'), ev('thread-ended', 'u', { status: 'completed' }), ev('gate-started', 'u', { attempt: 1, headSha: A }));
+  s = apply(s, gated('u', 'fail', { failures: ['no commits on top of x'], unanswered: true, headSha: A }));
+  const u = unitOf(s, 'u');
+  assert.deepEqual([u.state, u.attempt, u.tried], ['queued', 3, ['i::m']]);
+  assert.ok(u.minTier > 1);
+});

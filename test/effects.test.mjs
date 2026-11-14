@@ -511,6 +511,20 @@ test('same commit after feedback: no second gate, straight to the next rung', as
   assert.notEqual(fresh, sha);
 });
 
+test('after a nudge the gate runs even when the branch did not move: the shortcut is only for judged work', async (t) => {
+  const spawned = [];
+  const s = await setup(t, [unitSpec('a')], { cap: 3, fx: { spawnGate: async () => { spawned.push(1); return 1; } } });
+  await s.act(launchA());
+  const u = unitOf(await readState(s.p.repo), 'a');
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'completed' }, { type: 'gate-started', unit: 'a', attempt: 1, headSha: u.baseSha, pid: 1 },
+    { type: 'unfinished', unit: 'a', failures: ['no commits on top of x'], headSha: u.baseSha },
+    { type: 'feedback-sent', unit: 'a', attempt: 1, threadId: 'th1' }, { type: 'thread-ended', unit: 'a', status: 'completed' });
+  await s.act({ type: 'gate-start', unit: 'a', attempt: 1 });
+  assert.equal(spawned.length, 1); // the tick, not this shortcut, decides what a second empty turn means
+  const after = unitOf(await readState(s.p.repo), 'a');
+  assert.deepEqual([after.state, after.attempt, after.gateStarts], ['gating', 1, 1]);
+});
+
 test('a new commit after feedback is gated', async (t) => {
   const spawned = [];
   const s = await setup(t, [unitSpec('a')], { cap: 3, fx: { spawnGate: async () => { spawned.push(1); return 1; } } });

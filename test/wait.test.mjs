@@ -38,7 +38,7 @@ function simulator(p, scripts) {
     if (args[1] === 'send') {
       const t = sim.threads.get(args[2]);
       sim.sends = [...(sim.sends ?? []), t.id];
-      Object.assign(t, { status: 'running', updatedAt: sim.now + 1, step: 0, script: ['commit-complete'] });
+      Object.assign(t, { status: 'running', updatedAt: sim.now + 1, step: 0, script: [sim.stubborn ? 'complete' : 'commit-complete'] });
       return ok({ threadId: t.id, runId: 'r', status: 'queued', delivery: 'queued' });
     }
     const unit = /^orq (\S+):/.exec(opt(args, '--title'))[1];
@@ -702,4 +702,22 @@ test('wait: a worker whose turn ends with nothing committed is told to go on in 
   const u = unitOf(await readState(p.repo), 'a');
   assert.deepEqual([u.state, u.attempt, u.launches, u.nudges], ['integrated', 1, 1, 1]);
   assert.deepEqual(await listLeases(path.join(p.home, 'leases')), []);
+});
+
+test('wait: workers that never commit end in a judgment after two threads, each told once: no endless relaunch', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['complete'], ['complete'], ['complete'], ['complete']] });
+  sim.stubborn = true; // a message changes nothing: the next turn ends empty too
+  const r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^judgment: a: gate failed 3 times: no commits on top of [0-9a-f]{12}\n/);
+  assert.deepEqual(sim.sends, ['th1', 'th2']);
+  assert.equal(sim.byUnit.a.length, 2);
+  assert.notEqual(sim.byUnit.a[1].model, sim.byUnit.a[0].model);
+  const u = unitOf(await readState(p.repo), 'a');
+  assert.deepEqual([u.state, u.launches, u.nudges], ['failed', 2, 1]); // two threads, never a third
+  assert.deepEqual(await listLeases(path.join(p.home, 'leases')), []);
+  const again = await orq(['wait', '--max-seconds', '20'], p, sim); // and it stays there
+  assert.match(again.out, /^judgment: a: gate failed 3 times/);
+  assert.equal(sim.byUnit.a.length, 2);
 });

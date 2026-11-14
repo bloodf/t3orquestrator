@@ -599,20 +599,33 @@ test('unfinished: a thread that ended without a commit is nudged once, with no v
   assert.deepEqual(full.actions, []);
 });
 
-test('unfinished: the second empty turn of the same thread is a gate failure; a new thread is nudged again', () => {
-  const nudged = [launched('a'), ended('a'), startedAtBase('a'),
-    { type: 'unfinished', unit: 'a', at: 5, failures: ['no commits on top of aaaaaaaaaaaa'], headSha: A },
+test('unfinished: a second empty turn is a recorded gate failure and skips to a new thread; that thread gets its own nudge; then judgment', () => {
+  const unfinishedEv = { type: 'unfinished', unit: 'a', at: 5, failures: ['no commits on top of aaaaaaaaaaaa'], headSha: A };
+  const nudged = [launched('a'), ended('a'), startedAtBase('a'), unfinishedEv,
     { type: 'feedback-sent', unit: 'a', at: 6, attempt: 1, threadId: 't-a' }, ended('a'), startedAtBase('a')];
   const again = go(nudged, { gates: noCommit });
   assert.deepEqual(evTypes(again), ['gated:a']);
-  assert.equal(again.events[0].attempt, 1);
-  assert.deepEqual(again.actions.map((x) => `${x.type}:${x.attempt ?? ''}`), ['record-result:', 'send-feedback:2']);
-  const relaunched = [...nudged, gatedEv('a', 'fail'), { type: 'feedback-sent', unit: 'a', at: 7, attempt: 2, threadId: 't-a' }, ended('a'),
-    startedAtBase('a', 2), gatedEv('a', 'fail', 2), launched('a', { attempt: 3, threadId: 't-a3', key: 'a::m3', model: 'm3', tier: 3 }), ended('a'), startedAtBase('a', 3)];
-  const third = go(relaunched, { gates: noCommit });
-  assert.deepEqual(evTypes(third), ['unfinished:a']); // not "gate failed 3 times"
-  assert.equal(third.actions[0].attempt, 3);
-  assert.equal(third.actions[0].threadId, 't-a3');
+  assert.deepEqual([again.events[0].attempt, again.events[0].unanswered], [1, true]);
+  // the model's record is written, and the next rung is a new thread one tier up: not the same message a third time
+  assert.deepEqual(again.actions.map((x) => `${x.type}:${x.attempt ?? x.pass}`), ['record-result:false', 'launch:3']);
+  assert.equal(launches(again)[0].key, 'a::m3');
+  const third = [...nudged, { ...gatedEv('a', 'fail'), unanswered: true, headSha: A },
+    launched('a', { attempt: 3, threadId: 't-a3', key: 'a::m3', model: 'm3', tier: 3 }), ended('a'), startedAtBase('a', 3)];
+  const fresh = go(third, { gates: noCommit });
+  assert.deepEqual(evTypes(fresh), ['unfinished:a']); // not yet "gate failed 3 times"
+  assert.deepEqual([fresh.actions[0].type, fresh.actions[0].attempt, fresh.actions[0].threadId], ['send-feedback', 3, 't-a3']);
+  const last = go([...third, unfinishedEv, { type: 'feedback-sent', unit: 'a', at: 8, attempt: 3, threadId: 't-a3' }, ended('a'), startedAtBase('a', 3)], { gates: noCommit });
+  assert.deepEqual(evTypes(last), ['gated:a', 'needs-judgment:a']); // it ends: never an attempt 4
+  assert.equal(last.events[1].reason, 'gate failed 3 times: no commits on top of aaaaaaaaaaaa');
+  assert.deepEqual(launches(last).filter((x) => x.unit === 'a'), []);
+});
+
+test('unfinished: work that passes after a nudge is not a first pass in the model record', () => {
+  const pass = { a: { running: false, result: { verdict: 'pass', failures: [], flags: [], headSha: B } } };
+  const r = go([launched('a'), ended('a'), startedAtBase('a'),
+    { type: 'unfinished', unit: 'a', at: 5, failures: ['no commits on top of aaaaaaaaaaaa'], headSha: A },
+    { type: 'feedback-sent', unit: 'a', at: 6, attempt: 1, threadId: 't-a' }, ended('a'), gateStarted('a')], { gates: pass });
+  assert.equal(r.actions.find((x) => x.type === 'record-success').firstPass, false);
 });
 
 test('unfinished: only a result that is nothing but "no commits" counts', () => {

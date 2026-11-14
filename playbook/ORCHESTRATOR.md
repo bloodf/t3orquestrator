@@ -55,7 +55,7 @@ Write `.orq/plan.json` (shape: `~/.t3orq/kit/playbook/templates/plan.example.jso
 - List what is still open after the intake answers and would change behaviour (formats, limits, error cases, naming the user will see). Settle all of it with one `orq ask` (see "Questions") before you write `decisions`. Do not guess, and do not go back to the user.
 - Settle every question two units would both face in `decisions`, and copy the ones that apply into each work order, before fan-out. Two workers deciding the same question differently is what breaks merges.
 - When other units build on shared code, make that a foundational unit and list it in their `deps`.
-- A dep makes a unit wait. List one only where the unit needs what the other commits; `orq plan check` prints how many units can run at once.
+- A dep makes a unit wait. List one only where the unit needs what the other commits; `orq plan check` prints how many units can start now.
 - Cut vertical slices (one feature end to end), not layers.
 - Units with no dependency path between them run in parallel and must own disjoint `paths`.
 - Put the tests that `evidence` relies on in `forbidden`, unless writing them is the unit's job. A worker that can edit its own check can pass by weakening it.

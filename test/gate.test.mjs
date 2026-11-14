@@ -402,9 +402,9 @@ test('a leftover in .orq/gate/ that cannot be cleared (an orphaned step still ow
   try {
     const r = await real(w, 'test -f lib/a.mjs && test ! -d locked && pwd', { workDir });
     assert.equal(r.verdict, 'pass', JSON.stringify(r));
-    assert.match(r.steps[0].tail, new RegExp(`/\\.orq/gate/u1\\.gate-${process.pid}$`));
+    assert.match(r.steps[0].tail, new RegExp(`/\\.orq/gate/u1\\.gate-${process.pid}-\\d+$`));
     await fs.stat(path.join(locked, 'busy.txt')); // the old directory was not fought over
-    await assert.rejects(fs.stat(`${workDir}.gate-${process.pid}`)); // its own checkout is removed
+    assert.deepEqual(await fs.readdir(path.dirname(workDir)), ['u1']); // its own checkout is removed
   } finally {
     await fs.chmod(locked, 0o755); // or the temporary directory cannot be removed
   }
