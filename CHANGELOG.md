@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-14
+
+### Changed
+
+- The playbook now says where an orchestrator's rules come from (the user's messages, the repository's instruction file, the playbook) and forbids adding its own. In two real runs the orchestrators had read rules out of a handoff document and their own notes: a `git` wrapper that blocked worktree removal and made gates fail, a private copy of the kit, a three-thread ceiling, acceptance criteria nobody asked for, and whole plans of report-only units. After ten hours one run had 121 commits that existed only on that machine.
+
 ## [0.3.1] - 2026-11-14
 
 ### Added
