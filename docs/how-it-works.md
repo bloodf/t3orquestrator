@@ -98,7 +98,7 @@ Candidates come from `~/.t3orq/tools.json` first, then from `playbook/tools.json
 | Mode | What the orchestrator does |
 |---|---|
 | `draft` | Pushes the integration branch and opens a draft pull request. You review and merge. |
-| `review-fix` | Before the pull request, `orq review start` runs a reviewer on a model from another family. Findings that come with a reproducing command become `fix` units. There are at most two rounds. Then it opens a draft pull request. You merge. |
+| `review-fix` | Before the pull request, `orq review start` runs a reviewer on a model from another family, started once every unit is integrated or dropped so it runs alongside the final checks. Findings that come with a reproducing command become `fix` units; a second round only confirms those fixes. There are at most two rounds. Then it opens a draft pull request. You merge. |
 | `review-fix-merge` | As `review-fix`, then it waits for the host's checks, marks the pull request ready and merges it. |
 
 It never force-pushes, never deletes a branch, and never bypasses a required check or branch protection, whatever the mode. If the repository has no remote, the branch stays local.

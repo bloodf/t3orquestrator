@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-15
+
+### Changed
+
+- The playbook's Plan rules ask for `checks.unit` to be the typecheck plus every test suite that needs no browser and no running service (within the 20 minutes a gate step has), not the typecheck alone. Both real projects gated units with the typecheck only, so a unit that broke a test (a route not registered in the API catalog, a migration list, a printer count) passed its gate, was merged, and was found by the final check: one plan finished its 13 units in 44 minutes and then spent 148 minutes on 13 fix units and five final checks. A gate failure goes back to the same worker on its own; `gateConcurrency` bounds the load.
+- The review in `review-fix` and `review-fix-merge` starts on a `timeout:` line whose counts are all 0 (only the final checks left), alongside them, instead of after `done`; a second review round only confirms the first round's fixes, and a new finding in it below high severity goes to the next plan (or the pull request body without a goal).
+- In `review-fix-merge`, the orchestrator fetches and merges only when `origin/<base>` is an ancestor of the integration branch; otherwise a `fix` unit merges `origin/<base>` into it first (with the upstream files in its `paths`), so the final checks ran on what lands.
+
 ## [0.7.1] - 2026-11-15
 
 ### Changed
