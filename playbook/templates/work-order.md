@@ -16,7 +16,7 @@ You are a worker started by `orq`. You do this work yourself, in this worktree, 
 ## You must not touch
 - <glob>
 ## Done when
-`<evidence command>` exits 0. It will be run for you in a clean checkout of your commit.
+`<evidence command>` exits 0. Run it before you report; it will be run again for you in a clean checkout of your commit. Checks scoped to the files you changed (typecheck, lint, their tests) are fine. Do not run the project's whole test suite or build: the full suite runs once after all units are merged.
 ## Out of scope
 - <work a reasonable worker might do that this unit must not>
 ## Rules

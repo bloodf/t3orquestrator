@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-14
+
+### Changed
+
+- The playbook and the work order template now say that a worker runs its unit's evidence command and checks scoped to the files it changed, not the project-wide suites. `checks.unit`, when set, already runs in every gate and `checks.full` once on the integration branch. A real orchestrator wrote the root typecheck, the root tests, an application's typecheck and its 336 test files into every order: with 15 workers at once the machine's load average reached 289 on 10 cores and the median unit took 57 minutes.
+
 ## [0.6.0] - 2026-11-14
 
 ### Changed
