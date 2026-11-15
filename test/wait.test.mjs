@@ -783,3 +783,33 @@ test('wait: workers that never commit end in a judgment after two threads, each 
   assert.match(again.out, /^judgment: a: gate failed 3 times/);
   assert.equal(sim.byUnit.a.length, 2);
 });
+
+async function continuousProject(t, full) {
+  const p = await makeProject(t, [unitSpec('a'), unitSpec('b')], { checks: { full } });
+  const file = path.join(p.repo, '.orq', 'config.json');
+  await fs.writeFile(file, JSON.stringify({ ...JSON.parse(await fs.readFile(file, 'utf8')), autonomy: 'continuous' }));
+  return p;
+}
+
+test('wait in continuous mode: the final checks run while a unit still works, and a passed head is ready to ship', async (t) => {
+  const p = await continuousProject(t, 'test -f a.txt');
+  const sim = simulator(p, { a: [['commit-complete']], b: [['idle']] });
+  const r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  const st = await readState(p.repo);
+  assert.equal(st.plan.green, st.plan.integrationHead);
+  assert.equal(r.out.split('\n')[0], `ship-ready: ${st.plan.green.slice(0, 12)} passed the final checks; 1 units not shipped yet; run "orq ship"`);
+  assert.equal(unitOf(st, 'b').state, 'running');
+});
+
+test('wait in continuous mode: a failing head is reported once while units are open', async (t) => {
+  const p = await continuousProject(t, 'echo broken; exit 3');
+  const sim = simulator(p, { a: [['commit-complete']], b: [['idle']] });
+  const r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  const st = await readState(p.repo);
+  assert.equal(r.out.split('\n')[0], `final-fail: ${st.plan.final.head.slice(0, 12)} fails the final checks while units are still open; ${st.plan.final.failures.join('; ')}`);
+  assert.equal(st.plan.noted, st.plan.final.head);
+  const again = await orq(['wait', '--max-seconds', '60'], p, sim);
+  assert.match(again.out, /^timeout: 1 running/);
+});

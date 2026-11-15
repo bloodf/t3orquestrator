@@ -351,3 +351,18 @@ test('C1: archive keeps an abandoned lease (its thread may still run) and says t
   assert.ok(lines.includes('note: thread quiet was given up and may still be running: interrupt it (t3_thread_interrupt)'), r.out);
   assert.deepEqual((await listLeases(dir)).map((l) => l.threadId), ['quiet']);
 });
+
+test('archive refuses while a final run started on an older head still runs (continuous mode)', async (t) => {
+  const p = await makeProject(t, [unitSpec('a'), unitSpec('b')]);
+  const pass = (u) => [launched(p, u, `th-${u}`), { type: 'thread-ended', unit: u, status: 'completed' },
+    { type: 'gate-started', unit: u, attempt: 1, headSha: p.baseSha, pid: 1 },
+    { type: 'gated', unit: u, attempt: 1, verdict: 'pass', failures: [], flags: [], headSha: p.baseSha }];
+  await append(p, { type: 'plan-started', unit: null, planId: 'p1', baseSha: p.baseSha, integrationBranch: 'orq/p1/integration' },
+    ...pass('a'), { type: 'integrated', unit: 'a', sha: p.baseSha, head: 'c'.repeat(40) },
+    { type: 'gate-started', unit: 'integration', attempt: 1, headSha: 'c'.repeat(40), pid: process.pid },
+    ...pass('b'), { type: 'integrated', unit: 'b', sha: p.baseSha, head: 'd'.repeat(40) });
+  assert.equal((await readState(p.repo)).plan.finalGateStarts, 0); // reset by b's integration
+  await fs.mkdir(orqPath(p, 'units', 'integration'), { recursive: true });
+  await fs.writeFile(orqPath(p, 'units', 'integration', 'gate-1.pid'), `${process.pid}\n`);
+  assert.equal((await orq(['plan', 'archive'], p)).err, 'orq: plan: cannot archive: the final gate is running\n');
+});
