@@ -213,9 +213,11 @@ test('the worktree is removed when a command throws, and the error surfaces', as
   assert.equal(git.calls.at(-1)[0], 'remove');
 });
 
-test('a removal failure surfaces when the run itself succeeded', async () => {
+test('a removal failure after the steps ran keeps the verdict and names what was left', async () => {
   const git = fakeGit({ removeWorktree: () => { throw new Error('cannot remove'); } });
-  await assert.rejects(gate({ git }), /cannot remove/);
+  const r = await gate({ git });
+  assert.equal(r.verdict, 'pass');
+  assert.equal(r.cleanup, 'cannot remove');
 });
 
 test('steps record name, code, duration from the injected clock and a 15-line tail', async () => {
@@ -411,6 +413,24 @@ test('a leftover in .orq/gate/ that cannot be cleared (an orphaned step still ow
     assert.deepEqual(await fs.readdir(path.dirname(workDir)), ['u1']); // its own checkout is removed
   } finally {
     await fs.chmod(locked, 0o755); // or the temporary directory cannot be removed
+  }
+});
+
+test('a checkout that cannot be removed (a step left files nobody can delete) loses no verdict and does not block the next gate', { skip: process.getuid?.() === 0 }, async (t) => {
+  const w = await realWork(t, { 'lib/a.mjs': 'x\n' });
+  const workDir = path.join(w.repo, '.orq', 'gate', 'u1');
+  const locked = path.join(workDir, 'locked');
+  try {
+    const first = await real(w, 'mkdir locked && touch locked/busy.txt && chmod 555 locked', { workDir });
+    assert.equal(first.verdict, 'pass', JSON.stringify(first));
+    assert.match(first.cleanup, /git worktree failed/);
+    await fs.stat(path.join(locked, 'busy.txt')); // still there, and still a registered worktree
+    const second = await real(w, 'test -f lib/a.mjs && test ! -d locked && pwd', { workDir });
+    assert.equal(second.verdict, 'pass', JSON.stringify(second));
+    assert.equal(second.cleanup, undefined);
+    assert.match(second.steps[0].tail, new RegExp(`/\\.orq/gate/u1\\.gate-${process.pid}-\\d+$`));
+  } finally {
+    await fs.chmod(locked, 0o755).catch(() => {}); // or the temporary directory cannot be removed
   }
 });
 

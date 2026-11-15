@@ -57,6 +57,22 @@ async function finished(t) {
   return { p, head };
 }
 
+test('archive finishes when a gate checkout cannot be emptied (an orphaned step still owns it)', { skip: process.getuid?.() === 0 }, async (t) => {
+  const { p } = await finished(t);
+  const locked = orqPath(p, 'gate', 'a', 'locked');
+  await fs.mkdir(locked);
+  await fs.writeFile(path.join(locked, 'busy.txt'), 'in use');
+  await fs.chmod(locked, 0o555);
+  try {
+    const r = await orq(['plan', 'archive'], p);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(await exists(orqPath(p, 'plan.json')), false);
+    assert.equal(await exists(orqPath(p, 'archive', 'p1', 'ledger.jsonl')), true);
+  } finally {
+    await fs.chmod(locked, 0o755);
+  }
+});
+
 test('archive with a standing goal adds the goal: and next: lines; without one the output is unchanged', async (t) => {
   const { p } = await finished(t);
   const file = orqPath(p, 'config.json');

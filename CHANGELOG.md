@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-11-15
+
+### Fixed
+
+- A gate no longer loses its verdict when its scratch checkout cannot be removed afterwards. The steps had run and the verdict was known, but `git worktree remove` failing (`failed to delete '.orq/gate/integration': Directory not empty`, seen when processes a browser suite started were still writing) made the gate exit without a result. `orq wait` then ran the whole final gate again, up to twice, and reported `final gate could not complete`; in a real project a 51-minute final gate was lost this way and the plan could not finish for hours. The result now carries the verdict plus a `cleanup` field that says why the checkout is still there.
+- A gate checkout left behind as a registered worktree that git still cannot remove no longer stops the next gate from starting: inside `.orq/gate/` the directory is cleared, or the gate runs in a directory of its own beside it, as it already did for a leftover that was not registered.
+- `orq plan archive` no longer stops when `.orq/gate` cannot be emptied (a leftover checkout something still writes into): it is scratch space, and the next plan's gates clear it or work beside it.
+
 ## [0.6.3] - 2026-11-15
 
 ### Added
