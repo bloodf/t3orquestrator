@@ -108,11 +108,11 @@ A gate that started twice without producing a result goes to `failed` with `gate
 
 ## What `orq wait` returns
 
-The first line is one of the forms below. Notes and detail lines follow it. Output is held to 7 lines by cutting notes only: when they do not fit, the ones that do are followed by `note: <n> more notes omitted`. Decision lines (one per failed or blocked unit, `stalled:`, `waiting:`) are never cut, so with many of them the output is longer than 7 lines. The exit code is 0 for all of them.
+The first line is one of the forms below. Notes and detail lines follow it. Output is held to 7 lines by cutting notes only (a `message:` is not: it prints up to 60 lines): when they do not fit, the ones that do are followed by `note: <n> more notes omitted`. Decision lines (one per failed or blocked unit, `stalled:`, `waiting:`) are never cut, so with many of them the output is longer than 7 lines. The exit code is 0 for all of them.
 
 | First line | Meaning |
 |---|---|
-| `message: from the user, through orq inbox; read it and follow it before anything else` | The user left a message with `orq inbox`. The message lines follow (at most 60; a longer one ends with `… <n> more lines in .orq/inbox-read/<file>`). Checked before anything else, with or without a plan; the scheduler does not poll in this call. Each message is delivered once. |
+| `message: from the user, through orq inbox; read it and follow it before anything else` | The user left a message with `orq inbox`. The message lines follow (at most 60; a longer one ends with `… <n> more lines in .orq/inbox-read/<file>`). Checked before anything else, with or without a plan, and again before each poll, so a message returns within one poll of its arrival. Not delivered when `.orq/inbox.md` is tracked by git (a note says so). Each message is delivered once. |
 | `done: <n> units integrated at <sha>; final checks <pass\|no-evidence\|none>` | Every unit is integrated or dropped, and the final checks ran on the current integration head. `none` means nothing was integrated. |
 | `final-fail: <n> units integrated at <sha>; <failures>` | Every unit is integrated or dropped, but the final checks failed on the current integration head. The run is not done. Append a `fix` unit to the plan, or, when the failure predates the request, narrow `checks.full` and run `orq unit retry integration`: the final gate runs again on the same head with the current `checks.full`. |
 | `ship-ready: <green12> passed the final checks; <k> units not shipped yet; run "orq ship"` | `continuous` mode only. The latest head that passed the final checks is not shipped yet; `k` counts the units integrated since the last ship up to it. Comes after `judgment:` and `blocked:` lines. |

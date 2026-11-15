@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `orq inbox <text>` (or `-` for stdin) leaves a message for the orchestrator in `.orq/inbox.md`. The next `orq wait` delivers it before anything else, with or without a plan: it moves the file to `.orq/inbox-read/<iso time>.md` and returns `message: from the user, through orq inbox; read it and follow it before anything else` followed by the message (at most 60 lines). Measured: messages sent to an orchestrator's thread wait until its turn ends, which can be hours; twice in one day one never arrived and the orchestrator set back a mode the user had changed.
 - `orq status` prints `inbox: <n> message(s) waiting` while the inbox is not empty. `orq plan archive` leaves the inbox and the read messages in place.
+- `orq wait` checks the inbox again before each poll, takes it under the project lock, and does not deliver an inbox tracked by git.
 
 ## [0.8.0] - 2026-11-15
 

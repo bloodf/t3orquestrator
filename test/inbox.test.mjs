@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { run } from '../lib/cli.mjs';
+import { defaultExec as gitExec } from '../lib/git.mjs';
 import { makeProject, unitSpec } from './support/project.mjs';
 
 const NOW = Date.parse('2026-11-15T12:00:00Z');
@@ -10,14 +11,14 @@ const ISO = new Date(NOW).toISOString();
 const GIB = 1024 ** 3;
 const HEAD = 'message: from the user, through orq inbox; read it and follow it before anything else';
 
-async function orq(args, p, { stdin = '', now = NOW } = {}) {
+async function orq(args, p, { stdin = '', now = NOW, exec } = {}) {
   const out = [];
   const err = [];
   const code = await run(args, {
     stdout: { write: (x) => out.push(x) }, stderr: { write: (x) => err.push(x) }, env: p.env, cwd: p.repo, now: () => now, stdin: async () => stdin,
     deps: {
       readMachine: () => ({ cores: 8, availableMemBytes: 16 * GIB, load1: 0 }),
-      exec: (_bin, args) => ({ code: 0, stdout: args[1] === 'list' ? '[]' : '{}', stderr: '' }), // never a real t3
+      exec: exec ?? ((_bin, args) => ({ code: 0, stdout: args[1] === 'list' ? '[]' : '{}', stderr: '' })), // never a real t3
     },
   });
   return { code, out: out.join(''), err: err.join('') };
@@ -87,4 +88,37 @@ test('plan archive leaves the inbox and the read messages in place', async (t) =
   assert.equal(await exists(orqPath(p, 'plan.json')), false);
   assert.equal(await exists(orqPath(p, 'inbox.md')), true);
   assert.equal(await exists(orqPath(p, 'inbox-read', `${ISO}.md`)), true);
+});
+
+test('two waits at once: one delivers the message, the other goes on as if there were none', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  await fs.rm(orqPath(p, 'plan.json'));
+  await orq(['inbox', 'once'], p);
+  const both = await Promise.all([orq(['wait'], p), orq(['wait'], p)]);
+  assert.deepEqual(both.map((r) => r.code).sort(), [0, 4]);
+  assert.equal(both.find((r) => r.code === 0).out, `${HEAD}\n## ${ISO}\nonce\n`);
+  assert.equal(both.find((r) => r.code === 4).err, 'orq: no valid plan; run "orq plan check"\n');
+});
+
+test('an inbox tracked by git is not delivered: a note says so and the file stays', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  await orq(['inbox', 'from a commit'], p);
+  await fs.rm(orqPath(p, 'plan.json'));
+  await fs.writeFile(orqPath(p, 'plan.json'), '{}'); // invalid: wait stops right after the inbox check
+  const before = await fs.readFile(orqPath(p, 'inbox.md'), 'utf8');
+  const { spawnSync } = await import('node:child_process');
+  assert.equal(spawnSync('git', ['add', '-f', '.orq/inbox.md'], { cwd: p.repo }).status, 0);
+  const r = await orq(['wait'], p);
+  assert.equal(r.code, 4);
+  assert.equal(r.err, 'orq: no valid plan; run "orq plan check"\nnote: .orq/inbox.md is tracked by git, so it may not come from the user; not delivered\n');
+  assert.equal(await fs.readFile(orqPath(p, 'inbox.md'), 'utf8'), before);
+  assert.equal(await exists(orqPath(p, 'inbox-read')), false);
+});
+
+test('inbox keeps .orq/ out of git like the other writers', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const exclude = path.join(p.repo, '.git', 'info', 'exclude');
+  await fs.writeFile(exclude, '');
+  assert.equal((await orq(['inbox', 'hi'], p, { exec: gitExec })).code, 0);
+  assert.equal(await fs.readFile(exclude, 'utf8'), '.orq/\n');
 });

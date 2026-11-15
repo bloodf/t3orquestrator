@@ -74,7 +74,7 @@ Run `orq plan check` and fix every `error:` line until it prints `plan ok`.
 
 ## Run
 
-Call `orq wait`. It returns one line. Act on it, then call `orq wait` again, until it returns `done`.
+Call `orq wait`. It returns one line (a `message:` returns the message too). Act on it, then call `orq wait` again, until it returns `done`.
 
 | Return | Action |
 |---|---|

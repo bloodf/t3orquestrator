@@ -814,3 +814,17 @@ test('wait in continuous mode: a failing head is reported once while units are o
   const again = await orq(['wait', '--max-seconds', '60'], p, sim);
   assert.match(again.out, /^timeout: 1 running/);
 });
+
+test('wait: a message left while the plan runs returns on the next poll', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['idle']] });
+  const sleep = sim.sleep;
+  sim.sleep = async (ms) => {
+    await sleep(ms);
+    if (sim.polls.length === 1) await run(['inbox', 'stop after a'], { stdout: quiet, stderr: quiet, env: p.env, cwd: p.repo, now: () => sim.now, deps: { exec: () => ({ code: 1, stdout: '', stderr: '' }) } });
+  };
+  const r = await orq(['wait', '--max-seconds', '600'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(sim.polls.length, 1);
+  assert.equal(r.out, `message: from the user, through orq inbox; read it and follow it before anything else\n## ${new Date(NOW + 15000).toISOString()}\nstop after a\n`);
+});
