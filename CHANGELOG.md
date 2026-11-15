@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-15
+
+### Changed
+
+- A failed final check is no longer run a second time to tell a flaky failure from a real one. A full suite takes 15 to 20 minutes in a real project, so every failed final gate cost twice that, once per fix round (four rounds in one plan). The playbook's `final-fail` row now has the orchestrator rerun only the failing tests at the integrated commit first: if they pass, the failure was flaky and the final gate is retried with no fix unit. It also sends one fix unit per independent failure, in parallel. `checks.setup` keeps its second try in the final gate, and unit gates keep theirs.
+- The playbook says to write `checks.full` so that one run reports every failure: independent suites joined so each still runs after one fails, and no `--bail`. A real `checks.full` chained five suites with `&&`, so each final gate showed only the first failing suite and each fix round found the next one.
+
 ## [0.7.0] - 2026-11-15
 
 ### Added

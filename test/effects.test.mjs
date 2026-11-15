@@ -421,6 +421,32 @@ test('item 1: gate-run removes its pid file when it finishes, also when it fails
   await assert.rejects(fs.stat(pidFile), /ENOENT/);
 });
 
+test('gate-run: a failed final check is not run a second time (a full suite costs minutes); a unit check still is', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await s.act(launchA());
+  const sha = await commitOn(s.p.repo, unitOf(await readState(s.p.repo), 'a').branch, { 'a.txt': 'A\n' });
+  const quiet = { write: () => {} };
+  let calls = 0;
+  const run = async () => { calls += 1; return { code: 1, output: 'boom', timedOut: false }; };
+  const orq = (args) => cli(args, {
+    stdout: quiet, stderr: quiet, env: s.p.env, cwd: s.p.repo, deps: { run },
+  });
+  assert.equal(await orq(['config', 'set', 'checks.setup', 'null']), 0);
+  assert.equal(await orq(['config', 'set', 'checks.unit', 'false']), 0);
+  assert.equal(await orq(['config', 'set', 'checks.full', 'false']), 0);
+  await orq(['gate-run', 'a', '1', sha]);
+  assert.equal(calls, 2); // a unit gate's failing evidence is run once more: a flaky test passes on the retry
+  calls = 0;
+  await orq(['gate-run', 'integration', '1', sha]);
+  assert.equal(calls, 1);
+  const result = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'integration', 1, 'json'), 'utf8'));
+  assert.deepEqual(result.failures, ['checks failed (exit 1)']);
+  assert.equal(await orq(['config', 'set', 'checks.setup', 'false']), 0);
+  calls = 0;
+  await orq(['gate-run', 'integration', '1', sha]);
+  assert.equal(calls, 2); // setup still gets its second try
+});
+
 test('gate-run: the final gate gets finalTimeoutMinutes (default 60), a unit gate 20; a timed-out final check says how to raise it', async (t) => {
   const s = await setup(t, [unitSpec('a')]);
   await s.act(launchA());
