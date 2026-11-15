@@ -5,6 +5,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-15
+
+### Added
+
+- `finalTimeoutMinutes` (project setting, default 60, at most 1440): the limit of each step of the final gate (`checks.setup` and `checks.full`). The limit was 20 minutes for every gate step and could not be changed. A real project's full suite (typecheck, unit tests and a dozen browser suites) needed more than that on a loaded machine, so every final gate ended in `checks timed out` and the plan could not finish. Unit gates keep 20 minutes per step.
+
+### Changed
+
+- A final check that runs out of time now says so with the limit and the way out: `checks timed out after 60 min: raise the limit with "orq config set finalTimeoutMinutes <minutes>" or narrow checks.full, then "orq unit retry integration"`. A final-gate setup that times out names the same setting.
+- The playbook's row for `judgment: <unit>: worker reported <STATUS>` now says what to do when the worker asked nothing and only reports that it did not finish: retry one tier up or split the unit, and move sibling units that stopped the same way up together. In a real plan five browser-journey units were retried on the same tier with the same order, stopped the same way again, and reached a stronger model only on the third launch.
+- `orq unit retry integration` refuses while the final gate is still running (`the final gate is still running; "orq wait" reports its verdict`) or has a verdict that no poll has recorded yet (`the final gate has a verdict; run "orq wait" to read it`). Before, a retry at that moment discarded the result of a suite that had just run for 19 minutes and ran it again.
+
 ## [0.6.2] - 2026-11-15
 
 ### Changed

@@ -212,6 +212,25 @@ test('item 5: unit retry integration restarts a final gate that was lost twice',
   assert.equal((await readState(p.repo)).plan.finalGateStarts, 0);
 });
 
+test('unit retry integration refuses while the final gate runs or has a verdict nobody read', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const lost = { type: 'gate-started', unit: 'integration', attempt: 1, headSha: C, pid: 1 };
+  await append(p, { type: 'plan-started', unit: null, planId: 'p1', baseSha: A, integrationBranch: 'orq/p1/integration' },
+    launched('a', 'th1'), { type: 'thread-ended', unit: 'a', status: 'completed' }, { type: 'gate-started', unit: 'a', attempt: 1, headSha: B, pid: 1 },
+    { type: 'gated', unit: 'a', attempt: 1, verdict: 'pass', failures: [], flags: [], headSha: B }, { type: 'integrated', unit: 'a', sha: B, head: C }, lost, lost);
+  const dir = path.join(p.repo, '.orq', 'units', 'integration');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, 'gate-1.pid'), `${process.pid}\n`);
+  const running = await orq(['unit', 'retry', 'integration'], p);
+  assert.equal(running.code, 1);
+  assert.equal(running.err, 'orq: the final gate is still running; "orq wait" reports its verdict\n');
+  await fs.writeFile(path.join(dir, 'gate-1.json'), JSON.stringify({ verdict: 'fail', failures: ['checks failed (exit 1)'], flags: [], steps: [], headSha: C }));
+  const unread = await orq(['unit', 'retry', 'integration'], p);
+  assert.equal(unread.code, 1);
+  assert.equal(unread.err, 'orq: the final gate has a verdict; run "orq wait" to read it\n');
+  assert.equal((await readState(p.repo)).plan.finalGateStarts, 2);
+});
+
 test('status: cooling instances are listed after the units', async (t) => {
   const p = await makeProject(t, [unitSpec('a')]);
   const regFile = path.join(p.home, 'registry.json');

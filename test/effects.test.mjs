@@ -421,6 +421,38 @@ test('item 1: gate-run removes its pid file when it finishes, also when it fails
   await assert.rejects(fs.stat(pidFile), /ENOENT/);
 });
 
+test('gate-run: the final gate gets finalTimeoutMinutes (default 60), a unit gate 20; a timed-out final check says how to raise it', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await s.act(launchA());
+  const sha = await commitOn(s.p.repo, unitOf(await readState(s.p.repo), 'a').branch, { 'a.txt': 'A\n' });
+  const quiet = { write: () => {} };
+  const seen = [];
+  const run = async (_command, { timeoutMs }) => {
+    seen.push(timeoutMs);
+    return { code: 1, output: '', timedOut: true };
+  };
+  const orq = (args) => cli(args, {
+    stdout: quiet, stderr: quiet, env: s.p.env, cwd: s.p.repo, deps: { run },
+  });
+  assert.equal(await orq(['config', 'set', 'checks.setup', 'null']), 0);
+  assert.equal(await orq(['config', 'set', 'checks.full', 'true']), 0);
+  await orq(['gate-run', 'a', '1', sha]);
+  await orq(['gate-run', 'integration', '1', sha]);
+  assert.equal(await orq(['config', 'set', 'finalTimeoutMinutes', '45']), 0);
+  await orq(['gate-run', 'integration', '1', sha]);
+  assert.deepEqual(seen, [20 * 60000, 60 * 60000, 45 * 60000]);
+  const result = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'integration', 1, 'json'), 'utf8'));
+  assert.deepEqual(result.failures, [
+    'checks timed out after 45 min: raise the limit with "orq config set finalTimeoutMinutes <minutes>" or narrow checks.full, then "orq unit retry integration"',
+  ]);
+  assert.equal(await orq(['config', 'set', 'checks.setup', 'true']), 0);
+  assert.equal(await orq(['config', 'set', 'finalTimeoutMinutes', '99999']), 0);
+  await orq(['gate-run', 'integration', '1', sha]);
+  assert.equal(seen.at(-1), 1440 * 60000); // capped at a day
+  const afterSetup = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'integration', 1, 'json'), 'utf8'));
+  assert.deepEqual(afterSetup.failures, ['setup timed out (the limit is 1440 min a step; "orq config set finalTimeoutMinutes <minutes>" raises it)']);
+});
+
 test('item 1: a leftover pid file with a result present reads as finished and is removed', async (t) => {
   const s = await setup(t, [unitSpec('a')], { fx: { isAlive: () => true } });
   const file = (ext) => gateFile(s.p.repo, 'a', 1, ext);

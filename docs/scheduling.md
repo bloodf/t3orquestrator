@@ -134,6 +134,7 @@ Project settings, set with `orq config set <key> <n>`:
 | `stallMinutes` | 20 |
 | `gateConcurrency` | 1 |
 | `leaseTtlMinutes` | 30 |
+| `finalTimeoutMinutes` | 60 (the limit of each step of the final gate, `checks.setup` and `checks.full`; at most 1440; a unit gate's steps have 20 minutes each) |
 
 ## Known limits
 
