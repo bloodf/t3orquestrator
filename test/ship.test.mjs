@@ -201,3 +201,30 @@ test('ship: refused while orq wait, an archive or another ship holds the runner 
   assert.equal(r.code, 5);
   assert.equal(r.err, `orq: ship: orq wait, orq plan archive or another orq ship is running (pid ${process.pid}); run "orq ship" when it is done\n`);
 });
+
+test('ship: a ledger written before continuous mode (0.7.x events, mode switched mid-plan) ships and is recorded', async (t) => {
+  const p = await shipProject(t, { autonomy: 'draft', checks: { setup: null, unit: null, full: 'true' } });
+  // 0.7.x wrote final-gated without `checks`; the plan state is rebuilt from the events whatever the mode was
+  const ledger = path.join(p.repo, '.orq', 'ledger.jsonl');
+  const lines = (await fs.readFile(ledger, 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+  await fs.writeFile(ledger, `${lines.map(({ checks, ...e }) => JSON.stringify(e)).join('\n')}\n`);
+  assert.equal((await orq(['config', 'set', 'autonomy', 'continuous'], p)).code, 0);
+  const gh = fakeGh({ remote: p.remote });
+  const r = await orq(['ship'], p, { ghExec: gh.exec });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out, `shipped ${p.X.slice(0, 12)} as ${URL1}: 1 units\n`);
+  const create = gh.calls.find((a) => a[1] === 'create');
+  assert.match(create[create.indexOf('--body') + 1], /checks\.full: not recorded/);
+  assert.equal((await readState(p.repo)).plan.shipped, p.X);
+});
+
+test('ship: a head not newer than the shipped one is refused before anything is pushed', async (t) => {
+  const p = await shipProject(t);
+  await append(p, { type: 'shipped', unit: null, head: p.Y, pr: URL1, n: 1 }, passed(p.X));
+  const gh = fakeGh({ remote: p.remote });
+  const r = await orq(['ship'], p, { ghExec: gh.exec });
+  assert.equal(r.code, 4);
+  assert.equal(r.err, `orq: ship: ${p.X.slice(0, 12)} is not newer than the shipped head ${p.Y.slice(0, 12)}; nothing was shipped\n`);
+  assert.deepEqual(gh.calls, []);
+  assert.equal(p.remoteSha('refs/heads/main'), p.baseSha); // the base did not move
+});
