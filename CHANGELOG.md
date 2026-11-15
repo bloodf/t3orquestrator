@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-15
+
+### Changed
+
+- "Start one unit first" applies only until an archived plan of the project has integrated a unit. Its purpose is to prove the project's setup on one unit before many fail the same way; a later plan of a proven project now fills its slots at once. An archive whose units all failed, or one archived before it started, does not count. In a real project, eight units waited about an hour behind one slow browser-journey unit for no reason but this rule.
+
 ## [0.8.1] - 2026-11-15
 
 ### Added

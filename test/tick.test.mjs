@@ -229,6 +229,12 @@ test('rule 5: start one unit first, then fill the slots', () => {
   assert.deepEqual(launches(after).map((a) => a.unit), ['b', 'c']);
 });
 
+test('rule 5: a project that archived a plan before is proven: no start-one-first wait', () => {
+  const r = go([launched('a')], { threads: { 't-a': thread('t-a') }, config: { proven: true } });
+  assert.deepEqual(launches(r).map((x) => x.unit), ['c']); // b waits on its dep a, not on the rule
+  assert.deepEqual(launches(go([launched('a')], { threads: { 't-a': thread('t-a') } })), []);
+});
+
 test('rule 5: cap counts leases from other projects', () => {
   assert.deepEqual(launches(go(doneA, { cap: 1, leases: [lease('x1')] })), []);
   assert.deepEqual(launches(go(doneA, { cap: 2, leases: [lease('x1')] })).map((a) => a.unit), ['b']);
