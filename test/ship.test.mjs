@@ -14,22 +14,22 @@ const NOW = Date.parse('2026-11-12T12:00:00Z');
 const GIB = 1024 ** 3;
 const URL1 = 'https://example.invalid/o/r/pull/12';
 
-// gh: no PR for any branch until one is created; `pr view <url>` answers `state`
-function fakeGh({ state = 'MERGED' } = {}) {
-  const gh = { calls: [], prs: {} };
+// gh: no PR for any branch until one is created (or `prs` presets one); a branch's PR reports the oid the remote
+// branch holds; `pr view <url>` answers `state`
+function fakeGh({ state = 'MERGED', remote = null, prs = {} } = {}) {
+  const gh = { calls: [], prs: { ...prs } };
   gh.exec = (bin, args) => {
     gh.calls.push(args);
     const ok = (stdout) => ({ code: 0, stdout, stderr: '' });
     if (args[0] === 'pr' && args[1] === 'create') {
-      gh.prs[args[args.indexOf('--head') + 1]] = URL1;
+      gh.prs[args[args.indexOf('--head') + 1]] = { url: URL1, state: 'OPEN' };
       return ok(`${URL1}\n`);
     }
     if (args[0] === 'pr' && args[1] === 'view' && args[2].startsWith('https://')) return ok(JSON.stringify({ state, mergedAt: null }));
     if (args[0] === 'pr' && args[1] === 'view') {
-      const url = gh.prs[args[2]];
-      return url ? ok(JSON.stringify({ url, state: 'OPEN' })) : { code: 1, stdout: '', stderr: 'no pull requests found' };
+      const pr = gh.prs[args[2]];
+      return pr ? ok(JSON.stringify({ ...pr, headRefOid: sh(remote, 'rev-parse', `refs/heads/${args[2]}`) })) : { code: 1, stdout: '', stderr: 'no pull requests found' };
     }
-    if (args[0] === 'pr' && args[1] === 'merge') return ok('');
     return { code: 1, stdout: '', stderr: `unexpected gh ${args.join(' ')}` };
   };
   return gh;
@@ -57,8 +57,8 @@ const through = (u, head) => [
   },
   { type: 'integrated', unit: u, sha: head, head },
 ];
-const passed = (head) => ({
-  type: 'final-gated', unit: null, verdict: 'pass', failures: [], head,
+const passed = (head, verdict = 'pass') => ({
+  type: 'final-gated', unit: null, verdict, failures: [], head, checks: verdict === 'pass' ? 'npm test' : null,
 });
 
 // a project in continuous mode with an `origin` bare remote; units a and b integrated (heads X, Y), X passed
@@ -84,14 +84,14 @@ async function shipProject(t, config = {}) {
 
 test('ship: refused outside continuous mode', async (t) => {
   const p = await shipProject(t, { autonomy: 'draft' });
-  const r = await orq(['ship'], p, { ghExec: fakeGh().exec });
+  const r = await orq(['ship'], p, { ghExec: fakeGh({ remote: p.remote }).exec });
   assert.equal(r.code, 4);
   assert.equal(r.err, 'orq: ship: runs only in continuous mode (autonomy is draft); "orq config set autonomy continuous" turns it on\n');
 });
 
 test('ship: pushes the passed head as its own pull request, fast-forwards the base, records it; status shows it', async (t) => {
   const p = await shipProject(t, { base: 'origin/main', checks: { setup: null, unit: null, full: 'true' } });
-  const gh = fakeGh();
+  const gh = fakeGh({ remote: p.remote });
   const r = await orq(['ship'], p, { ghExec: gh.exec });
   assert.equal(r.code, 0, r.err);
   assert.equal(r.out, `shipped ${p.X.slice(0, 12)} as ${URL1}: 1 units\n`);
@@ -102,6 +102,7 @@ test('ship: pushes the passed head as its own pull request, fast-forwards the ba
   assert.deepEqual([arg('--base'), arg('--head'), arg('--title')], ['main', 'orq/p1/ship-1', 'p1 ship 1: a']);
   assert.match(arg('--body'), /- a: do a/);
   assert.match(arg('--body'), new RegExp(`final checks passed on ${p.X}`));
+  assert.match(arg('--body'), /checks\.full: `npm test`/); // the command the green run used
   assert.ok(!gh.calls.some((a) => a[1] === 'merge')); // the host marked it merged on the push
   const s = await readState(p.repo);
   assert.deepEqual([s.plan.shipped, s.plan.ships], [p.X, 1]);
@@ -110,7 +111,7 @@ test('ship: pushes the passed head as its own pull request, fast-forwards the ba
   assert.equal((await orq(['ship'], p, { ghExec: gh.exec })).out, `nothing to ship: ${p.X.slice(0, 12)} is shipped; run "orq wait"\n`);
   // the next passed head ships as the next pull request, with only its own units
   await append(p, passed(p.Y));
-  const second = await orq(['ship'], p, { ghExec: fakeGh().exec });
+  const second = await orq(['ship'], p, { ghExec: fakeGh({ remote: p.remote }).exec });
   assert.equal(second.out, `shipped ${p.Y.slice(0, 12)} as ${URL1}: 1 units\n`);
   assert.equal(p.remoteSha('refs/heads/main'), p.Y);
   assert.equal(p.remoteSha('refs/heads/orq/p1/ship-2'), p.Y);
@@ -120,7 +121,7 @@ test('ship: refused when the base moved on origin', async (t) => {
   const p = await shipProject(t);
   sh(p.repo, 'commit', '-q', '--allow-empty', '-m', 'upstream');
   sh(p.repo, 'push', '-q', 'origin', 'main');
-  const gh = fakeGh();
+  const gh = fakeGh({ remote: p.remote });
   const r = await orq(['ship'], p, { ghExec: gh.exec });
   assert.equal(r.code, 4);
   assert.equal(r.err, 'orq: ship: main moved on origin; append a fix unit that merges origin/main into the integration branch\n');
@@ -130,7 +131,7 @@ test('ship: refused when the base moved on origin', async (t) => {
 
 test('ship: never merges on the host; a pull request not yet marked merged after 30 s is shipped with a note', async (t) => {
   const p = await shipProject(t);
-  const gh = fakeGh({ state: 'OPEN' });
+  const gh = fakeGh({ state: 'OPEN', remote: p.remote });
   const slept = [];
   const r = await orq(['ship'], p, { ghExec: gh.exec }, { sleep: async (ms) => { slept.push(ms); } });
   assert.equal(r.code, 0, r.err);
@@ -144,7 +145,7 @@ test('ship: never merges on the host; a pull request not yet marked merged after
 
 test('ship: a failed base push names the open pull request; running it again reuses that pull request', async (t) => {
   const p = await shipProject(t);
-  const gh = fakeGh();
+  const gh = fakeGh({ remote: p.remote });
   const rejecting = (cmd, args, opts) => (args.includes(`${p.X}:refs/heads/main`)
     ? { code: 1, stdout: '', stderr: ' ! [rejected] main (non-fast-forward)' } : defaultExec(cmd, args, opts));
   const r = await orq(['ship'], p, { ghExec: gh.exec, gitExec: rejecting });
@@ -170,4 +171,33 @@ test('unit retry integration in continuous mode: counts the starts on the head t
   assert.equal(r.code, 0, r.err);
   const s = await readState(p.repo);
   assert.deepEqual([s.plan.finalHeadStarts, s.plan.green], [0, p.X]);
+});
+
+test('ship: a head whose final run proved nothing is not shipped', async (t) => {
+  const p = await shipProject(t);
+  await append(p, passed(p.Y, 'no-evidence'));
+  const r = await orq(['ship'], p, { ghExec: fakeGh({ remote: p.remote }).exec });
+  assert.equal(r.code, 4);
+  assert.equal(r.err, `orq: ship: ${p.Y.slice(0, 12)} has no passing final checks (verdict no-evidence); set checks.full ("orq config set checks.full <cmd>"): only a head that passes it ships\n`);
+});
+
+test('ship: a ship branch that holds another head, or a merged pull request, is never reused', async (t) => {
+  const p = await shipProject(t);
+  sh(p.repo, 'push', '-q', 'origin', `${p.baseSha}:refs/heads/orq/p1/ship-1`);
+  const gh = fakeGh({ remote: p.remote, prs: { 'orq/p1/ship-2': { url: 'https://example.invalid/o/r/pull/5', state: 'MERGED' } } });
+  const r = await orq(['ship'], p, { ghExec: gh.exec });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(p.remoteSha('refs/heads/orq/p1/ship-1'), p.baseSha); // untouched
+  assert.equal(p.remoteSha('refs/heads/orq/p1/ship-2'), p.X);
+  const create = gh.calls.find((a) => a[1] === 'create');
+  assert.equal(create[create.indexOf('--head') + 1], 'orq/p1/ship-2');
+  assert.equal(create[create.indexOf('--title') + 1], 'p1 ship 2: a');
+});
+
+test('ship: refused while orq wait, an archive or another ship holds the runner lock', async (t) => {
+  const p = await shipProject(t);
+  await fs.writeFile(path.join(p.repo, '.orq', 'runner.lock'), JSON.stringify({ pid: process.pid, token: 'other' }));
+  const r = await orq(['ship'], p, { ghExec: fakeGh({ remote: p.remote }).exec });
+  assert.equal(r.code, 5);
+  assert.equal(r.err, `orq: ship: orq wait, orq plan archive or another orq ship is running (pid ${process.pid}); run "orq ship" when it is done\n`);
 });

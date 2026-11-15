@@ -132,3 +132,14 @@ test('project goal: one clean line of at most 500 characters, cleared with null'
     await assert.rejects(loadProjectConfig(await tmpFile(`{"goal":${bad}}`)), /goal must be/);
   }
 });
+
+test('continuous needs checks.full: the head that passes it moves the base', () => {
+  const base = { autonomy: null, base: 'main', checks: { setup: null, unit: null, full: null }, slots: {}, t3: null };
+  assert.throws(() => setConfigValue(base, 'autonomy', 'continuous', 'project'), /autonomy continuous needs checks\.full/);
+  const full = { ...base, checks: { ...base.checks, full: 'npm test' } };
+  const on = setConfigValue(full, 'autonomy', 'continuous', 'project');
+  assert.equal(on.autonomy, 'continuous');
+  assert.throws(() => setConfigValue(on, 'checks.full', 'null', 'project'), /checks\.full cannot be cleared while autonomy is continuous/);
+  assert.equal(setConfigValue(on, 'checks.full', 'make test', 'project').checks.full, 'make test');
+  assert.equal(setConfigValue(full, 'checks.full', 'null', 'project').checks.full, null); // other modes: as before
+});

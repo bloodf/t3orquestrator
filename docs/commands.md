@@ -37,7 +37,7 @@ Run `orq` as `node ~/.t3orq/kit/bin/orq.mjs`. Project commands act on the curren
 | 2 | Usage error: unknown command, unknown option or missing argument |
 | 3 | `init` or `ask` was run inside a worker thread |
 | 4 | Refused or nothing to do: invalid plan, no route, tier owned by the user, unit busy, review not possible, update refused |
-| 5 | Another `orq wait` is running for this project |
+| 5 | Another `orq wait` is running for this project (for `ship`: a wait, an archive or another ship) |
 
 ## init
 
@@ -239,9 +239,11 @@ Removes the worker worktrees of every integrated unit of the running plan: the s
 Continuous mode only; in any other mode it refuses with exit 4: `ship: runs only in continuous mode (autonomy is <mode>); "orq config set autonomy continuous" turns it on`. It ships the latest integration head that passed the final checks (`green`) when it differs from the last shipped head, and prints `nothing to ship: …; run "orq wait"` (exit 0) otherwise. The base branch is the config `base` without a leading `origin/`; the remote is `origin`.
 
 1. `git fetch origin <base>`. Unless `origin/<base>` is an ancestor of the head, it refuses with exit 4: `ship: <base> moved on origin; append a fix unit that merges origin/<base> into the integration branch`.
-2. It pushes the head to `orq/<planId>/ship-<n>` (`n` counts the ships of this plan) and opens a pull request against the base with `gh pr create`. Title: `<planId> ship <n>: <up to 3 unit ids>[ +<k> more]`, the units first integrated in this ship; the body lists them with their titles and says `final checks passed on <sha>` (or that nothing verified it when `checks.full` is not set). A pull request already open for that branch, left by an interrupted ship, is reused.
+2. It pushes the head to `orq/<planId>/ship-<n>` (`n` counts the ships of this plan; see below) and opens a pull request against the base with `gh pr create`. Title: `<planId> ship <n>: <up to 3 unit ids>[ +<k> more]`, the units first integrated in this ship; the body lists them with their titles, says `final checks passed on <sha>` and names the `checks.full` command. An open pull request on that branch and head, left by an interrupted ship, is reused.
 3. It fast-forwards the base on `origin` with a plain push of the head (never forced: git refuses a non-fast-forward). The host marks the pull request merged once its head is in the base; `orq ship` polls `gh pr view` for up to 30 seconds. It never merges the pull request itself, so no merge commit lands on the base; when the host has not marked it merged by then, the ship is recorded anyway and a line `note: <pr url> is not marked merged yet; GitHub marks it once it sees the push, nothing to do` follows.
 4. It records a `shipped` event and prints `shipped <sha12> as <pr url>: <k> units`.
+
+The base moves by a direct fast-forward push, so the host's checks on the pull request do not run before it does: `checks.full` is the gate. Only a head whose final run passed ships: a head with any other verdict is refused with exit 4 (`ship: <sha12> has no passing final checks (verdict <v>); set checks.full …`). `orq config set autonomy continuous` is refused while `checks.full` is not set, and `checks.full` cannot be cleared while the mode is `continuous`. The pull request body names the `checks.full` command that run used. The ship branch is the first `orq/<planId>/ship-<n>` from the next number on that is free on `origin` or already holds the head; a pull request is reused only when it is open and its head is the head being shipped. `orq ship` holds the runner lock (the one `orq wait` and `orq plan archive` hold), so it refuses with exit 5 while either runs or another ship does, and the `shipped` event is refused when the head is not later in the integration order than the head shipped before.
 
 Every failure prints one line naming the step that failed and the way out, with exit 1: a failed fetch or branch push ships nothing; a failed `gh pr create` names the pushed branch; a failed base push names the open pull request (running `orq ship` again reuses it). git and `gh` run outside every lock.
 

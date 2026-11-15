@@ -798,6 +798,7 @@ test('wait in continuous mode: the final checks run while a unit still works, an
   assert.equal(r.code, 0, r.err);
   const st = await readState(p.repo);
   assert.equal(st.plan.green, st.plan.integrationHead);
+  assert.equal(st.plan.greenChecks, 'test -f a.txt'); // the command the green run used
   assert.equal(r.out.split('\n')[0], `ship-ready: ${st.plan.green.slice(0, 12)} passed the final checks; 1 units not shipped yet; run "orq ship"`);
   assert.equal(unitOf(st, 'b').state, 'running');
 });
