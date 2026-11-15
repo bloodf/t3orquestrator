@@ -14,6 +14,7 @@ Run `orq` as `node ~/.t3orq/kit/bin/orq.mjs`. Project commands act on the curren
 | [`plan check`](#plan-check) | Validate `.orq/plan.json` |
 | [`plan archive`](#plan-archive) | Put a finished plan away so the next request starts a fresh one |
 | [`wait`](#wait) | Run the plan until something needs the orchestrator |
+| [`inbox`](#inbox) | Leave a message for the orchestrator's next `orq wait` |
 | [`status`](#status) | The plan, slots and one line per unit |
 | [`unit`](#unit) | Retry or drop a unit after judgment |
 | [`review`](#review) | Start or read a review of the integrated result |
@@ -159,11 +160,19 @@ While an archive is in progress the project is frozen: it writes `.orq/archiving
 
 This runs the scheduler for up to `N` seconds (default 480). The first line it prints is one of `done:`, `final-fail:`, `judgment:`, `blocked:`, `idle:` or `timeout:`, and in `continuous` mode also `ship-ready:`. It exits 0 for each of them. When the running kit's playbook differs from the one recorded (`orq update` moved the kit, or the project was set up by an older kit), the second line is `playbook: the kit was updated (<old kit12|unknown> -> <new kit12|unknown>); read <path of the running kit's playbook/ORCHESTRATOR.md> again now, then run "orq init"`. When threads orq started are done for good and still unsettled in T3, the next line is `settle: <threadId> <threadId> …` (at most 20 ids, then `+<n> more`); notes and detail lines follow. See [Scheduling](scheduling.md#what-orq-wait-returns). When a standing goal is set (see [config](#config)), the `done:` line is followed by `goal: <text>` and `next: the goal is still open: finish this plan as the playbook says, run "orq plan archive", then plan the next part and call "orq wait" again in this same turn`. Exit 4 when the plan is invalid or uses the reserved unit id `integration`. When there is no plan file and a goal is set, the `no valid plan` error on stderr is followed by `goal: <text>` and `next: the goal is still open: plan its next part, run "orq plan check", then call "orq wait"`; an invalid plan that exists gets the error alone, since its units may be in flight. Exit 1 when no usable `t3` is recorded. Exit 5 when another `orq wait` holds this project.
 
+Before anything else, when `.orq/inbox.md` (see [inbox](#inbox)) is not empty, `orq wait` moves it to `.orq/inbox-read/<iso time>.md` and returns at once, exit 0, with the first line `message: from the user, through orq inbox; read it and follow it before anything else` followed by the file's lines as written (its `## <iso time>` headers included). It prints at most 60 of them; a longer message ends with `… <n> more lines in .orq/inbox-read/<file>`. Each message is delivered once. This happens with or without a plan, and while an archive is unfinished.
+
 In `continuous` mode two lines are added and `done:` means more:
 
 - `ship-ready: <green12> passed the final checks; <k> units not shipped yet; run "orq ship"` when the latest head that passed the final checks is not shipped yet; `k` counts the units integrated since the last ship up to that head. It comes after `judgment:` and `blocked:` lines and before anything else.
 - `final-fail: <head12> fails the final checks while units are still open; <failures>` once per failing head while units are still open. Printing it records a `final-noted` event, so the same head is not reported again; a later final run on a newer head may report again. A `final-fail:` once every unit is in reads as in the other modes.
 - `done:` only when every unit is integrated or dropped and the integration head is shipped (or nothing was integrated).
+
+## inbox
+
+`orq inbox <text> | orq inbox - < text`
+
+Appends a message for the orchestrator to `.orq/inbox.md`: a header line `## <iso time>`, then the text (the arguments joined by spaces, or stdin with `-`). It prints `inbox: queued for the next "orq wait"` and exits 0; empty text is exit 2. A message sent to the orchestrator's thread waits until its turn ends, which can be hours; `orq wait` returns at least every 8 minutes, so its next call delivers the message (see [wait](#wait)). `orq status` prints `inbox: <n> message(s) waiting` while it is not empty. `orq plan archive` leaves `.orq/inbox.md` and `.orq/inbox-read/` in place.
 
 ## status
 
@@ -173,6 +182,7 @@ In `continuous` mode two lines are added and `done:` means more:
 plan: <goal> (<planId>|not started)
 goal: <text>   (only when a standing goal is set)
 playbook: the kit was updated (…); read <file> again now, then run "orq init"   (only after a kit update)
+inbox: <n> message(s) waiting   (only while .orq/inbox.md is not empty)
 integration: <branch> head=<sha> base=<sha>
 ship: green=<sha12|none> shipped=<sha12|none> ships=<n>   (continuous mode only)
 cap=<n> active=<n> blocked=<n> gates=<n> machine_leases=<n>[ expired_leases=<n>][ project_cap=<n> project_leases=<n>]

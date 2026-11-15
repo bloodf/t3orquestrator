@@ -78,6 +78,7 @@ Call `orq wait`. It returns one line. Act on it, then call `orq wait` again, unt
 
 | Return | Action |
 |---|---|
+| `message: …` | It comes from the user: follow it before anything else, even where it changes what your start message said. A setting that changed between your commands was changed by the user: follow it, never set it back. |
 | `done: <n> units integrated at <sha>; final checks <pass\|no-evidence>` | Go to Finish. |
 | `ship-ready: <sha> …; run "orq ship"` | While an accepted high-severity review finding is open, do not ship: call `orq wait`. Otherwise run `orq ship`, write one line with the pull request link it prints, and call `orq wait`. If it says `base` moved, append the `fix` unit it names and call `orq wait`. |
 | `final-fail: <n> units integrated at <sha>; <failures>` | Not done. Read `.orq/units/integration/gate-1.json`. Rerun only the failing tests at `<sha>`: if they pass, the failure is flaky, so note it and run `orq unit retry integration`, no fix unit. Then run them on `base` in a clean worktree: if it fails there too, the failure is older than this request, so tell the user, narrow `checks.full` with `orq config set`, and run `orq unit retry integration` so the final checks run again; send no fix unit after it. Otherwise append a `fix` unit for each independent failure, in parallel, and call `orq wait`. If the same check still fails after two fix units, stop and show the user. |
