@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-15
+
+### Changed
+
+- The playbook says that `orq` deletes only checkouts it made itself and that an orchestrator runs its commands as they are, without auditing the kit against the rules it was given. A real orchestrator had been told "no forced worktree removal", read `git worktree remove --force` in the kit's source (used for the gate's scratch checkout and for the integration worktree once it is clean; worker worktrees are removed without it), refused to run the kit and stopped for five hours with 55 units integrated and unmerged.
+- With a standing goal open, the playbook no longer lets an orchestrator end its turn because hardware, an account or a protocol document is missing: it builds against simulators, fixtures and open-source clients of the protocol, marks the work as not proven on hardware, and stops only when nothing of what is left can be built that way. A real orchestrator stopped after five merged pull requests with a list of things only the user could provide, two of which a simulator or public source code could stand in for.
+
 ## [0.6.1] - 2026-11-14
 
 ### Changed
