@@ -57,3 +57,13 @@ test('timeoutLines: a ship line when most units are integrated and none was for 
   const smallState = { plan: { lastIntegratedAt: 0 }, units: { a: { state: 'integrated' }, b: { state: 'integrated' }, c: { state: 'integrated' }, d: { state: 'running' } } };
   assert.notEqual(timeoutLines(small, smallState, report, 4, undefined, 45 * MIN).at(-1).slice(0, 5), 'ship:'); // a small plan waits
 });
+
+test('timeoutLines: no ship line in continuous mode, where each passed head ships on its own', () => {
+  const ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+  const plan = { units: ids.map((id) => ({ id })) };
+  const units = { ...Object.fromEntries(ids.map((id) => [id, { state: 'integrated' }])), g: { state: 'running' }, h: { state: 'queued' } };
+  const state = { plan: { lastIntegratedAt: 0 }, units };
+  const report = { noSlots: false, slotWaiting: [], stalled: [] };
+  assert.match(timeoutLines(plan, state, report, 4, undefined, 45 * 60000).at(-1), /^ship: /);
+  assert.doesNotMatch(timeoutLines(plan, state, report, 4, undefined, 45 * 60000, true).at(-1), /^ship: /);
+});

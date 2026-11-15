@@ -35,12 +35,12 @@ function fakeGh({ state = 'MERGED' } = {}) {
   return gh;
 }
 
-async function orq(args, p, deps = {}) {
+async function orq(args, p, deps = {}, over = {}) {
   const out = [];
   const err = [];
   const code = await run(args, {
     stdout: { write: (x) => out.push(x) }, stderr: { write: (x) => err.push(x) }, env: p.env, cwd: p.repo, now: () => NOW, sleep: async () => {},
-    deps: { readMachine: () => ({ cores: 8, availableMemBytes: 16 * GIB, load1: 0 }), ...deps },
+    deps: { readMachine: () => ({ cores: 8, availableMemBytes: 16 * GIB, load1: 0 }), ...deps }, ...over,
   });
   return { code, out: out.join(''), err: err.join('') };
 }
@@ -128,13 +128,18 @@ test('ship: refused when the base moved on origin', async (t) => {
   assert.equal((await readState(p.repo)).plan.shipped, undefined);
 });
 
-test('ship: merges with gh when the host did not mark the pull request merged', async (t) => {
+test('ship: never merges on the host; a pull request not yet marked merged after 30 s is shipped with a note', async (t) => {
   const p = await shipProject(t);
   const gh = fakeGh({ state: 'OPEN' });
-  const r = await orq(['ship'], p, { ghExec: gh.exec });
+  const slept = [];
+  const r = await orq(['ship'], p, { ghExec: gh.exec }, { sleep: async (ms) => { slept.push(ms); } });
   assert.equal(r.code, 0, r.err);
-  assert.equal(r.out, `shipped ${p.X.slice(0, 12)} as ${URL1}: 1 units\nnote: the host did not mark ${URL1} merged after the push; merged it with "gh pr merge"\n`);
-  assert.deepEqual(gh.calls.find((a) => a[1] === 'merge'), ['pr', 'merge', URL1, '--merge']);
+  assert.equal(r.out, `shipped ${p.X.slice(0, 12)} as ${URL1}: 1 units\nnote: ${URL1} is not marked merged yet; GitHub marks it once it sees the push, nothing to do\n`);
+  assert.ok(!gh.calls.some((a) => a[1] === 'merge'));
+  assert.equal(slept.reduce((a, b) => a + b, 0), 30_000);
+  assert.ok(gh.calls.filter((a) => a[1] === 'view' && a[2] === URL1).length > 1); // polled
+  assert.equal(p.remoteSha('refs/heads/main'), p.X); // no merge commit on the base
+  assert.equal((await readState(p.repo)).plan.shipped, p.X);
 });
 
 test('ship: a failed base push names the open pull request; running it again reuses that pull request', async (t) => {
