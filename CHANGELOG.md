@@ -5,6 +5,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-15
+
+### Added
+
+- `orq wait` adds a `ship:` line to its `timeout:` output when at least three quarters of the plan's units (and at least six) are integrated, none has been for 30 minutes, and no unit is in its gate or being merged. It names the units still open and says to drop them to the next plan, so the final checks run and the pull request ships now. In real plans the time from plan start to merged pull request was almost all "waiting for the last unit": one plan had 80% of its 25 units integrated after 22 minutes and its last unit after 305; another 80% of 68 after 206 minutes and the last after 846. The integration time this needs is recorded from the `integrated` events (`lastIntegratedAt`); a ledger written before it gets no `ship:` line until its next integration.
+- `orq plan archive` leaves the worktree of a unit dropped from the archived plan, whose thread may still be working in it; the next archive removes it as usual.
+
+### Changed
+
+- The playbook says what to do on a `ship:` line (drop the open units, leave their threads running, ship, and carry each into the next plan from its branch), and to plan each part of a standing goal as at most about 12 units that each fit in an hour. Plans of about 13 units went from start to merged pull request in 47 to 93 minutes; plans of 57 and 68 units took 10 to 14 hours.
+
 ## [0.6.4] - 2026-11-15
 
 ### Fixed

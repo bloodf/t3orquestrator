@@ -309,6 +309,18 @@ test('archive leaves worktrees on non-orq branches alone', async (t) => {
   assert.equal(await exists(dir), true);
 });
 
+test('archive leaves the worktree of a unit dropped from this plan (its thread may still run) and removes the others', async (t) => {
+  const { p } = await finished(t);
+  await append(p, launched(p, 'c', 'th3'), { type: 'dropped', unit: 'c' });
+  const kept = addWorker(p, 'wc', 'orq/p1/c-a1');
+  const other = addWorker(p, 'w1', 'orq/p1/a-a1-w');
+  const r = await orq(['plan', 'archive'], p);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /\nremoved 1 worker worktrees\n/);
+  assert.equal(await exists(kept), true);
+  assert.equal(await exists(other), false);
+});
+
 test('archive also removes clean leftovers from an earlier plan', async (t) => {
   const { p } = await finished(t);
   const dir = addWorker(p, 'old', 'orq/p0/review-1');

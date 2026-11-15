@@ -53,6 +53,7 @@ test('happy path: queued -> running -> blocked -> running -> gating -> passed ->
   assert.equal(u.headSha, B);
   assert.equal(u.gateStarts, 1);
   assert.equal(s.plan.integrationHead, C);
+  assert.equal(typeof s.plan.lastIntegratedAt, 'number'); // when the last unit was merged: `orq wait` says when to ship
 });
 
 test('blocked marks the unit reported; unblocked clears it', () => {

@@ -50,7 +50,7 @@ The `slots:` line names the tool for each role: `judge`, `memory`, `code-index` 
    - anything destructive, paid or public the work would need.
    Each question states the answer you will assume and why, so the user can reply "go" to accept them all. Never ask what the request, the code or memory already answers; never ask about style, tools or models; ask nothing when nothing qualifies or the user said not to ask. These questions always go to the user: the `questions` setting only governs what comes up after the work starts. Record the answers in `decisions`. This is the only time you ask: after it, open points go to `orq ask`.
 5. Size the work. Default to ONE unit. Fan out only for three or more independent, substantial units. One or two files, or tightly coupled work, is one unit: every extra unit costs a thread, a gate and a merge.
-6. A goal larger than one plan (a roadmap, a handoff, "keep going until it is finished"): store it in one sentence with `orq config set goal "<sentence>"`, then plan its first part. Later parts of the goal skip step 4: their open points go to `orq ask`.
+6. A goal larger than one plan (a roadmap, a handoff, "keep going until it is finished"): store it in one sentence with `orq config set goal "<sentence>"`, then plan its first part. Later parts of the goal skip step 4: their open points go to `orq ask`. A pull request merges only once its plan's last unit is in, so plan each part as at most about 12 units that each fit in an hour; a part that needs more is the next plan.
 
 ## Plan
 
@@ -93,6 +93,7 @@ Call `orq wait`. It returns one line. Act on it, then call `orq wait` again, unt
 | `idle: … retry at <time>` | Models are cooling down. Tell the user why and the time, and call `orq wait` again at that time. |
 | any other `idle:` | Calling `orq wait` again changes nothing. Run `orq status`, then change the plan (`orq unit retry`, `orq unit drop`, or edit `plan.json`) or tell the user. |
 | `timeout: <counts>` | Normal for long work. Run `orq status`. Interrupt a thread only if it shows as stalled (`t3_thread_interrupt`). Units that are `gating` are running their checks, and a `waiting:` line means every slot is taken for now: leave both. Call `orq wait` again. |
+| `ship: …` (after `timeout:`) | Finished units are waiting on slow ones. Run `orq unit drop <id>` for each open unit it names, dependents first; leave their threads running, then call `orq wait`: the final checks run on what is integrated and you ship it. Carry each dropped unit into the next plan: one that ran starts its order with "merge branch `<its branch>` (from `orq status --json`) and finish the work" and launches once `t3 thread show <its thread>` no longer says running; one that never ran is carried as it was. |
 
 When a `note:` says `orq` gave up on a thread, interrupt that thread with `t3_thread_interrupt`: it stopped responding, the unit has moved to another model, and the thread holds a slot until it ends.
 

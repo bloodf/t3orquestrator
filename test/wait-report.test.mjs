@@ -34,3 +34,26 @@ test('timeoutLines: the waiting line names the limit in force', () => {
   assert.equal(timeoutLines(plan, state, report, 4)[1], 'waiting: 1 ready units wait for a free slot (machine cap 4, or a provider instance limit)');
   assert.equal(timeoutLines(plan, state, { ...report, capBy: 'project' }, 4, 2)[1], 'waiting: 1 ready units wait for a free slot (project cap 2 of this project, machine cap 4, or a provider instance limit)');
 });
+
+test('timeoutLines: a ship line when most units are integrated and none was for 30 minutes', () => {
+  const MIN = 60000;
+  const ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+  const plan = { units: ids.map((id) => ({ id })) };
+  const units = Object.fromEntries(ids.map((id) => [id, { state: 'integrated' }]));
+  const report = { noSlots: false, slotWaiting: [], stalled: [] };
+  const at = (u, lastIntegratedAt) => ({ plan: { lastIntegratedAt }, units: { ...units, ...u } });
+  const tail = { g: { state: 'running' }, h: { state: 'queued' } };
+  const ship = 'ship: 6 of 8 units integrated, none for 45 min; still open: g, h. Drop them to the next plan ("orq unit drop <id>") so the final checks run and the pull request ships now';
+  assert.equal(timeoutLines(plan, at(tail, 0), report, 4, undefined, 45 * MIN).at(-1), ship);
+  assert.notEqual(timeoutLines(plan, at(tail, 0), report, 4, undefined, 29 * MIN).at(-1).slice(0, 5), 'ship:'); // too soon
+  const half = { ...tail, e: { state: 'running' }, f: { state: 'running' } };
+  assert.notEqual(timeoutLines(plan, at(half, 0), report, 4, undefined, 45 * MIN).at(-1).slice(0, 5), 'ship:'); // under 75%
+  const dropped = { g: { state: 'running' }, h: { state: 'dropped' } }; // a dropped unit is neither done nor open
+  assert.match(timeoutLines(plan, at(dropped, 0), report, 4, undefined, 45 * MIN).at(-1), /^ship: 6 of 7 units integrated, none for 45 min; still open: g\. /);
+  assert.notEqual(timeoutLines(plan, at(tail, undefined), report, 4, undefined, 45 * MIN).at(-1).slice(0, 5), 'ship:'); // older ledger
+  const gating = { g: { state: 'gating' }, h: { state: 'queued' } };
+  assert.notEqual(timeoutLines(plan, at(gating, 0), report, 4, undefined, 45 * MIN).at(-1).slice(0, 5), 'ship:'); // may land in minutes
+  const small = { units: ['a', 'b', 'c', 'd'].map((id) => ({ id })) };
+  const smallState = { plan: { lastIntegratedAt: 0 }, units: { a: { state: 'integrated' }, b: { state: 'integrated' }, c: { state: 'integrated' }, d: { state: 'running' } } };
+  assert.notEqual(timeoutLines(small, smallState, report, 4, undefined, 45 * MIN).at(-1).slice(0, 5), 'ship:'); // a small plan waits
+});
