@@ -24,7 +24,7 @@
 | `running` | Yes | The thread completes (to `gating`), fails, is cancelled, is interrupted or disappears (back to `queued`), or asks a question (to `blocked`) |
 | `blocked` | No; the lease stays but is marked blocked | The question is answered (to `running`) |
 | `gating` | No; gates are limited by `gateConcurrency` (default 1 per project) | The gate result: `pass` or `no-evidence` to `passed`, `fail` back to `queued` or to `failed` |
-| `passed` | No | The merge into the integration branch (to `integrated`), or a conflict (to `failed`) |
+| `passed` | No | The merge into the integration branch (to `integrated`), or a conflict: back to `queued` for the same thread to merge the integration head, and to `failed` after two conflicts in one launch |
 | `integrated` | No | Final |
 | `failed` | No | `orq unit retry <id>` (to `queued`, or to `gating` after a setup failure) or `orq unit drop <id>` |
 | `dropped` | No | Final |

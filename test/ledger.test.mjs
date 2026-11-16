@@ -56,6 +56,27 @@ test('happy path: queued -> running -> blocked -> running -> gating -> passed ->
   assert.equal(typeof s.plan.lastIntegratedAt, 'number'); // when the last unit was merged: `orq wait` says when to ship
 });
 
+test('conflicted: a passed unit goes back to its thread on the same attempt with the head to merge; a new launch resets the count', () => {
+  const pre = [launched('u'), ev('thread-ended', 'u', { status: 'completed' }), ev('gate-started', 'u', { attempt: 1, headSha: B, pid: 9 }), gated('u', 'pass')];
+  const s = run(...pre, ev('conflicted', 'u', { failures: ['merge conflict with the integration branch in x'], baseSha: C }));
+  const u = unitOf(s, 'u');
+  assert.equal(u.state, 'queued');
+  assert.equal(u.attempt, 1);
+  assert.equal(u.threadId, 't1');
+  assert.equal(u.nudge, true);
+  assert.equal(u.nudges, 0); // a conflict is not an empty turn: it uses none of the nudges
+  assert.equal(u.conflicts, 1);
+  assert.equal(u.baseSha, C);
+  assert.deepEqual(u.lastFailure, ['merge conflict with the integration branch in x']);
+  assert.throws(() => apply(run(launched('u')), ev('conflicted', 'u', { failures: [], baseSha: C })), /conflicted/);
+  assert.equal(unitOf(emptyState(), 'x').conflicts, 0);
+  const relaunched = apply(apply(apply(s, ev('needs-judgment', 'u', { reason: 'r' })), ev('retried', 'u')), launched('u'));
+  assert.equal(unitOf(relaunched, 'u').conflicts, 0);
+  // a launch that continues a failed provider's work keeps the count: the conflict is still there
+  const continued = apply(apply(s, ev('feedback-sent', 'u', { attempt: 1, threadId: 't1' })), ev('thread-ended', 'u', { status: 'failed' }));
+  assert.equal(unitOf(apply(continued, launched('u', { continues: 't1', continuesKey: 'i::m' })), 'u').conflicts, 1);
+});
+
 test('blocked marks the unit reported; unblocked clears it', () => {
   const s = run(launched('u'), ev('blocked', 'u'));
   assert.equal(unitOf(s, 'u').blockedReported, true);

@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-11-16
+
+### Changed
+
+- A unit whose merge into the integration branch conflicts now goes back to its own worker, on the same attempt, with the integration head to merge and resolve. Before, it went to the orchestrator, whose retry started a fresh worker from scratch: in a real project a large unit passed, conflicted, and was redone twice at about an hour each. After two conflicts in one launch the unit goes to the orchestrator as before. A worker that commits nothing after the conflict message is not sent down the quality ladder: its commit already passed.
+
 ## [0.8.4] - 2026-11-16
 
 ### Fixed

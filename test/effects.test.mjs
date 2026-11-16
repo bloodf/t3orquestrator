@@ -5,8 +5,10 @@ import path from 'node:path';
 import os from 'node:os';
 import fsSync from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
+import { spawnSync } from 'node:child_process';
 import { createGit, defaultExec } from '../lib/git.mjs';
 import { perform, feedbackMessage } from '../lib/effects.mjs';
+import { awaitsFeedback } from '../lib/tick-util.mjs';
 import { ensurePlanStarted } from '../lib/launch.mjs';
 import { collectGate, spawnGateRun } from '../lib/gaterun.mjs';
 import { commit, readState, unitOf } from '../lib/ledger.mjs';
@@ -204,7 +206,72 @@ test('launch base: a dependant branches from an integration head that contains i
   assert.equal(unitOf(await readState(s.p.repo), 'b').baseSha, base);
 });
 
-test('integrate: a conflict needs judgment and names the files', async (t) => {
+test('integrate: a conflict goes back to the same worker to merge the integration head; the third one needs judgment', async (t) => {
+  const spawned = [];
+  const s = await setup(t, [unitSpec('a', { paths: ['shared.txt'] }), unitSpec('b', { paths: ['shared.txt'] })], {
+    fx: { spawnGate: async () => { spawned.push(1); return 1; } },
+  });
+  await s.act(launchA());
+  await s.act(launchA('b', { key: 'pb::m2', instance: 'pb' }));
+  await toPassed(s, 'a', { 'shared.txt': 'from a\n' });
+  await toPassed(s, 'b', { 'shared.txt': 'from b\n' });
+  await s.act({ type: 'integrate', unit: 'a' });
+  const head = (await readState(s.p.repo)).plan.integrationHead;
+  const thread = unitOf(await readState(s.p.repo), 'b').threadId;
+  await s.act({ type: 'integrate', unit: 'b' });
+  const b = unitOf(await readState(s.p.repo), 'b');
+  assert.equal(b.state, 'queued');
+  assert.equal(b.threadId, thread);
+  assert.equal(b.attempt, 1); // the same attempt: the gate passed, only the merge is left
+  assert.equal(b.conflicts, 1);
+  assert.equal(b.baseSha, head); // the next gate judges only what the worker adds on top of the head it merges
+  assert.equal(awaitsFeedback(b), true);
+  assert.match(b.lastFailure[0], new RegExp(`^merge conflict with the integration branch in shared\\.txt: .*git merge ${head}`));
+  const msg = feedbackMessage(b.lastFailure, 'Flag: test-weakened x — 1 lines removed');
+  assert.match(msg, new RegExp(`git merge ${head}`));
+  assert.doesNotMatch(msg, /Flag:|gate rejected/);
+  // the worker's turn ends without resolving it: gated again on the same commit, it conflicts again (twice per launch)
+  // the commit already passed its gate once: the shortcut passes it again with no gate run and no rung of the ladder
+  const unresolved = async () => {
+    await append(s, { type: 'feedback-sent', unit: 'b', attempt: 1, threadId: thread }, { type: 'thread-ended', unit: 'b', status: 'completed' });
+    await s.act({ type: 'gate-start', unit: 'b', attempt: 1 });
+    const u = unitOf(await readState(s.p.repo), 'b');
+    assert.deepEqual([u.state, u.attempt, u.headSha], ['passed', 1, b.headSha]);
+  };
+  await unresolved();
+  await s.act({ type: 'integrate', unit: 'b' });
+  assert.equal(unitOf(await readState(s.p.repo), 'b').conflicts, 2);
+  await unresolved();
+  await s.act({ type: 'integrate', unit: 'b' });
+  assert.equal(spawned.length, 0);
+  const again = unitOf(await readState(s.p.repo), 'b');
+  assert.equal(again.state, 'failed');
+  assert.equal(again.reason, 'merge conflict: shared.txt');
+});
+
+test('after a conflict, a merge commit that failed its gate is never passed by the same-commit shortcut', async (t) => {
+  const s = await setup(t, [unitSpec('a', { paths: ['shared.txt'] }), unitSpec('b', { paths: ['shared.txt'] })], {
+    fx: { spawnGate: async () => 1 },
+  });
+  await s.act(launchA());
+  await s.act(launchA('b', { key: 'pb::m2', instance: 'pb' }));
+  await toPassed(s, 'a', { 'shared.txt': 'from a\n' });
+  await toPassed(s, 'b', { 'shared.txt': 'from b\n' });
+  await s.act({ type: 'integrate', unit: 'a' });
+  await s.act({ type: 'integrate', unit: 'b' });
+  const b = unitOf(await readState(s.p.repo), 'b');
+  const m = await commitOn(s.p.repo, b.branch, { 'shared.txt': 'broken merge\n' });
+  await append(s, { type: 'feedback-sent', unit: 'b', attempt: 1, threadId: b.threadId }, { type: 'thread-ended', unit: 'b', status: 'completed' },
+    { type: 'gate-started', unit: 'b', attempt: 1, headSha: m, pid: 1 },
+    { type: 'gated', unit: 'b', attempt: 1, verdict: 'fail', failures: ['checks failed (exit 1)'], flags: [], headSha: m },
+    { type: 'feedback-sent', unit: 'b', attempt: 2, threadId: b.threadId }, { type: 'thread-ended', unit: 'b', status: 'completed' });
+  await s.act({ type: 'gate-start', unit: 'b', attempt: 2 });
+  const after = unitOf(await readState(s.p.repo), 'b');
+  assert.deepEqual([after.state, after.attempt], ['queued', 3]);
+  assert.equal(after.lastFailure[0], 'no new commit after feedback');
+});
+
+test('integrate: the worker merges the head it was given, and the unit then integrates', async (t) => {
   const s = await setup(t, [unitSpec('a', { paths: ['shared.txt'] }), unitSpec('b', { paths: ['shared.txt'] })]);
   await s.act(launchA());
   await s.act(launchA('b', { key: 'pb::m2', instance: 'pb' }));
@@ -213,8 +280,18 @@ test('integrate: a conflict needs judgment and names the files', async (t) => {
   await s.act({ type: 'integrate', unit: 'a' });
   await s.act({ type: 'integrate', unit: 'b' });
   const b = unitOf(await readState(s.p.repo), 'b');
-  assert.equal(b.state, 'failed');
-  assert.equal(b.reason, 'merge conflict: shared.txt');
+  const wt = await fs.mkdtemp(path.join(os.tmpdir(), 'orq-wt-'));
+  t.after(() => fs.rm(wt, { recursive: true, force: true }));
+  sh(s.p.repo, 'worktree', 'add', '-q', wt, b.branch);
+  spawnSync('git', ['merge', '-q', b.baseSha], { cwd: wt }); // stops on the conflict, resolved below
+  await fs.writeFile(path.join(wt, 'shared.txt'), 'from a\nfrom b\n');
+  sh(wt, 'commit', '-qam', 'merge the integration head');
+  const sha = sh(wt, 'rev-parse', 'HEAD');
+  await append(s, { type: 'feedback-sent', unit: 'b', attempt: 1, threadId: b.threadId },
+    { type: 'thread-ended', unit: 'b', status: 'completed' }, { type: 'gate-started', unit: 'b', attempt: 1, headSha: sha, pid: 1 },
+    { type: 'gated', unit: 'b', attempt: 1, verdict: 'pass', failures: [], flags: [], headSha: sha });
+  await s.act({ type: 'integrate', unit: 'b' });
+  assert.equal(unitOf(await readState(s.p.repo), 'b').state, 'integrated');
 });
 
 async function waitForResult(fx, unit, attempt) {
