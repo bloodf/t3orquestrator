@@ -46,7 +46,7 @@ Read [How it works](docs/how-it-works.md) for the full sequence.
 - A global agent instruction file that mandates another dispatch or routing procedure conflicts with the playbook. Exempt projects that use this kit from it.
 - Some providers report no model list to T3 Code. The orchestrator then asks you once for the model names you run there.
 - The gate runs project code as you; it is not a sandbox. See [SECURITY.md](SECURITY.md).
-- There is no token-usage accounting, because T3's CLI does not expose token usage.
+- There is no token-usage accounting, because T3's CLI does not expose token usage. Account limits can be read from a CLIProxyAPI (EasyCLIProxyAPI) management API, so routing skips accounts at their limit: see [Account usage](docs/scheduling.md#account-usage).
 - The machine-wide thread cap counts only threads `orq` started. Threads you start by hand are not counted. A project can also set its own, lower cap (`orq config set cap <n>`).
 - A unit's worker worktrees are removed when the unit is integrated; its branches stay. `orq worktree prune` does the same for units integrated earlier. Review and decision worktrees, and whatever was kept, are removed at `orq plan archive`. A worktree with uncommitted or untracked files is always kept; files git ignores go with the worktree.
 - A shared `node_modules` is a symlink into your main checkout: a thread can write through it. npm and yarn projects are never shared. Turn sharing off with `orq config set share null`. See [SECURITY.md](SECURITY.md).

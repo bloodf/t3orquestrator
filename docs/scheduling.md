@@ -60,16 +60,41 @@ Until some unit has passed its gate, only one unit is in flight. A plan with a b
 Among enabled, available models at or above the minimum tier, candidates are ordered by:
 
 1. lowest tier first (highest first for `decide`, the job `orq ask` routes: it wants the strongest model, and when every tier-4 model is cooling down or at its limit it takes the strongest free model rather than wait);
-2. then the better record for this job class: the share of the model's last 10 recorded results that passed, once it has at least 3 (fewer count as neutral, 0.5, so a new model is not starved);
-3. then fewest running threads on that instance;
-4. then least recently used;
-5. then key order.
+2. then the account with more headroom, when [account usage](#account-usage) is configured: in quarters (75% or more left, 50-74%, 25-49%, under 25%), an instance whose usage is unknown counting as 50-74%, so small differences fall through to the rules below;
+3. then the better record for this job class: the share of the model's last 10 recorded results that passed, once it has at least 3 (fewer count as neutral, 0.5, so a new model is not starved);
+4. then fewest running threads on that instance;
+5. then least recently used;
+6. then key order.
 
 For `review`, models from the author's family, and models whose family is unknown, move to the end. If no model reaches the minimum tier, the best available tier is used and `orq route` marks it `below-tier`. A unit launched that way, including a `fix` unit that cannot get the author's tier, gets a `note: unit <id> wanted tier <n>; launched on <key> (tier <m>), the best available` line from `orq wait`, and `wanted_tier=<n>` in `orq status`.
 
 A result is recorded once per worker launch: the first gate verdict after the launch, pass or fail, for the model and job class of that launch. Later verdicts of the same launch (attempt 2, after feedback on the same thread) are not recorded. Attempt 3 is a new launch, so its first verdict is recorded for its own model. Not recorded: a launch that continued another worker's commits, a setup failure, and provider failures (they only drive cooldowns). A model with at least 4 recorded results of which under 34% passed is demoted: it is tried only after every other eligible model, at any adequate tier, and stays usable when it is all there is. A demotion lapses 24 hours after the model's last recorded result for that job class, so the model gets another chance. `orq route` prints `score=<rate> n=<results>` and `demoted`. `review` and `decide` are never scored: their threads are not gated. Records kept before this version (`outcomes` in the registry) are not read for scoring.
 
 A model is skipped while it or its instance is cooling down, or while its instance is at its limit. A model whose work failed the gate twice for this unit is excluded for that unit (the quality ladder's third attempt). A model or instance on which this unit hit a provider failure moves to the end of the order, a failed model behind a failed instance, but it is not excluded: when nothing else is eligible it is used again once its cooldown has passed.
+
+### Account usage
+
+Optional. `orq` can read each account's usage from a [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) management API (the core of EasyCLIProxyAPI), so it routes away from an account that is at or near its limit instead of finding out through failed threads. Without it, routing works as described above. Add a `usage` block to `~/.t3orq/config.json` by hand:
+
+```json
+{
+  "usage": {
+    "url": "http://127.0.0.1:8317",
+    "keyEnv": "ORQ_CLIPROXY_KEY",
+    "accounts": { "codex": "<auth file name>", "antigravity-proxy": ["<account>", "<account>"] },
+    "threshold": 90,
+    "ttlSeconds": 300
+  }
+}
+```
+
+- `url`: the proxy's base URL. `orq` calls only `GET /v0/management/auth-files`, with a 3-second timeout.
+- `keyEnv` or `keyFile`: where the management key is, an environment variable name or an absolute path to a file that holds only the key. `orq` never writes the key anywhere; keep a key file at mode 0600.
+- `accounts`: T3 provider instance id to the proxy account it uses, by auth file `name`, `email`, `label`, `id` or `auth_index`. An instance can name a list: a pool that the proxy itself spreads over several accounts. The pool has the headroom of its best open account, and it is exhausted only when every account is. Instances not listed are routed as before. T3's display names do not reliably name the account behind an instance, so the map is never guessed.
+- `threshold` (default 90): at this used percent an instance cools down until its window resets.
+- `ttlSeconds` (default 300): how long `orq wait`, `route`, `status`, `ask` and review launches reuse the last reading, cached in `~/.t3orq/usage.json`. `orq sync` always reads afresh.
+
+From each account the proxy reports, `orq` takes the fullest usage window that has not reset (the `-Used-Percent` and `-Reset-At` quota signals; codex reports a weekly and a 5-hour window) and any quota cooldown on the whole credential. An instance at or over the threshold, or on such a cooldown, cools down until the reset, so it is skipped and `orq wait` reports `idle: … retry at <reset>` when nothing else can take the unit. This cooldown is computed on every read and never stored in the registry. Accounts that report no usage window (in CLIProxyAPI 8.0.63: antigravity, claude and kimi) only cool down when the proxy has them on a quota cooldown. The proxy observes an account's usage only on requests it makes with that account, so a reading can be hours old. That errs on the safe side: within a window usage only grows. When the proxy cannot be reached, `orq` keeps the last reading, says so in `status`, and tries again after the TTL.
 
 ## Failure ladders
 

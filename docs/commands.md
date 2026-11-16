@@ -73,10 +73,11 @@ enabled: <ids>
 unavailable: <n>
 synced: <n> instances (<n> enabled), <n> models (<n> confirmed)
 providers: … (as for init)
+usage: <instance> <used%|->[ resets <iso time>][ exhausted until <iso time>]; …   (only with account usage configured)
 inferred: <keys> — set with: orq tier set <key> <1-4>
 ```
 
-Lines with nothing to report are left out. `inferred:` lists at most 8 keys, then `+<n> more`. Exit 2 when stdin is empty or over 8 MiB. Exit 1 when the JSON is invalid or the capabilities look truncated.
+With [account usage](scheduling.md#account-usage) configured, `sync` reads it afresh and prints the `usage:` line (see [status](#status)). Lines with nothing to report are left out. `inferred:` lists at most 8 keys, then `+<n> more`. Exit 2 when stdin is empty or over 8 MiB. Exit 1 when the JSON is invalid or the capabilities look truncated.
 
 ## instance
 
@@ -109,8 +110,10 @@ Prints `tier <key> = <n> (<by>)`. `--by` defaults to `orchestrator`. A tier set 
 Lists the eligible models in the order `orq` would use them:
 
 ```
-1 <instance> <model> tier=<n> family=<family> confirmed|unconfirmed[ same-family][ below-tier][ score=<rate|-> n=<attempts>][ demoted]
+1 <instance> <model> tier=<n> family=<family> confirmed|unconfirmed[ same-family][ below-tier][ score=<rate|-> n=<attempts>][ demoted][ headroom=<n>%]
 ```
+
+`headroom` is what is left of the account's fullest usage window, with [account usage](scheduling.md#account-usage) configured.
 
 `review` and `fix` need the author's tier, and `review` also needs the family. If the project has integrated units, the values come from the ledger. Exit 4 with `none blocked=<excluded|cooling|limit|mixed|empty> retry_at=<iso time|-> reason="<why>"` when nothing is eligible.
 
@@ -123,7 +126,7 @@ Lists the eligible models in the order `orq` would use them:
 | Scope | Keys |
 |---|---|
 | project (`.orq/config.json`) | `autonomy`, `base`, `cap`, `checks.setup`, `checks.unit`, `checks.full`, `pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`, `finalTimeoutMinutes`, `questions`, `share`, `goal` |
-| machine (`~/.t3orq/config.json`) | `cap`, `perInstanceLimit` |
+| machine (`~/.t3orq/config.json`) | `cap`, `perInstanceLimit` (`usage` is edited by hand: see [Account usage](scheduling.md#account-usage)) |
 
 `checks.unit` runs in every unit's gate after the evidence. `checks.full` runs once on the integration head.
 
@@ -187,13 +190,14 @@ integration: <branch> head=<sha> base=<sha>
 ship: green=<sha12|none> shipped=<sha12|none> ships=<n>   (continuous mode only)
 cap=<n> active=<n> blocked=<n> gates=<n> machine_leases=<n>[ expired_leases=<n>][ project_cap=<n> project_leases=<n>]
 providers: … (as for init)
+usage[ (last fetch failed: <why>)]: <instance> <used%|->[ resets <iso time>][ exhausted until <iso time>]; …[; no account matches <instance>: <account>, …]
 <unit> <state>[ attempt=<n>][ model=<key>][ tier=<n>][ wanted_tier=<n>][ continued][ thread=<id>][ flags=<kinds>][ <reason>]
 authors: max_tier=<n> family=<family>
 cooling: <instance> until <iso time>, …
 note: cap covers threads orq started; threads started by hand are not counted
 ```
 
-When the machine `cap` is an override above what the machine computes, a line `note: cap <n> is an override; this machine computes <m> (<reasons>)` comes before the last note; `orq wait` prints the same note once per call. When the project sets its own `cap`, the cap line ends with `project_cap=<n> project_leases=<n>` (this project's live leases), and when that cap leaves fewer free slots than the machine cap does, a line `note: project cap <n> is the limit in force: <k> slots free for this project, <m> under the machine cap <c>` comes before the last note. `--json` has `projectCap` (null when unset) and `projectLeases`. The `goal:` line is the standing goal from the project config; the `plan:` line and `--json` `plan.goal` are the running plan's own goal. A line `ask: decision <n> running thread=<id> model=<key>` follows the `authors:` line for each decision thread still running, then `abandoned: thread <id> of unit <u> holds a slot until it ends` for each thread `orq` gave up on whose lease still counts against the cap. The `integration:`, `authors:`, `ask:` and `cooling:` lines appear only when they apply. `wanted_tier` appears when the unit was launched below its minimum tier because no model at that tier was usable.
+When the machine `cap` is an override above what the machine computes, a line `note: cap <n> is an override; this machine computes <m> (<reasons>)` comes before the last note; `orq wait` prints the same note once per call. When the project sets its own `cap`, the cap line ends with `project_cap=<n> project_leases=<n>` (this project's live leases), and when that cap leaves fewer free slots than the machine cap does, a line `note: project cap <n> is the limit in force: <k> slots free for this project, <m> under the machine cap <c>` comes before the last note. `--json` has `projectCap` (null when unset) and `projectLeases`. The `goal:` line is the standing goal from the project config; the `plan:` line and `--json` `plan.goal` are the running plan's own goal. A line `ask: decision <n> running thread=<id> model=<key>` follows the `authors:` line for each decision thread still running, then `abandoned: thread <id> of unit <u> holds a slot until it ends` for each thread `orq` gave up on whose lease still counts against the cap. The `usage:` line appears only with [account usage](scheduling.md#account-usage) configured, also between plans; an instance at its limit is also counted as cooling and listed on the `cooling:` line until its reset, and `--json` has the reading as `usage`. The `integration:`, `authors:`, `ask:` and `cooling:` lines appear only when they apply. `wanted_tier` appears when the unit was launched below its minimum tier because no model at that tier was usable.
 
 ## unit
 

@@ -5,6 +5,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Optional account usage from a CLIProxyAPI (EasyCLIProxyAPI) management API. With a `usage` block in `~/.t3orq/config.json` (URL, the key's environment variable or file, and which proxy account each T3 instance uses), `orq` reads each account's used percent, reset time and quota cooldowns: at `orq sync`, and at most every `ttlSeconds` (default 300) on `wait`, `route`, `status`, `ask` and review launches. An instance at 90% or more of its window, or on a quota cooldown, is skipped until its reset instead of failing threads first; among the rest, accounts with more headroom go first. `orq status` and `orq sync` print a `usage:` line per instance and `orq route` a `headroom=` field. Without the block nothing changes. See [Account usage](docs/scheduling.md#account-usage).
+
 ## [0.8.7] - 2026-11-16
 
 ### Fixed

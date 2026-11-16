@@ -1,0 +1,351 @@
+{
+  "files": [
+    {
+      "auth_index": "idx-antigravity-a",
+      "id": "antigravity-a.json",
+      "name": "antigravity-a.json",
+      "provider": "antigravity",
+      "type": "antigravity",
+      "label": "antigravity-a@example.invalid",
+      "email": "antigravity-a@example.invalid",
+      "status": "active",
+      "status_message": "",
+      "disabled": false,
+      "unavailable": false,
+      "runtime_only": false,
+      "source": "file",
+      "success": 5699,
+      "failed": 261,
+      "quota": {
+        "signals": {}
+      },
+      "cooldowns": []
+    },
+    {
+      "auth_index": "idx-antigravity-b",
+      "id": "antigravity-b.json",
+      "name": "antigravity-b.json",
+      "provider": "antigravity",
+      "type": "antigravity",
+      "label": "antigravity-b@example.invalid",
+      "email": "antigravity-b@example.invalid",
+      "status": "active",
+      "status_message": "",
+      "disabled": false,
+      "unavailable": false,
+      "runtime_only": false,
+      "source": "file",
+      "success": 402,
+      "failed": 3852,
+      "quota": {
+        "signals": {}
+      },
+      "cooldowns": []
+    },
+    {
+      "auth_index": "idx-claude-a",
+      "id": "claude-a.json",
+      "name": "claude-a.json",
+      "provider": "claude",
+      "type": "claude",
+      "label": "claude-a@example.invalid",
+      "email": "claude-a@example.invalid",
+      "status": "active",
+      "status_message": "",
+      "disabled": false,
+      "unavailable": false,
+      "runtime_only": false,
+      "source": "file",
+      "success": 0,
+      "failed": 0,
+      "quota": {
+        "signals": {}
+      },
+      "cooldowns": []
+    },
+    {
+      "auth_index": "idx-claude-b",
+      "id": "claude-b.json",
+      "name": "claude-b.json",
+      "provider": "claude",
+      "type": "claude",
+      "label": "claude-b@example.invalid",
+      "email": "claude-b@example.invalid",
+      "status": "active",
+      "status_message": "",
+      "disabled": false,
+      "unavailable": false,
+      "runtime_only": false,
+      "source": "file",
+      "success": 0,
+      "failed": 0,
+      "quota": {
+        "signals": {}
+      },
+      "cooldowns": []
+    },
+    {
+      "auth_index": "idx-codex-a",
+      "id": "codex-a.json",
+      "name": "codex-a.json",
+      "provider": "codex",
+      "type": "codex",
+      "label": "codex-a@example.invalid",
+      "email": "codex-a@example.invalid",
+      "status": "active",
+      "status_message": "",
+      "disabled": false,
+      "unavailable": false,
+      "runtime_only": false,
+      "source": "file",
+      "success": 63,
+      "failed": 0,
+      "quota": {
+        "observed_at": "2026-11-16T11:13:48.314652-03:00",
+        "signals": {
+          "X-Codex-Active-Limit": "premium",
+          "X-Codex-Credits-Balance": "0",
+          "X-Codex-Credits-Has-Credits": "False",
+          "X-Codex-Credits-Unlimited": "False",
+          "X-Codex-Plan-Type": "pro",
+          "X-Codex-Primary-Over-Secondary-Limit-Percent": "0",
+          "X-Codex-Primary-Reset-After-Seconds": "278752",
+          "X-Codex-Primary-Reset-At": "1795117138",
+          "X-Codex-Primary-Used-Percent": "85",
+          "X-Codex-Primary-Window-Minutes": "10080",
+          "X-Codex-Secondary-Reset-After-Seconds": "0",
+          "X-Codex-Secondary-Used-Percent": "0",
+          "X-Codex-Secondary-Window-Minutes": "0"
+        }
+      },
+      "model_quotas": {
+        "gpt-6-luna": {
+          "observed_at": "2026-11-16T11:12:26.396275-03:00",
+          "signals": {
+            "X-Codex-Active-Limit": "premium",
+            "X-Codex-Credits-Balance": "0",
+            "X-Codex-Credits-Has-Credits": "False",
+            "X-Codex-Credits-Unlimited": "False",
+            "X-Codex-Plan-Type": "pro",
+            "X-Codex-Primary-Over-Secondary-Limit-Percent": "0",
+            "X-Codex-Primary-Reset-After-Seconds": "278800",
+            "X-Codex-Primary-Reset-At": "1795117138",
+            "X-Codex-Primary-Used-Percent": "85",
+            "X-Codex-Primary-Window-Minutes": "10080",
+            "X-Codex-Secondary-Reset-After-Seconds": "0",
+            "X-Codex-Secondary-Used-Percent": "0",
+            "X-Codex-Secondary-Window-Minutes": "0"
+          }
+        },
+        "gpt-6.1-terra": {
+          "observed_at": "2026-11-16T11:13:48.314652-03:00",
+          "signals": {
+            "X-Codex-Active-Limit": "premium",
+            "X-Codex-Credits-Balance": "0",
+            "X-Codex-Credits-Has-Credits": "False",
+            "X-Codex-Credits-Unlimited": "False",
+            "X-Codex-Plan-Type": "pro",
+            "X-Codex-Primary-Over-Secondary-Limit-Percent": "0",
+            "X-Codex-Primary-Reset-After-Seconds": "278752",
+            "X-Codex-Primary-Reset-At": "1795117138",
+            "X-Codex-Primary-Used-Percent": "85",
+            "X-Codex-Primary-Window-Minutes": "10080",
+            "X-Codex-Secondary-Reset-After-Seconds": "0",
+            "X-Codex-Secondary-Used-Percent": "0",
+            "X-Codex-Secondary-Window-Minutes": "0"
+          }
+        }
+      },
+      "cooldowns": []
+    },
+    {
+      "auth_index": "idx-codex-b",
+      "id": "codex-b.json",
+      "name": "codex-b.json",
+      "provider": "codex",
+      "type": "codex",
+      "label": "codex-b@example.invalid",
+      "email": "codex-b@example.invalid",
+      "status": "active",
+      "status_message": "",
+      "disabled": false,
+      "unavailable": false,
+      "runtime_only": false,
+      "source": "file",
+      "success": 39,
+      "failed": 24,
+      "quota": {
+        "observed_at": "2026-11-16T11:13:56.228835-03:00",
+        "signals": {
+          "X-Codex-Active-Limit": "premium",
+          "X-Codex-Credits-Balance": "0",
+          "X-Codex-Credits-Has-Credits": "False",
+          "X-Codex-Credits-Unlimited": "False",
+          "X-Codex-Plan-Type": "prolite",
+          "X-Codex-Primary-Over-Secondary-Limit-Percent": "0",
+          "X-Codex-Primary-Reset-After-Seconds": "438814",
+          "X-Codex-Primary-Reset-At": "1795277242",
+          "X-Codex-Primary-Used-Percent": "6",
+          "X-Codex-Primary-Window-Minutes": "10080",
+          "X-Codex-Secondary-Reset-After-Seconds": "0",
+          "X-Codex-Secondary-Used-Percent": "0",
+          "X-Codex-Secondary-Window-Minutes": "0"
+        }
+      },
+      "model_quotas": {
+        "gpt-6-luna": {
+          "observed_at": "2026-11-16T11:12:25.211163-03:00",
+          "signals": {
+            "X-Codex-Active-Limit": "premium",
+            "X-Codex-Credits-Balance": "0",
+            "X-Codex-Credits-Has-Credits": "False",
+            "X-Codex-Credits-Unlimited": "False",
+            "X-Codex-Plan-Type": "prolite",
+            "X-Codex-Primary-Over-Secondary-Limit-Percent": "0",
+            "X-Codex-Primary-Reset-After-Seconds": "438904",
+            "X-Codex-Primary-Reset-At": "1795277242",
+            "X-Codex-Primary-Used-Percent": "6",
+            "X-Codex-Primary-Window-Minutes": "10080",
+            "X-Codex-Secondary-Reset-After-Seconds": "0",
+            "X-Codex-Secondary-Used-Percent": "0",
+            "X-Codex-Secondary-Window-Minutes": "0"
+          }
+        },
+        "gpt-6.1-terra": {
+          "observed_at": "2026-11-16T11:13:56.228835-03:00",
+          "signals": {
+            "X-Codex-Active-Limit": "premium",
+            "X-Codex-Credits-Balance": "0",
+            "X-Codex-Credits-Has-Credits": "False",
+            "X-Codex-Credits-Unlimited": "False",
+            "X-Codex-Plan-Type": "prolite",
+            "X-Codex-Primary-Over-Secondary-Limit-Percent": "0",
+            "X-Codex-Primary-Reset-After-Seconds": "438814",
+            "X-Codex-Primary-Reset-At": "1795277242",
+            "X-Codex-Primary-Used-Percent": "6",
+            "X-Codex-Primary-Window-Minutes": "10080",
+            "X-Codex-Secondary-Reset-After-Seconds": "0",
+            "X-Codex-Secondary-Used-Percent": "0",
+            "X-Codex-Secondary-Window-Minutes": "0"
+          }
+        }
+      },
+      "cooldowns": []
+    },
+    {
+      "auth_index": "idx-codex-c",
+      "id": "codex-c.json",
+      "name": "codex-c.json",
+      "provider": "codex",
+      "type": "codex",
+      "label": "codex-c@example.invalid",
+      "email": "codex-c@example.invalid",
+      "status": "active",
+      "status_message": "",
+      "disabled": false,
+      "unavailable": false,
+      "runtime_only": false,
+      "source": "file",
+      "success": 62,
+      "failed": 0,
+      "quota": {
+        "observed_at": "2026-11-16T11:13:58.403929-03:00",
+        "signals": {
+          "X-Codex-Active-Limit": "premium",
+          "X-Codex-Credits-Balance": "1000.0000000000",
+          "X-Codex-Credits-Has-Credits": "True",
+          "X-Codex-Credits-Unlimited": "False",
+          "X-Codex-Plan-Type": "pro",
+          "X-Codex-Primary-Over-Secondary-Limit-Percent": "0",
+          "X-Codex-Primary-Reset-After-Seconds": "439025",
+          "X-Codex-Primary-Reset-At": "1795277460",
+          "X-Codex-Primary-Used-Percent": "95",
+          "X-Codex-Primary-Window-Minutes": "10080",
+          "X-Codex-Secondary-Reset-After-Seconds": "0",
+          "X-Codex-Secondary-Used-Percent": "0",
+          "X-Codex-Secondary-Window-Minutes": "0"
+        }
+      },
+      "model_quotas": {
+        "gpt-6-luna": {
+          "observed_at": "2026-11-16T09:36:22.7992-03:00",
+          "signals": {
+            "X-Codex-Active-Limit": "premium",
+            "X-Codex-Credits-Balance": "1000.0000000000",
+            "X-Codex-Credits-Has-Credits": "True",
+            "X-Codex-Credits-Unlimited": "False",
+            "X-Codex-Plan-Type": "pro",
+            "X-Codex-Primary-Over-Secondary-Limit-Percent": "0",
+            "X-Codex-Primary-Reset-After-Seconds": "444885",
+            "X-Codex-Primary-Reset-At": "1795277460",
+            "X-Codex-Primary-Used-Percent": "89",
+            "X-Codex-Primary-Window-Minutes": "10080",
+            "X-Codex-Secondary-Reset-After-Seconds": "0",
+            "X-Codex-Secondary-Used-Percent": "0",
+            "X-Codex-Secondary-Window-Minutes": "0"
+          }
+        },
+        "gpt-6.1-terra": {
+          "observed_at": "2026-11-16T11:13:58.403929-03:00",
+          "signals": {
+            "X-Codex-Active-Limit": "premium",
+            "X-Codex-Credits-Balance": "1000.0000000000",
+            "X-Codex-Credits-Has-Credits": "True",
+            "X-Codex-Credits-Unlimited": "False",
+            "X-Codex-Plan-Type": "pro",
+            "X-Codex-Primary-Over-Secondary-Limit-Percent": "0",
+            "X-Codex-Primary-Reset-After-Seconds": "439025",
+            "X-Codex-Primary-Reset-At": "1795277460",
+            "X-Codex-Primary-Used-Percent": "95",
+            "X-Codex-Primary-Window-Minutes": "10080",
+            "X-Codex-Secondary-Reset-After-Seconds": "0",
+            "X-Codex-Secondary-Used-Percent": "0",
+            "X-Codex-Secondary-Window-Minutes": "0"
+          }
+        }
+      },
+      "cooldowns": []
+    },
+    {
+      "auth_index": "idx-kimi-a",
+      "id": "kimi-a.json",
+      "name": "kimi-a.json",
+      "provider": "kimi",
+      "type": "kimi",
+      "label": "kimi-a@example.invalid",
+      "status": "active",
+      "status_message": "",
+      "disabled": false,
+      "unavailable": false,
+      "runtime_only": false,
+      "source": "file",
+      "success": 0,
+      "failed": 0,
+      "quota": {
+        "signals": {}
+      },
+      "cooldowns": []
+    },
+    {
+      "auth_index": "idx-xai-a",
+      "id": "xai-a.json",
+      "name": "xai-a.json",
+      "provider": "xai",
+      "type": "xai",
+      "label": "xai-a@example.invalid",
+      "email": "xai-a@example.invalid",
+      "status": "active",
+      "status_message": "",
+      "disabled": false,
+      "unavailable": false,
+      "runtime_only": false,
+      "source": "file",
+      "success": 0,
+      "failed": 0,
+      "quota": {
+        "signals": {}
+      },
+      "cooldowns": []
+    }
+  ]
+}
