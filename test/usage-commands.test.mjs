@@ -87,6 +87,8 @@ test('proxy down: the last known usage stays, and status says the fetch failed',
   const r = await orq(['status'], p, { fetch: down });
   assert.ok(r.out.includes(`usage (last fetch failed: fetch failed (ECONNREFUSED)): pa 95% resets ${iso(1795277460)}`), r.out);
   assert.match(r.out, /1 cooling \(pa\)/);
+  await fs.rm(path.join(p.home, 'usage.json'));
+  assert.match((await orq(['status'], p, { fetch: down })).out, /^usage \(last fetch failed: fetch failed \(ECONNREFUSED\)\): nothing read yet$/m);
 });
 
 test('no usage configured: no fetch, no usage line, no usage file', async (t) => {
@@ -95,6 +97,7 @@ test('no usage configured: no fetch, no usage line, no usage file', async (t) =>
   const r = await orq(['status'], p, { fetch });
   assert.equal(r.code, 0, r.err);
   assert.doesNotMatch(r.out, /usage/);
+  assert.equal('usage' in JSON.parse((await orq(['status', '--json'], p, { fetch })).out), false);
   assert.match((await orq(['route', '--job', 'implement'], p, { fetch })).out, /^1 pa m2 /);
   assert.equal(existsSync(path.join(p.home, 'usage.json')), false);
 });

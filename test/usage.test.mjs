@@ -166,10 +166,17 @@ test('loadUsage: none configured, fetch with the key, cache for the TTL, keep th
   assert.equal(calls.length, 1);
   await loadUsage(ctx, { usage: settings }, { fresh: true });
   assert.equal(calls.length, 2);
-  now += 301_000;
+  await loadUsage(ctx, { usage: { ...settings, accounts: { codex: 'codex-b.json' } } }); // another mapping: read again
+  assert.equal(calls.length, 3);
+  await loadUsage(ctx, { usage: settings });
+  assert.equal(calls.length, 4);
+  now -= 120_000; // the clock went back: the cache looks from the future
+  await loadUsage(ctx, { usage: settings });
+  assert.equal(calls.length, 5);
+  now += 120_000 + 301_000;
   fail = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
   const down = await loadUsage(ctx, { usage: settings });
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 6);
   assert.equal(down.instances.codex.usedPercent, 95);
   assert.equal(down.error, 'fetch failed (ECONNREFUSED)');
   assert.equal(down.fetchedAt, now); // the failure waits out the TTL too
@@ -193,4 +200,11 @@ test('loadUsage reads the key from a file, and reports a missing key', async (t)
   assert.equal(auth, 'Bearer from-file');
   const missing = await loadUsage(ctx, { usage: { url: 'http://h:1', keyEnv: 'NOPE', accounts: {} } }, { fresh: true });
   assert.match(missing.error, /no management key: set NOPE/);
+  await fs.writeFile(keyFile, 'two\nlines-secret\n');
+  const bad = await loadUsage(ctx, { usage: { url: 'http://h:1', keyFile, accounts: {} } }, { fresh: true });
+  assert.equal(bad.error, 'the management key must be one line of printable characters');
+  assert.doesNotMatch(await fs.readFile(path.join(dir, 'usage.json'), 'utf8'), /secret/);
+  await fs.writeFile(keyFile, 'from-file\n');
+  await fs.writeFile(path.join(dir, 'usage.json'), '{damaged');
+  assert.deepEqual((await loadUsage(ctx, { usage: { url: 'http://h:1', keyFile, accounts: {} } })).instances, {});
 });
