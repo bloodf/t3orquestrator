@@ -255,6 +255,49 @@ test('defaultRun merges output, caps it, reports exit code and timeout', async (
   assert.equal(slow.timedOut, true);
 });
 
+test('defaultRun with logFile appends the whole output there, past the 200 lines it returns', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orq-log-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const logFile = path.join(dir, 'out.log');
+  await fs.writeFile(logFile, 'before\n');
+  const r = await defaultRun('i=0; while [ $i -lt 300 ]; do echo l$i; i=$((i+1)); done; echo e 1>&2', { cwd: dir, timeoutMs: 10000, logFile });
+  assert.equal(r.output.trim().split('\n').length, 200);
+  const kept = (await fs.readFile(logFile, 'utf8')).trim().split('\n');
+  assert.equal(kept[0], 'before');
+  assert.equal(kept[1], 'l0');
+  assert.ok(kept.includes('l299') && kept.includes('e'));
+});
+
+test('defaultRun: a log it cannot write never stops the step or leaves it running', async () => {
+  const r = await defaultRun('echo hi; echo bye', { cwd: os.tmpdir(), timeoutMs: 10000, logFile: '/nonexistent-orq-dir/x.log' });
+  assert.equal(r.code, 0);
+  assert.match(r.output, /bye/);
+});
+
+test('runGate: an unwritable log still gives a verdict', async () => {
+  const r = await gate({ logFile: '/nonexistent-orq-dir/x.log' });
+  assert.equal(r.verdict, 'pass');
+});
+
+test('defaultRun stops logging past maxLogBytes and says so', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orq-log-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const logFile = path.join(dir, 'out.log');
+  await defaultRun('i=0; while [ $i -lt 2000 ]; do echo line$i; i=$((i+1)); done', { cwd: dir, timeoutMs: 10000, logFile, maxLogBytes: 1000 });
+  const kept = await fs.readFile(logFile, 'utf8');
+  assert.ok(kept.length < 1200);
+  assert.match(kept, /== log truncated/);
+});
+
+test('runGate passes logFile to every step and heads each step with its name', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orq-log-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const logFile = path.join(dir, 'out.log');
+  const r = await gate({ logFile });
+  assert.ok(r.calls.length > 0 && r.calls.every((c) => c.logFile === logFile));
+  assert.match(await fs.readFile(logFile, 'utf8'), /^== evidence\n/m);
+});
+
 const alive = (pid) => {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 };

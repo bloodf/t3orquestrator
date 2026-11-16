@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-11-16
+
+### Fixed
+
+- A failed final run kept only its last 15 lines, which rarely named the failing test, so orchestrators reran the whole suite (20-50 minutes) to find it. The final gate now writes its whole output to `.orq/units/integration/head-<head12>.log` and names that file as `output` in the result when the run fails. Writing the log is best effort and capped at 64 MB a step; a passing final run removes the logs of earlier heads.
+
 ## [0.8.3] - 2026-11-16
 
 ### Fixed

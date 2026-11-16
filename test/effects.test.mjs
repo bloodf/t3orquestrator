@@ -447,6 +447,62 @@ test('gate-run: a failed final check is not run a second time (a full suite cost
   assert.equal(calls, 2); // setup still gets its second try
 });
 
+test('gate-run: a failed final gate keeps its whole output in head-<sha>.log and names it; a passing one keeps none', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await s.act(launchA());
+  const sha = await commitOn(s.p.repo, unitOf(await readState(s.p.repo), 'a').branch, { 'a.txt': 'A\n' });
+  const quiet = { write: () => {} };
+  let code = 1;
+  const run = async (_command, { logFile }) => {
+    if (logFile) fsSync.appendFileSync(logFile, 'FAIL tests/x.test.ts\nlast\n');
+    return { code, output: 'last', timedOut: false };
+  };
+  const orq = (args) => cli(args, {
+    stdout: quiet, stderr: quiet, env: s.p.env, cwd: s.p.repo, deps: { run },
+  });
+  assert.equal(await orq(['config', 'set', 'checks.setup', 'null']), 0);
+  assert.equal(await orq(['config', 'set', 'checks.full', 'false']), 0);
+  const rel = `.orq/units/integration/head-${sha.slice(0, 12)}.log`;
+  const log = path.join(s.p.repo, rel);
+  await orq(['gate-run', 'integration', '1', sha]);
+  const failed = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'integration', 1, 'json'), 'utf8'));
+  assert.equal(failed.output, rel);
+  assert.match(await fs.readFile(log, 'utf8'), /^== checks\nFAIL tests\/x\.test\.ts\nlast\n$/);
+  await orq(['gate-run', 'integration', '1', sha]); // the same head again: a new log, not one appended to the last
+  assert.equal((await fs.readFile(log, 'utf8')).match(/FAIL/g).length, 1);
+  code = 0;
+  await orq(['gate-run', 'integration', '1', sha]);
+  const passed = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'integration', 1, 'json'), 'utf8'));
+  assert.equal(passed.output, undefined);
+  assert.equal(fsSync.existsSync(log), false);
+  code = 1;
+  const other = path.join(s.p.repo, '.orq/units/integration/head-000000000000.log');
+  await fs.writeFile(other, 'old failure\n');
+  await orq(['gate-run', 'integration', '1', sha]);
+  assert.equal(fsSync.existsSync(other), true); // a failing run leaves earlier logs alone
+  code = 0;
+  await orq(['gate-run', 'integration', '1', sha]);
+  assert.equal(fsSync.existsSync(other), false); // a passing final run clears every older head's log
+  const seen = [];
+  const unitRun = async (_c, opts) => { seen.push(opts.logFile); return { code: 0, output: '', timedOut: false }; };
+  await cli(['gate-run', 'a', '1', sha], { stdout: quiet, stderr: quiet, env: s.p.env, cwd: s.p.repo, deps: { run: unitRun } });
+  assert.ok(seen.length > 0 && seen.every((f) => f === undefined)); // a unit gate keeps no log
+});
+
+test('gate-run: a final gate that fails before any step names no output', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await s.act(launchA());
+  const sha = unitOf(await readState(s.p.repo), 'a').baseSha; // no commits on top of the base
+  const quiet = { write: () => {} };
+  const run = async () => ({ code: 0, output: '', timedOut: false });
+  const orq = (args) => cli(args, { stdout: quiet, stderr: quiet, env: s.p.env, cwd: s.p.repo, deps: { run } });
+  assert.equal(await orq(['config', 'set', 'checks.full', 'false']), 0);
+  await orq(['gate-run', 'integration', '1', sha]);
+  const r = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'integration', 1, 'json'), 'utf8'));
+  assert.equal(r.verdict, 'fail');
+  assert.equal(r.output, undefined);
+});
+
 test('gate-run: the final gate gets finalTimeoutMinutes (default 60), a unit gate 20; a timed-out final check says how to raise it', async (t) => {
   const s = await setup(t, [unitSpec('a')]);
   await s.act(launchA());
