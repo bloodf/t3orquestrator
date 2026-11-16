@@ -164,7 +164,7 @@ Before anything else, when `.orq/inbox.md` (see [inbox](#inbox)) is not empty, `
 
 In `continuous` mode two lines are added and `done:` means more:
 
-- `ship-ready: <green12> passed the final checks; <k> units not shipped yet; run "orq ship"` when the latest head that passed the final checks is not shipped yet; `k` counts the units integrated since the last ship up to that head. It comes after `judgment:` and `blocked:` lines and before anything else.
+- `ship-ready: <green12> passed the final checks; <k> units not shipped yet; run "orq ship"` when the latest head that passed the final checks is not shipped yet; `k` counts the units integrated since the last ship up to that head. It comes after `judgment:` and `blocked:` lines and before anything else. When origin's base, as `orq ship` last fetched it, has moved past that head, `orq ship` would refuse it: `orq wait` prints no `ship-ready:` line for it and keeps working, with a note that says so, and when nothing else is open it prints `ship-blocked: <green12> passed the final checks, but origin/<base> moved past it; append a unit with job "fix" that merges origin/<base> into the integration branch`.
 - `final-fail: <head12> fails the final checks while units are still open; <failures>; details in .orq/units/integration/head-<head12>.json` once per failing head while units are still open. Printing it records a `final-noted` event, so the same head is not reported again; a later final run on a newer head may report again. A `final-fail:` once every unit is in reads as in the other modes.
 - `done:` only when every unit is integrated or dropped and the integration head is shipped (or nothing was integrated).
 

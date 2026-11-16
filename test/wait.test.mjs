@@ -803,6 +803,24 @@ test('wait in continuous mode: the final checks run while a unit still works, an
   assert.equal(unitOf(st, 'b').state, 'running');
 });
 
+test('wait in continuous mode: a passed head that origin\'s base moved past is not ship-ready again; wait keeps working', async (t) => {
+  const p = await continuousProject(t, 'test -f a.txt');
+  const sim = simulator(p, { a: [['commit-complete']], b: [['idle']] });
+  assert.match((await orq(['wait'], p, sim)).out, /^ship-ready: /);
+  const { green } = (await readState(p.repo)).plan;
+  // `orq ship` fetched the base and refused: origin/main has a commit the green head lacks
+  const git = (...a) => spawnSync('git', a, { cwd: p.repo, encoding: 'utf8' });
+  const moved = git('commit-tree', `${green}^{tree}`, '-p', green, '-m', 'other machine').stdout.trim();
+  assert.equal(git('update-ref', 'refs/remotes/origin/main', moved).status, 0);
+  const r = await orq(['wait', '--max-seconds', '1'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^timeout: /);
+  assert.match(r.out, new RegExp(`note: ${green.slice(0, 12)} passed the final checks but origin/main moved past it; it ships once a unit merges origin/main`));
+  // a base that has not moved past it (or no fetched base at all) leaves it ship-ready
+  assert.equal(git('update-ref', 'refs/remotes/origin/main', green).status, 0);
+  assert.match((await orq(['wait', '--max-seconds', '1'], p, sim)).out, /^ship-ready: /);
+});
+
 test('wait in continuous mode: a failing head is reported once while units are open', async (t) => {
   const p = await continuousProject(t, 'echo broken; exit 3');
   const sim = simulator(p, { a: [['commit-complete']], b: [['idle']] });

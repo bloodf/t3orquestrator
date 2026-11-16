@@ -134,8 +134,8 @@ const st = (units, p) => ({
 const two = { units: [{ id: 'a' }, { id: 'b' }] };
 const bothIn = { a: { state: 'integrated' }, b: { state: 'integrated' } };
 const aIn = { a: { state: 'integrated' }, b: { state: 'running' } };
-const say = (s, over = {}, continuous = true) => decide({
-  plan: two, report: { ...report, ...over }, state: s, launched: 0, continuous,
+const say = (s, over = {}, continuous = true, stale = null) => decide({
+  plan: two, report: { ...report, ...over }, state: s, launched: 0, continuous, stale,
 });
 
 test('decide in continuous: ship-ready when a passed head is not shipped, after judgment and blocked lines', () => {
@@ -147,7 +147,13 @@ test('decide in continuous: ship-ready when a passed head is not shipped, after 
   assert.match(say(ready, { newlyBlocked: [{ unit: 'b', threadId: 't' }] })[0], /^blocked: /);
   assert.equal(say(st(aIn, { green: C, shipped: C })), null); // shipped: b still runs
   assert.equal(say(ready, {}, false), null); // other modes never print it
+  assert.equal(say(ready, {}, true, 'main'), null); // origin's base moved past it: `orq ship` would refuse; units still run, keep polling
+  // nothing left in flight: say what unblocks it, never `done` for a head that did not ship
+  assert.deepEqual(say(withShip, { done: true }, true, 'main'), [`ship-blocked: ${D.slice(0, 12)} passed the final checks, but origin/main moved past it; append a unit with job "fix" that merges origin/main into the integration branch`]);
   assert.equal(say({ ...ready, plan: { ...ready.plan, greenVerdict: 'no-evidence' } }), null); // proved nothing: not ready
+  // the merge unit landed and the newer head fails: the failure is the line, not another merge
+  const mergedFails = st(bothIn, { green: C, final: { verdict: 'fail', failures: ['boom'], head: D } });
+  assert.deepEqual(say(mergedFails, { done: true }, true, 'main'), [`final-fail: 2 units integrated at ${D.slice(0, 12)}; boom`]);
 });
 
 test('decide in continuous: an early final-fail once per failing head while units are open', () => {

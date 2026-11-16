@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-11-16
+
+### Fixed
+
+- In `continuous` mode, after `orq ship` refused a passed head because origin's base had moved, `orq wait` returned `ship-ready:` for that same head at once on every call, so it no longer waited. In a real project the orchestrator fell back to polling in the background, ended its turn and sat idle for over 30 minutes. `orq wait` now checks the base as `orq ship` last fetched it: for a head the base moved past it prints no `ship-ready:`, keeps working and adds a note, and with nothing else open it returns `ship-blocked:`, which names the merge unit to append.
+
 ## [0.8.6] - 2026-11-16
 
 ### Changed
