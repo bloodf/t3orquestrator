@@ -7,7 +7,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Optional account usage from a CLIProxyAPI (EasyCLIProxyAPI) management API. With a `usage` block in `~/.t3orq/config.json` (URL, the key's environment variable or file, and which proxy account each T3 instance uses), `orq` reads each account's used percent, reset time and quota cooldowns: at `orq sync`, and at most every `ttlSeconds` (default 300) on `wait`, `route`, `status`, `ask` and review launches. An instance at 90% or more of its window, or on a quota cooldown, is skipped until its reset instead of failing threads first; among the rest, accounts with more headroom go first. `orq status` and `orq sync` print a `usage:` line per instance and `orq route` a `headroom=` field. Without the block nothing changes. See [Account usage](docs/scheduling.md#account-usage).
+- Routing reads each instance's usage limits from T3's provider status cache (`$T3CODE_HOME/caches/<instance>.json`, written by T3's own usage probe). A model at 90% or more of a usage window that binds it (`usageThreshold` in the machine config) is skipped until the latest such window resets, instead of failing threads first; an instance T3 reports in error or signed out is skipped too, and readings over an hour old are ignored. Among the rest, models with more headroom go first. `orq status` and `orq sync` print a `usage:` line per instance, and `orq route` a `headroom=` field. Nothing to configure; without T3 usage data, routing is unchanged. See [Account usage](docs/scheduling.md#account-usage).
 
 ## [0.8.7] - 2026-11-16
 

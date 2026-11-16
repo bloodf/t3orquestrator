@@ -1,0 +1,51 @@
+{
+  "driver": "antigravity",
+  "status": "ready",
+  "enabled": true,
+  "auth": {
+    "status": "authenticated"
+  },
+  "usageLimits": {
+    "checkedAt": "2026-11-16T20:03:50.235Z",
+    "windows": [
+      {
+        "id": "3p-5h",
+        "label": "Claude & GPT (shared) · 5-hour",
+        "kind": "session",
+        "usedPercent": 0,
+        "windowDurationMins": 300
+      },
+      {
+        "id": "gemini-5h",
+        "label": "Gemini · 5-hour",
+        "kind": "session",
+        "usedPercent": 0,
+        "windowDurationMins": 300
+      },
+      {
+        "id": "3p-weekly",
+        "label": "Claude & GPT (shared) · Weekly",
+        "kind": "weekly",
+        "usedPercent": 99.63812,
+        "resetsAt": "2026-11-21T19:06:39.000Z",
+        "windowDurationMins": 10080
+      },
+      {
+        "id": "gemini-argon-wtu-weekly",
+        "label": "Gemini 4 Argon · Weekly",
+        "kind": "weekly",
+        "usedPercent": 100,
+        "resetsAt": "2026-11-20T22:52:48.000Z",
+        "windowDurationMins": 10080
+      },
+      {
+        "id": "gemini-weekly",
+        "label": "Gemini · Weekly",
+        "kind": "weekly",
+        "usedPercent": 100,
+        "resetsAt": "2026-11-20T23:44:13.000Z",
+        "windowDurationMins": 10080
+      }
+    ]
+  }
+}

@@ -60,7 +60,7 @@ Until some unit has passed its gate, only one unit is in flight. A plan with a b
 Among enabled, available models at or above the minimum tier, candidates are ordered by:
 
 1. lowest tier first (highest first for `decide`, the job `orq ask` routes: it wants the strongest model, and when every tier-4 model is cooling down or at its limit it takes the strongest free model rather than wait);
-2. then the account with more headroom, when [account usage](#account-usage) is configured: in quarters (75% or more left, 50-74%, 25-49%, under 25%), an instance whose usage is unknown counting as 50-74%, so small differences fall through to the rules below;
+2. then the model with more headroom, when T3 reports [account usage](#account-usage): in quarters (75% or more left, 50-74%, 25-49%, under 25%), an instance whose usage is unknown counting as 50-74%, so small differences fall through to the rules below;
 3. then the better record for this job class: the share of the model's last 10 recorded results that passed, once it has at least 3 (fewer count as neutral, 0.5, so a new model is not starved);
 4. then fewest running threads on that instance;
 5. then least recently used;
@@ -74,27 +74,15 @@ A model is skipped while it or its instance is cooling down, or while its instan
 
 ### Account usage
 
-Optional. `orq` can read each account's usage from a [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) management API (the core of EasyCLIProxyAPI), so it routes away from an account that is at or near its limit instead of finding out through failed threads. Without it, routing works as described above. Add a `usage` block to `~/.t3orq/config.json` by hand:
+T3 Code probes each provider instance's usage limits itself (codex, Claude, Antigravity, Grok and others) and keeps the last result in its provider status cache, `$T3CODE_HOME/caches/<instance>.json` (`T3CODE_HOME` defaults to `~/.t3`). `orq` reads that file for each instance whenever it routes, so it routes away from an account that is at or near its limit instead of finding out through failed threads. Nothing needs configuring, and T3 already knows which account each instance uses. When an instance has no such file, or T3 reports no usage for it (kimi, a proxied instance whose probe failed), routing works as described above. No `t3` command or MCP tool returns this data; the file is T3's own cache, read-only, and a T3 update can change it (see [T3 surface](t3-surface.md)).
 
-```json
-{
-  "usage": {
-    "url": "http://127.0.0.1:8317",
-    "keyEnv": "ORQ_CLIPROXY_KEY",
-    "accounts": { "codex": "<auth file name>", "antigravity-proxy": ["<account>", "<account>"] },
-    "threshold": 90,
-    "ttlSeconds": 300
-  }
-}
-```
-
-- `url`: the proxy's base URL. `orq` calls only `GET /v0/management/auth-files`, with a 3-second timeout.
-- `keyEnv` or `keyFile`: where the management key is, an environment variable name or an absolute path to a file that holds only the key. `orq` never writes the key anywhere; keep a key file at mode 0600.
-- `accounts`: T3 provider instance id to the proxy account it uses, by auth file `name`, `email`, `label`, `id` or `auth_index`. An instance can name a list: a pool that the proxy itself spreads over several accounts. The pool has the headroom of its best open account, and it is exhausted only when every account is. Instances not listed are routed as before. T3's display names do not reliably name the account behind an instance, so the map is never guessed.
-- `threshold` (default 90): at this used percent an instance cools down until its window resets.
-- `ttlSeconds` (default 300): how long `orq wait`, `route`, `status`, `ask` and review launches reuse the last reading, cached in `~/.t3orq/usage.json`. `orq sync` always reads afresh, and so does any command after `url` or `accounts` changed.
-
-From each account the proxy reports, `orq` takes the fullest usage window that has not reset (the `-Used-Percent` and `-Reset-At` quota signals; codex reports a weekly and a 5-hour window) and any quota cooldown on the whole credential. An instance at or over the threshold whose window has a reset time, or on such a cooldown, cools down until then (a full window with no reset time only ranks last by headroom), so it is skipped and `orq wait` reports `idle: … retry at <reset>` when nothing else can take the unit. This cooldown is computed on every read and never stored in the registry. Accounts that report no usage window (in CLIProxyAPI 8.0.63: antigravity, claude and kimi) only cool down when the proxy has them on a quota cooldown. The proxy observes an account's usage only on requests it makes with that account, so a reading can be hours old. That errs on the safe side: within a window usage only grows. When the proxy cannot be reached, `orq` keeps the last reading, says so in `status`, and tries again after the TTL.
+- A model is skipped while any usage window that binds it is at or over the threshold (machine `usageThreshold`, default 90, `orq config set --machine usageThreshold <1-100>`), until the latest reset among those windows, so two full windows wait for the later one. A full window with no reset time is looked at again after 5 minutes. Antigravity keeps one window per model family (`gemini-…`, `claude-…`, `gpt-…`, and `3p-…` shared by claude and gpt), and each binds only that family's models, as T3 itself decides; every other provider's windows bind all its models.
+- An instance T3 reports in error or signed out is skipped, and looked at again after 5 minutes.
+- A reading more than an hour old says nothing (T3 keeps the last bars after a failed probe), nor does a window whose reset has passed.
+- Among the rest, models with more headroom go first (see the order above): headroom is what is left of the fullest window that binds the model.
+- The usage cooldowns are computed on every read and never stored in the registry. `orq wait` reports `idle: … retry at <reset>` when every model a unit may use is at its limit.
+- One instance is one account in T3. An instance behind a proxy that rotates several accounts gets no usage from T3 (its probe fails), so it is routed as before.
+- Codex reset credits (`resetCredits`) are not counted: redeeming one is a step the user takes in T3.
 
 ## Failure ladders
 

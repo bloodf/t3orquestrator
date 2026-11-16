@@ -850,19 +850,21 @@ test('wait: a message left while the plan runs returns on the next poll', async 
   assert.equal(r.out, `message: from the user, through orq inbox; read it and follow it before anything else\n## ${new Date(NOW + 15000).toISOString()}\nstop after a\n`);
 });
 
-test('wait: an account at its usage limit gets no launch, and the registry keeps no usage cooldown', async (t) => {
+test('wait: an instance at its usage limit gets no launch, and the registry keeps no usage cooldown', async (t) => {
   const p = await makeProject(t, [unitSpec('a'), unitSpec('b')]);
-  const usage = { url: 'http://127.0.0.1:8317', keyEnv: 'ORQ_KEY', accounts: { pa: 'acct-a' } };
-  await fs.writeFile(path.join(p.home, 'config.json'), JSON.stringify({ cap: 2, usage }));
-  const reset = String(Math.floor(NOW / 1000) + 86400);
-  const files = [{ name: 'acct-a', quota: { signals: { 'X-Codex-Primary-Used-Percent': '97', 'X-Codex-Primary-Reset-At': reset } }, cooldowns: [] }];
-  const fetch = async () => ({ ok: true, status: 200, json: async () => ({ files }) });
-  const q = { ...p, env: { ...p.env, ORQ_KEY: 'k' } };
+  const t3home = path.join(p.root, 't3');
+  await fs.mkdir(path.join(t3home, 'caches'), { recursive: true });
+  const reset = new Date(NOW + 86400_000).toISOString();
+  await fs.writeFile(path.join(t3home, 'caches', 'pa.json'), JSON.stringify({
+    status: 'ready', auth: { status: 'authenticated' },
+    usageLimits: { checkedAt: new Date(NOW).toISOString(), windows: [{ id: 'primary', kind: 'weekly', usedPercent: 97, resetsAt: reset }] },
+  }));
+  const q = { ...p, env: { ...p.env, T3CODE_HOME: t3home } };
   const sim = simulator(p, { a: [['commit-complete']], b: [['commit-complete']] });
-  let r = await orq(['wait'], q, sim, { fetch });
-  for (let i = 0; i < 3 && !r.out.startsWith('done:'); i += 1) r = await orq(['wait'], q, sim, { fetch });
+  let r = await orq(['wait'], q, sim);
+  for (let i = 0; i < 3 && !r.out.startsWith('done:'); i += 1) r = await orq(['wait'], q, sim);
   assert.match(r.out, /^done: 2 units integrated at /, r.err);
   assert.deepEqual([...new Set(Object.values(sim.byUnit).flat().map((x) => x.instance))], ['pb']);
   const reg = JSON.parse(await fs.readFile(path.join(p.home, 'registry.json'), 'utf8'));
-  assert.equal(reg.instances.pa.cooldownUntil, null);
+  assert.equal(reg.models['pa::m2'].cooldownUntil, null);
 });

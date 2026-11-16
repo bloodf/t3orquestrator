@@ -1,0 +1,16 @@
+{
+  "driver": "codex",
+  "status": "ready",
+  "enabled": true,
+  "auth": {
+    "status": "unknown"
+  },
+  "usageLimits": {
+    "checkedAt": "2026-11-16T19:24:30.277Z",
+    "windows": [],
+    "unavailable": {
+      "reason": "probeFailed",
+      "message": "redacted"
+    }
+  }
+}

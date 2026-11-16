@@ -1,0 +1,25 @@
+{
+  "driver": "codex",
+  "status": "error",
+  "enabled": true,
+  "auth": {
+    "status": "unauthenticated"
+  },
+  "usageLimits": {
+    "checkedAt": "2026-11-14T22:45:27.164Z",
+    "windows": [
+      {
+        "id": "primary",
+        "kind": "weekly",
+        "label": "Weekly",
+        "usedPercent": 0,
+        "windowDurationMins": 10080,
+        "resetsAt": "2026-11-21T16:07:22.000Z"
+      }
+    ],
+    "resetCredits": {
+      "availableCount": 1,
+      "nextExpiresAt": "2026-12-12T22:20:26.000Z"
+    }
+  }
+}

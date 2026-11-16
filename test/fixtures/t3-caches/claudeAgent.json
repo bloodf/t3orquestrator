@@ -1,0 +1,29 @@
+{
+  "driver": "claudeAgent",
+  "status": "ready",
+  "enabled": true,
+  "auth": {
+    "status": "authenticated"
+  },
+  "usageLimits": {
+    "checkedAt": "2026-11-16T19:24:38.846Z",
+    "windows": [
+      {
+        "id": "seven_day",
+        "kind": "weekly",
+        "label": "Weekly",
+        "windowDurationMins": 10080,
+        "usedPercent": 61,
+        "resetsAt": "2026-11-17T07:00:00.032Z"
+      },
+      {
+        "id": "seven_day_fable",
+        "kind": "weekly",
+        "label": "Weekly · Fable",
+        "windowDurationMins": 10080,
+        "usedPercent": 66,
+        "resetsAt": "2026-11-17T07:00:00.032Z"
+      }
+    ]
+  }
+}

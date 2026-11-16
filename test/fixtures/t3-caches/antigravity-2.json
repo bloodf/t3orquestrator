@@ -1,0 +1,28 @@
+{
+  "driver": "antigravity",
+  "status": "ready",
+  "enabled": true,
+  "auth": {
+    "status": "authenticated"
+  },
+  "usageLimits": {
+    "checkedAt": "2026-11-16T20:03:50.238Z",
+    "windows": [
+      {
+        "id": "3p-weekly",
+        "label": "Claude & GPT (shared) · Weekly",
+        "kind": "weekly",
+        "usedPercent": 0,
+        "windowDurationMins": 10080
+      },
+      {
+        "id": "gemini-weekly",
+        "label": "Gemini · Weekly",
+        "kind": "weekly",
+        "usedPercent": 100,
+        "resetsAt": "2026-11-20T23:44:18.000Z",
+        "windowDurationMins": 10080
+      }
+    ]
+  }
+}

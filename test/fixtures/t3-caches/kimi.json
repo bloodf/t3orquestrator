@@ -1,0 +1,8 @@
+{
+  "driver": "acpRegistry",
+  "status": "ready",
+  "enabled": true,
+  "auth": {
+    "status": "authenticated"
+  }
+}
