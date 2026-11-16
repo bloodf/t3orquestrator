@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-11-16
+
+### Fixed
+
+- In `continuous` mode a failed final run's result was lost: the next run starts on the next head at once and removes `gate-1.json`, so the orchestrator often had only `checks failed (exit 1)` to go on. Each final result is now also written to `.orq/units/integration/head-<head12>.json`, which later runs leave in place, and the early `final-fail:` line names it.
+
 ## [0.8.2] - 2026-11-15
 
 ### Changed

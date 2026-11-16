@@ -152,7 +152,7 @@ test('decide in continuous: ship-ready when a passed head is not shipped, after 
 
 test('decide in continuous: an early final-fail once per failing head while units are open', () => {
   const failing = st(aIn, { final: { verdict: 'fail', failures: ['boom'], head: C } });
-  assert.deepEqual(say(failing), [`final-fail: ${C.slice(0, 12)} fails the final checks while units are still open; boom`]);
+  assert.deepEqual(say(failing), [`final-fail: ${C.slice(0, 12)} fails the final checks while units are still open; boom; details in .orq/units/integration/head-${C.slice(0, 12)}.json`]);
   assert.equal(say({ ...failing, plan: { ...failing.plan, noted: C } }), null); // already reported: b runs on
   assert.equal(say(failing, {}, false), null);
 });

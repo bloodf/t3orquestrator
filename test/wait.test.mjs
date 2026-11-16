@@ -809,7 +809,10 @@ test('wait in continuous mode: a failing head is reported once while units are o
   const r = await orq(['wait'], p, sim);
   assert.equal(r.code, 0, r.err);
   const st = await readState(p.repo);
-  assert.equal(r.out.split('\n')[0], `final-fail: ${st.plan.final.head.slice(0, 12)} fails the final checks while units are still open; ${st.plan.final.failures.join('; ')}`);
+  const head12 = st.plan.final.head.slice(0, 12);
+  assert.equal(r.out.split('\n')[0], `final-fail: ${head12} fails the final checks while units are still open; ${st.plan.final.failures.join('; ')}; details in .orq/units/integration/head-${head12}.json`);
+  const kept = JSON.parse(await fs.readFile(path.join(p.repo, '.orq', 'units', 'integration', `head-${head12}.json`), 'utf8'));
+  assert.equal(kept.headSha, st.plan.final.head); // kept per head: the next rolling run does not remove it
   assert.equal(st.plan.noted, st.plan.final.head);
   const again = await orq(['wait', '--max-seconds', '60'], p, sim);
   assert.match(again.out, /^timeout: 1 running/);
