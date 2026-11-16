@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-16
+
 ### Added
 
 - Routing reads each instance's usage limits from T3's provider status cache (`<T3 home>/caches/<instance>.json`, written by T3's own usage probe; `orq sync` records the T3 home as `t3Home` for commands run outside T3). A model at 90% or more of a usage window that binds it (`usageThreshold` in the machine config) is skipped until the latest such window resets, instead of failing threads first; an instance T3 reports in error or signed out is skipped too, and readings over an hour old are ignored. Among the rest, models with more headroom go first. `orq status` and `orq sync` print a `usage:` line per instance, and `orq route` a `headroom=` field. Nothing to configure; without T3 usage data, routing is unchanged. See [Account usage](docs/scheduling.md#account-usage).
