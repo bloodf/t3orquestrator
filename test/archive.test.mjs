@@ -243,7 +243,8 @@ test('status with no plan, archives listed; summary of an archived plan', async 
   const lines = s.out.split('\n');
   assert.equal(lines[0], 'plan: none');
   assert.match(lines[1], /^cap=2 active=0 blocked=0 gates=0 machine_leases=0$/);
-  assert.equal(lines[2], 'archives: 1 (latest p1)');
+  assert.match(lines[2], /^usage: no T3 provider cache in /);
+  assert.equal(lines[3], 'archives: 1 (latest p1)');
   assert.deepEqual(JSON.parse((await orq(['status', '--json'], p)).out).archives, { count: 1, latest: 'p1' });
   const sum = await orq(['summary', '--plan', 'p1'], p);
   assert.equal(sum.code, 0, sum.err);

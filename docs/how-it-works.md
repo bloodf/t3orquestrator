@@ -34,7 +34,7 @@ A plan can grow. Append units to `plan.json` after `done` and call `orq wait` ag
 | `~/.t3orq/kit` | machine | The kit checkout the stub cloned |
 | `~/.t3orq/registry.json` | machine | Provider instances and models, tiers, health, cooldowns |
 | `~/.t3orq/leases/` | machine | One file per thread `orq` started; the cap counts these |
-| `~/.t3orq/config.json` | machine | `cap`, `perInstanceLimit`, `usageThreshold` |
+| `~/.t3orq/config.json` | machine | `cap`, `perInstanceLimit`, `usageThreshold`, `t3Home` (T3's data directory, recorded by `orq sync`) |
 | `~/.t3orq/tools.json` | machine | Your own tool catalog, tried before the kit's |
 | `.orq/config.json` | project | `autonomy`, `questions`, `base`, `cap` (optional), `checks`, resolved slots, scheduler settings, the orchestrator's own model |
 | `.orq/plan.json`, `.orq/orders/` | project | The plan and its work orders |

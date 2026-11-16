@@ -51,6 +51,7 @@ test('status: plan line, counts, one line per unit, and the note', async (t) => 
     `integration: orq/p1/integration head=${A.slice(0, 12)} base=${A.slice(0, 12)}`,
     'cap=3 active=1 blocked=1 gates=0 machine_leases=3 expired_leases=1',
     'providers: 2 usable (pa, pb); 0 disabled in T3; 0 disabled by you; 0 cooling',
+    `usage: no T3 provider cache in ${path.join(p.env.T3CODE_HOME, 'caches')}`,
     'a running attempt=1 model=pa::m2 tier=2 thread=th1',
     'b blocked attempt=1 model=pa::m2 tier=2 thread=th2',
     'c failed 3 provider failures',
@@ -92,7 +93,7 @@ test('status: a project cap is shown with this project\'s leases, and named when
 test('status: a plan that has not started', async (t) => {
   const p = await makeProject(t, [unitSpec('a')]);
   const r = await orq(['status'], p);
-  assert.match(r.out, /^plan: test goal \(not started\)\ncap=.*\nproviders: .*\na queued\nnote: /);
+  assert.match(r.out, /^plan: test goal \(not started\)\ncap=.*\nproviders: .*\nusage: no T3 provider cache in .*\na queued\nnote: /);
 });
 
 test('unit retry: only from failed, resets the budget, optional tier', async (t) => {
@@ -146,9 +147,9 @@ test('status: flags, tiers and the authors line once units are integrated', asyn
   assert.equal(r.code, 0, r.err);
   const lines = r.out.split('\n');
   assert.equal(lines[1], `integration: orq/p1/integration head=${C.slice(0, 12)} base=${A.slice(0, 12)}`);
-  assert.equal(lines[4], 'a integrated attempt=1 model=pb::m3 tier=3 thread=th1 flags=flaky,placeholder');
-  assert.equal(lines[5], 'b integrated attempt=1 model=pa::m4 tier=4 thread=th2');
-  assert.equal(lines[7], 'authors: max_tier=4 family=fam-c');
+  assert.equal(lines[5], 'a integrated attempt=1 model=pb::m3 tier=3 thread=th1 flags=flaky,placeholder');
+  assert.equal(lines[6], 'b integrated attempt=1 model=pa::m4 tier=4 thread=th2');
+  assert.equal(lines[8], 'authors: max_tier=4 family=fam-c');
   const json = JSON.parse((await orq(['status', '--json'], p)).out);
   assert.deepEqual(json.integration, { branch: 'orq/p1/integration', head: C, base: A });
   assert.deepEqual(json.authors, { maxTier: 4, family: 'fam-c' });

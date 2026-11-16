@@ -54,7 +54,9 @@ export async function makeProject(t, units, { cap = 2, checks = {}, registry = R
   }));
   await fs.writeFile(path.join(home, 'registry.json'), JSON.stringify(registry));
   await fs.writeFile(path.join(home, 'config.json'), JSON.stringify({ cap }));
-  return { root, repo, home, env: { T3ORQ_HOME: home }, baseSha: sh(repo, 'rev-parse', 'HEAD') };
+  const t3home = path.join(root, 't3'); // T3's data directory, empty: no provider caches, so no usage
+  await fs.mkdir(t3home);
+  return { root, repo, home, env: { T3ORQ_HOME: home, T3CODE_HOME: t3home }, baseSha: sh(repo, 'rev-parse', 'HEAD') };
 }
 
 // Simulate a worker: commit files onto `branch` without touching other checkouts.

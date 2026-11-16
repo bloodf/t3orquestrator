@@ -68,6 +68,21 @@ test('route: the exhausted model is skipped and the rest carry their headroom', 
   assert.match(lines[0], / headroom=34%/);
 });
 
+test('sync records T3CODE_HOME as the machine t3Home, which later commands read without it', async (t) => {
+  const p = await project(t);
+  const caps = JSON.stringify({ providers: ['pa', 'pb'].map((id) => ({ providerInstanceId: id, models: ['m2'], constraints: [] })) });
+  assert.equal((await orq(['sync'], p, { stdin: caps })).code, 0);
+  assert.equal(JSON.parse(await fs.readFile(path.join(p.home, 'config.json'), 'utf8')).t3Home, p.t3home);
+  const bare = { ...p, env: { T3ORQ_HOME: p.home } };
+  assert.ok((await orq(['status'], bare, { t3home: null })).out.split('\n').includes(usageLine));
+});
+
+test('status --json lists only instances with something to say', async (t) => {
+  const p = await project(t);
+  await fs.writeFile(path.join(p.t3home, 'caches', 'pb.json'), cache('kimi'));
+  assert.deepEqual(Object.keys(JSON.parse((await orq(['status', '--json'], p)).out).usage), ['pa']);
+});
+
 test('sync prints the usage line', async (t) => {
   const p = await project(t);
   const caps = JSON.stringify({ providers: ['pa', 'pb'].map((id) => ({ providerInstanceId: id, models: ['m2'], constraints: [] })) });
@@ -86,12 +101,12 @@ test('a signed-out instance is down; no plan still shows usage', async (t) => {
   assert.equal((await orq(['route', '--job', 'implement'], p)).code, 4);
 });
 
-test('no T3 usage: no usage line, no usage key, routing as before', async (t) => {
+test('no T3 usage: the searched directory is named, no usage key, routing as before', async (t) => {
   const p = await project(t);
   const none = { t3home: path.join(p.root, 'empty') };
   const r = await orq(['status'], p, none);
   assert.equal(r.code, 0, r.err);
-  assert.doesNotMatch(r.out, /usage/);
+  assert.ok(r.out.split('\n').includes(`usage: no T3 provider cache in ${path.join(p.root, 'empty', 'caches')}`), r.out);
   assert.equal('usage' in JSON.parse((await orq(['status', '--json'], p, none)).out), false);
   assert.match((await orq(['route', '--job', 'implement'], p, none)).out, /^1 pa m2 tier=2 family=f unconfirmed\n/);
 });

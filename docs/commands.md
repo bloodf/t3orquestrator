@@ -73,7 +73,7 @@ enabled: <ids>
 unavailable: <n>
 synced: <n> instances (<n> enabled), <n> models (<n> confirmed)
 providers: … (as for init)
-usage: <instance> <used>% <window>[ resets <iso time>]|down|stale; …   (only when T3 reports usage)
+usage: <instance> <used>% <window>[ resets <iso time>]|down|stale|unreadable; …   (see status)
 inferred: <keys> — set with: orq tier set <key> <1-4>
 ```
 
@@ -126,7 +126,7 @@ Lists the eligible models in the order `orq` would use them:
 | Scope | Keys |
 |---|---|
 | project (`.orq/config.json`) | `autonomy`, `base`, `cap`, `checks.setup`, `checks.unit`, `checks.full`, `pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`, `finalTimeoutMinutes`, `questions`, `share`, `goal` |
-| machine (`~/.t3orq/config.json`) | `cap`, `perInstanceLimit`, `usageThreshold` (1-100, default 90: see [Account usage](scheduling.md#account-usage)) |
+| machine (`~/.t3orq/config.json`) | `cap`, `perInstanceLimit`, `usageThreshold` (1-100, default 90: see [Account usage](scheduling.md#account-usage)); `t3Home` is recorded by `sync` |
 
 `checks.unit` runs in every unit's gate after the evidence. `checks.full` runs once on the integration head.
 
@@ -190,14 +190,14 @@ integration: <branch> head=<sha> base=<sha>
 ship: green=<sha12|none> shipped=<sha12|none> ships=<n>   (continuous mode only)
 cap=<n> active=<n> blocked=<n> gates=<n> machine_leases=<n>[ expired_leases=<n>][ project_cap=<n> project_leases=<n>]
 providers: … (as for init)
-usage: <instance> <used>% <window>[ resets <iso time>]|down|stale; …
+usage: <instance> <used>% <window>[ resets <iso time>]|down|stale|unreadable; …   or   usage: no T3 provider cache in <dir>
 <unit> <state>[ attempt=<n>][ model=<key>][ tier=<n>][ wanted_tier=<n>][ continued][ thread=<id>][ flags=<kinds>][ <reason>]
 authors: max_tier=<n> family=<family>
 cooling: <instance> until <iso time>, …
 note: cap covers threads orq started; threads started by hand are not counted
 ```
 
-When the machine `cap` is an override above what the machine computes, a line `note: cap <n> is an override; this machine computes <m> (<reasons>)` comes before the last note; `orq wait` prints the same note once per call. When the project sets its own `cap`, the cap line ends with `project_cap=<n> project_leases=<n>` (this project's live leases), and when that cap leaves fewer free slots than the machine cap does, a line `note: project cap <n> is the limit in force: <k> slots free for this project, <m> under the machine cap <c>` comes before the last note. `--json` has `projectCap` (null when unset) and `projectLeases`. The `goal:` line is the standing goal from the project config; the `plan:` line and `--json` `plan.goal` are the running plan's own goal. A line `ask: decision <n> running thread=<id> model=<key>` follows the `authors:` line for each decision thread still running, then `abandoned: thread <id> of unit <u> holds a slot until it ends` for each thread `orq` gave up on whose lease still counts against the cap. The `usage:` line appears only when T3 reports [account usage](scheduling.md#account-usage), also between plans: per instance its fullest window, `down` (T3 reports it in error or signed out) or `stale` (the reading is over an hour old); `--json` then has the reading per instance as `usage`. The `integration:`, `authors:`, `ask:` and `cooling:` lines appear only when they apply. `wanted_tier` appears when the unit was launched below its minimum tier because no model at that tier was usable.
+When the machine `cap` is an override above what the machine computes, a line `note: cap <n> is an override; this machine computes <m> (<reasons>)` comes before the last note; `orq wait` prints the same note once per call. When the project sets its own `cap`, the cap line ends with `project_cap=<n> project_leases=<n>` (this project's live leases), and when that cap leaves fewer free slots than the machine cap does, a line `note: project cap <n> is the limit in force: <k> slots free for this project, <m> under the machine cap <c>` comes before the last note. `--json` has `projectCap` (null when unset) and `projectLeases`. The `goal:` line is the standing goal from the project config; the `plan:` line and `--json` `plan.goal` are the running plan's own goal. A line `ask: decision <n> running thread=<id> model=<key>` follows the `authors:` line for each decision thread still running, then `abandoned: thread <id> of unit <u> holds a slot until it ends` for each thread `orq` gave up on whose lease still counts against the cap. The `usage:` line shows [account usage](scheduling.md#account-usage) as T3 reports it, also between plans: per instance its fullest window, `down` (T3 reports it in error or signed out), `stale` (the reading is over an hour old) or `unreadable`; instances with nothing to report are left out, and the line too when none has anything. When no instance has a T3 cache file it reads `usage: no T3 provider cache in <dir>`, naming the directory searched. `--json` has the reported instances as `usage` (absent when none). The `integration:`, `authors:`, `ask:` and `cooling:` lines appear only when they apply. `wanted_tier` appears when the unit was launched below its minimum tier because no model at that tier was usable.
 
 ## unit
 

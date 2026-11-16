@@ -1,5 +1,6 @@
 {
   "driver": "acpRegistry",
+  "checkedAt": "2026-11-16T20:09:50.179Z",
   "status": "ready",
   "enabled": true,
   "auth": {

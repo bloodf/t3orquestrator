@@ -6,6 +6,7 @@ import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { instanceUsage, withUsage } from '../lib/usage.mjs';
 import { readUsage } from '../lib/usage-source.mjs';
+import { usageLine } from '../lib/providers.mjs';
 import { route } from '../lib/route.mjs';
 
 // Real T3 provider status caches ($T3CODE_HOME/caches/<instance>.json), redacted to status, auth status and usageLimits.
@@ -28,13 +29,33 @@ test('instanceUsage reads the windows of a T3 provider snapshot', () => {
   assert.deepEqual(instanceUsage(cache('kimi'), NOW).windows, []); // no usage reported: unknown
   assert.deepEqual(instanceUsage(cache('durindoor-api'), NOW).windows, []); // probe failed: unknown
   assert.equal(instanceUsage(null, NOW), null);
-  assert.equal(instanceUsage({ usageLimits: { windows: 'x' } }, NOW).windows.length, 0); // malformed: nothing
 });
 
-test('instanceUsage: an errored or signed-out instance is down', () => {
+test('instanceUsage: an errored or signed-out instance is down, only while its snapshot is fresh', () => {
   assert.equal(instanceUsage(cache('codex-2'), NOW).down, true);
   assert.equal(instanceUsage({ ...cache('codex'), status: 'error' }, NOW).down, true);
   assert.equal(instanceUsage({ ...cache('codex'), auth: { status: 'unauthenticated' } }, NOW).down, true);
+  assert.equal(instanceUsage(cache('codex-2'), Date.parse('2026-11-16T20:02:18.481Z') + H + 1).down, false);
+  const { checkedAt: _c, ...undated } = cache('codex-2');
+  assert.equal(instanceUsage(undated, NOW).down, false);
+});
+
+test('instanceUsage: no checkedAt, or one over an hour ahead, is stale; a little ahead is fresh', () => {
+  const c = cache('codex');
+  const { checkedAt: _c, ...limits } = c.usageLimits;
+  assert.deepEqual([instanceUsage({ ...c, usageLimits: limits }, NOW).stale, instanceUsage({ ...c, usageLimits: limits }, NOW).windows], [true, []]);
+  const at = (t) => instanceUsage({ ...c, usageLimits: { ...c.usageLimits, checkedAt: new Date(t).toISOString() } }, NOW);
+  assert.equal(at(NOW + 60_000).stale, false);
+  assert.equal(at(NOW + H + 1).stale, true);
+});
+
+test('instanceUsage: a resetsAt without a zone is UTC; malformed usageLimits are unreadable; none is nothing', () => {
+  const c = cache('codex');
+  const local = { ...c, usageLimits: { ...c.usageLimits, windows: [{ id: 'p', usedPercent: 50, resetsAt: '2026-11-19T19:38:58' }] } };
+  assert.equal(instanceUsage(local, NOW).windows[0].resetAt, Date.parse('2026-11-19T19:38:58Z'));
+  assert.equal(instanceUsage({ ...c, usageLimits: { checkedAt: c.usageLimits.checkedAt, windows: 'x' } }, NOW).unreadable, true);
+  assert.equal(instanceUsage({ ...c, usageLimits: 7 }, NOW).unreadable, true);
+  assert.equal(instanceUsage(cache('kimi'), NOW).unreadable, undefined);
 });
 
 test('instanceUsage: a window past its reset is dropped; a reading over an hour old is stale', () => {
@@ -50,7 +71,7 @@ const mod = (instance, model, tier = 2) => [`${instance}::${model}`, {
 const REG = deepFreeze({
   version: 1,
   instances: { codex: inst('codex'), cx: inst('codex'), ag: inst('antigravity') },
-  models: Object.fromEntries([mod('codex', 'gpt-x'), mod('cx', 'gpt-x'), mod('ag', 'gemini-3-pro'), mod('ag', 'claude-sonnet'), mod('ag', 'gpt-oss')]),
+  models: Object.fromEntries([mod('codex', 'gpt-x'), mod('cx', 'gpt-x'), mod('ag', 'gemini-3-pro'), mod('ag', 'gemini-3-flash'), mod('ag', 'gemini-argon-1'), mod('ag', 'claude-sonnet'), mod('ag', 'gpt-oss')]),
 });
 const usage = (windows, over = {}) => ({ checkedAt: NOW, down: false, stale: false, windows, ...over });
 const w = (id, used, resetAt = NOW + H) => ({ id, used, resetAt });
@@ -83,6 +104,11 @@ test('withUsage: antigravity windows apply to their model family, 3p to claude a
   const all = withUsage(REG, { ag: instanceUsage(cache('antigravity'), NOW) }, { now: NOW });
   assert.equal(all.models['ag::claude-sonnet'].cooldownUntil, Date.parse('2026-11-21T19:06:39.000Z')); // 3p-weekly 99.6%
   assert.equal(all.models['ag::gemini-3-pro'].cooldownUntil, Date.parse('2026-11-20T23:44:13.000Z')); // latest full gemini window
+  // gemini-<x>-… binds only the models whose slug has <x>: argon full alone leaves gemini-3-flash free
+  const argon = withUsage(REG, { ag: usage([w('gemini-argon-wtu-weekly', 100), w('gemini-weekly', 20), w('gemini-5h', 0)]) }, { now: NOW });
+  assert.equal(argon.models['ag::gemini-3-flash'].cooldownUntil, null);
+  assert.equal(argon.models['ag::gemini-3-flash'].headroom, 0.8);
+  assert.equal(argon.models['ag::gemini-argon-1'].cooldownUntil, NOW + H);
 });
 
 test('withUsage: a down instance cools until the next reading; a stale one is unknown', () => {
@@ -104,16 +130,41 @@ test('route skips the exhausted model, retries at its reset, and prefers the mos
   assert.ok(none.retryAt > NOW && none.retryAt <= NOW + H);
 });
 
-test('readUsage reads each instance cache under T3CODE_HOME, else ~/.t3; a missing or damaged file is skipped', async (t) => {
+async function t3home(t, files) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orq-t3home-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   await fs.mkdir(path.join(dir, 'caches'));
-  await fs.writeFile(path.join(dir, 'caches', 'codex.json'), JSON.stringify(cache('codex')));
-  await fs.writeFile(path.join(dir, 'caches', 'cx.json'), '{damaged');
-  const ctx = { env: { T3CODE_HOME: dir }, now: () => NOW, deps: { homedir: () => '/nonexistent' } };
-  const u = await readUsage(ctx, REG);
-  assert.deepEqual(Object.keys(u), ['codex']);
-  assert.equal(u.codex.windows[0].used, 100);
-  const viaHome = await readUsage({ env: {}, now: () => NOW, deps: { homedir: () => path.dirname(dir) } }, REG);
-  assert.deepEqual(viaHome, {}); // <home>/.t3/caches does not exist
+  for (const [id, text] of Object.entries(files)) await fs.writeFile(path.join(dir, 'caches', `${id}.json`), text);
+  return dir;
+}
+
+test('readUsage: T3CODE_HOME, else the machine t3Home, else ~/.t3; a damaged file is unreadable', async (t) => {
+  const dir = await t3home(t, { codex: JSON.stringify(cache('codex')), cx: '{damaged', ag: JSON.stringify(cache('kimi')) });
+  const ctx = (env, home = '/nonexistent') => ({ env, now: () => NOW, deps: { homedir: () => home } });
+  const u = await readUsage(ctx({ T3CODE_HOME: dir }), REG, {});
+  assert.equal(u.dir, path.join(dir, 'caches'));
+  assert.deepEqual(Object.keys(u.instances).sort(), ['ag', 'codex', 'cx']);
+  assert.equal(u.instances.codex.windows[0].used, 100);
+  assert.deepEqual(u.instances.cx, { unreadable: true });
+  assert.equal((await readUsage(ctx({}), REG, { t3Home: dir })).dir, path.join(dir, 'caches'));
+  const fallback = await readUsage(ctx({}, '/h'), REG, {});
+  assert.deepEqual([fallback.dir, fallback.instances], [path.join('/h', '.t3', 'caches'), {}]);
+});
+
+test('readUsage reads a file again once when it does not parse (T3 may be writing it)', async (t) => {
+  const dir = await t3home(t, { codex: JSON.stringify(cache('codex')) });
+  let reads = 0;
+  const readFile = async (f, enc) => { reads += 1; return reads === 1 ? '{"half' : fs.readFile(f, enc); };
+  const u = await readUsage({ env: { T3CODE_HOME: dir }, now: () => NOW, deps: { readFile } }, { instances: { codex: inst('codex') }, models: {} }, {});
+  assert.equal(u.instances.codex.windows[0].used, 100);
+  assert.equal(reads, 2);
+});
+
+test('usageLine: windows, down, stale, unreadable; nothing applies, nothing; no file at all names the directory', () => {
+  const line = (instances) => usageLine({ dir: '/t3/caches', instances });
+  assert.deepEqual(line({
+    a: usage([w('p', 99.6, Date.parse('2026-11-17T00:00:00Z'))]), b: usage([], { down: true }), c: usage([], { stale: true }), d: { unreadable: true }, e: usage([]),
+  }), ['usage: a 100% p resets 2026-11-17T00:00:00.000Z; b down; c stale; d unreadable']);
+  assert.deepEqual(line({ e: usage([]) }), []);
+  assert.deepEqual(line({}), ['usage: no T3 provider cache in /t3/caches']);
 });
