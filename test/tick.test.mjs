@@ -144,6 +144,22 @@ test('rule 2: a lost gate is restarted once, then needs judgment; concurrency li
 });
 function r2(r) { return r.actions.filter((a) => a.type === 'gate-start').map((a) => `${a.type}:${a.unit}`); }
 
+test('fix units go first: a fix unit takes the free gate slot and the free launch slot before earlier units', () => {
+  const fixLast = { goal: 'g', units: [unit('a'), unit('b'), unit('f2', { job: 'fix' }), unit('c'), unit('f', { job: 'fix' })] };
+  const waiting = [launched('b'), ended('b'), launched('f'), ended('f'), launched('f2'), ended('f2')];
+  assert.deepEqual(r2(go(waiting, { plan: fixLast })), ['gate-start:f2']);
+  // the plan's own order still holds among fix units and among the others
+  assert.deepEqual(r2(go(waiting, { plan: fixLast, config: { gateConcurrency: 3 } })), ['gate-start:f2', 'gate-start:f', 'gate-start:b']);
+  const one = go(doneA, { plan: fixLast, cap: 1 });
+  assert.deepEqual(launches(one).map((x) => x.unit), ['f2']);
+  assert.deepEqual(one.report.slotWaiting, ['f', 'b', 'c']);
+  // feedback: a fix unit's failed gate gets the one free slot before an earlier unit's
+  const failedBoth = [...doneA, launched('b'), ended('b'), gateStarted('b'), gatedEv('b', 'fail'),
+    launched('f'), ended('f'), gateStarted('f'), gatedEv('f', 'fail')];
+  const fb = go(failedBoth, { plan: fixLast, cap: 1 }).actions.filter((x) => x.type === 'send-feedback').map((x) => x.unit);
+  assert.deepEqual(fb, ['f']);
+});
+
 test('rule 3: provider failure removes the lease, records failure, and relaunches on another key (the failed one cools down)', () => {
   const r = go([launched('a')], { threads: { 't-a': thread('t-a', { status: 'failed' }) } });
   assert.deepEqual(evTypes(r), ['thread-ended:a']);

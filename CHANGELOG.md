@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-11-16
+
+### Changed
+
+- Units with `job: "fix"` now take free launch, feedback and gate slots before other ready units. Before, they waited in plan order, and a fix appended at the end of a long plan waited behind earlier units. In a real project, a fix for a failed final check waited 10 minutes for a gate slot. A final run then started on a head without the fix and failed again, costing one 23-minute run.
+
 ## [0.8.5] - 2026-11-16
 
 ### Changed

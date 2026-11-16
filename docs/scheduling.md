@@ -51,7 +51,7 @@ Each poll of `orq wait` refreshes the heartbeat on its project's leases. A lease
 
 ## Start one unit first
 
-Until some unit has passed its gate, only one unit is in flight. A plan with a bad assumption, a wrong check command or a model that cannot do the job fails once, not in parallel. After the first pass, ready units launch as slots free, in plan order. Once an archived plan of the project has integrated a unit, its setup and checks have worked, so later plans skip this wait; an archive whose units all failed, or one archived before it started, does not count.
+Until some unit has passed its gate, only one unit is in flight. A plan with a bad assumption, a wrong check command or a model that cannot do the job fails once, not in parallel. After the first pass, ready units launch as slots free, in plan order, except that units with `job: "fix"` go first; the same holds for feedback and free gate slots. Once an archived plan of the project has integrated a unit, its setup and checks have worked, so later plans skip this wait; an archive whose units all failed, or one archived before it started, does not count.
 
 ## Routing
 
