@@ -620,10 +620,26 @@ test('gate-run: a unit that fails only the tests its red base head fails passes,
   assert.deepEqual([passed.verdict, passed.failures, passed.flags.map((f) => f.kind)], ['pass', [], ['pre-existing-failures']]);
   assert.deepEqual(passed.steps.map((x) => x.name), ['evidence', 'checks', 'checks (retry)']); // as they ran
   assert.equal(fsSync.existsSync(gateFile(s.p.repo, 'a', 1, 'output.log')), false);
+  // a fix unit exists to fix the base's failures: they are never excused for it
+  const planFile = path.join(s.p.repo, '.orq', 'plan.json');
+  const plan = JSON.parse(await fs.readFile(planFile, 'utf8'));
+  await fs.writeFile(planFile, JSON.stringify({ ...plan, units: plan.units.map((x) => ({ ...x, job: 'fix' })) }));
+  await orq(['gate-run', 'a', '1', sha]);
+  const fix = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'a', 1, 'json'), 'utf8'));
+  assert.deepEqual([fix.verdict, fix.failures, fix.flags], ['fail', ['checks failed (exit 1)'], []]);
+  await fs.writeFile(planFile, JSON.stringify(plan));
   output += '(fail) spools: rejects a negative weight [1.00ms]\n';
   await orq(['gate-run', 'a', '1', sha]);
   const failed = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'a', 1, 'json'), 'utf8'));
   assert.deepEqual([failed.verdict, failed.failures, failed.flags], ['fail', ['checks failed (exit 1)'], []]);
+  // a gate that dies mid-step leaves no output file behind either
+  const dying = async (c, { logFile }) => {
+    if (c !== 'false') return { code: 0, output: '', timedOut: false };
+    fsSync.appendFileSync(logFile, 'partial\n');
+    throw new Error('runner died');
+  };
+  assert.equal(await cli(['gate-run', 'a', '1', sha], { stdout: quiet, stderr: quiet, env: s.p.env, cwd: s.p.repo, deps: { run: dying } }), 1);
+  assert.equal(fsSync.existsSync(gateFile(s.p.repo, 'a', 1, 'output.log')), false);
 });
 
 test('gate-run: a final gate that fails before any step names no output', async (t) => {

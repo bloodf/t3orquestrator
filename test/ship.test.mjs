@@ -8,6 +8,7 @@ import { createGit, defaultExec } from '../lib/git.mjs';
 import { commit, readState } from '../lib/ledger.mjs';
 import { readLines } from '../lib/store.mjs';
 import { staleBase, syncBase } from '../lib/commands/wait-sync.mjs';
+import { mergeBase } from '../lib/integrate.mjs';
 import {
   makeProject, unitSpec, commitOn, sh,
 } from './support/project.mjs';
@@ -231,10 +232,9 @@ test('ship: a head not newer than the shipped one is refused before anything is 
 
 test('ship --title --body-file: the orchestrator writes the title and summary; orq adds Closes lines and the checks line', async (t) => {
   const p = await shipProject(t, {}, [unitSpec('a', { title: '#12 #14: add a' }), unitSpec('b'), unitSpec('c')]);
-  const summary = path.join(p.root, 'summary.md');
-  await fs.writeFile(summary, 'Shops can now export their catalogue.\n\nValidated with the export suite.\n');
+  await fs.writeFile(path.join(p.repo, '.orq', 'body.md'), 'Shops can now export their catalogue.\n\nValidated with the export suite.\n');
   const gh = fakeGh({ remote: p.remote });
-  const r = await orq(['ship', '--title', 'feat(shop): export the catalogue', '--body-file', summary], p, { ghExec: gh.exec });
+  const r = await orq(['ship', '--title', '  feat(shop): export the catalogue ', '--body-file', '.orq/body.md'], p, { ghExec: gh.exec }); // relative to the project
   assert.equal(r.code, 0, r.err);
   const create = gh.calls.find((a) => a[1] === 'create');
   assert.equal(create[create.indexOf('--title') + 1], 'feat(shop): export the catalogue');
@@ -258,14 +258,26 @@ test('ship: a title or summary that breaks the rules ships nothing', async (t) =
   assert.equal(p.remoteSha('refs/heads/main'), p.baseSha);
 });
 
+test('ship: a default title that credits a tool or model ships nothing and asks for --title', async (t) => {
+  const p = await shipProject(t, {}, [unitSpec('a', { title: '#3 Written by Claude: add a' }), unitSpec('b'), unitSpec('c')]);
+  const gh = fakeGh({ remote: p.remote });
+  const r = await orq(['ship'], p, { ghExec: gh.exec });
+  assert.deepEqual([r.code, r.err, gh.calls], [2, 'orq: ship: the title made from the unit titles, "Written by Claude: add a", credits a tool or model ("Written by Claude"); pass --title; nothing was shipped\n', []]);
+  assert.equal(p.remoteSha('refs/heads/main'), p.baseSha);
+});
+
 // orq wait merging origin's base: real git against the bare remote, called the way `orq wait` calls it
-function syncRun(p, calls = []) {
-  const exec = (cmd, args, opts) => { calls.push(args.includes('fetch') ? 'fetch' : (args.includes('--no-ff') && 'merge') || ''); return defaultExec(cmd, args, opts); };
+function syncRun(p, calls = [], at = { now: NOW }) {
+  const timeouts = [];
+  const exec = (cmd, args, opts) => {
+    calls.push(args.includes('fetch') ? 'fetch' : (args.includes('--no-ff') && 'merge') || '');
+    if (args.includes('fetch')) timeouts.push(opts.timeoutMs);
+    return defaultExec(cmd, args, opts);
+  };
   const run = { config: { base: 'main' }, fx: { git: createGit({ exec }) }, notes: [] };
-  const at = { now: NOW };
   const ctx = { cwd: p.repo, now: () => at.now, deps: { gitExec: exec } };
   return {
-    run, ctx, at, calls, sync: () => syncBase(ctx, run),
+    run, ctx, at, calls, timeouts, sync: () => syncBase(ctx, run),
   };
 }
 
@@ -292,12 +304,11 @@ test('sync: orq merges origin\'s new base into the integration branch, records i
   assert.deepEqual(s.run.notes, [`note: merged origin/main (${O.slice(0, 12)}) into the integration branch at ${H.slice(0, 12)}; the final checks run on it`]);
   assert.deepEqual(staleBase(s.ctx, s.run.config, st.plan), { base: 'main', synced: true, files: [] }); // X is behind, the head is not
   assert.match((await orq(['status'], p)).out, new RegExp(`synced=${O.slice(0, 12)}->${H.slice(0, 12)}`));
-  // nothing new on origin: no merge; the fetch waits a few minutes
+  // the merged head waits for its final verdict: no fetch, no merge meanwhile
   await s.sync();
-  assert.deepEqual(s.calls.filter(Boolean), ['fetch', 'merge']);
   s.at.now += 6 * 60_000;
   await s.sync();
-  assert.deepEqual(s.calls.filter(Boolean), ['fetch', 'merge', 'fetch']);
+  assert.deepEqual(s.calls.filter(Boolean), ['fetch', 'merge']);
   assert.equal((await readLines(path.join(p.repo, '.orq', 'ledger.jsonl'))).filter((e) => e.type === 'synced').length, 1);
   // the merged head ships by fast-forward once its final checks pass
   await append(p, passed(H));
@@ -338,4 +349,68 @@ test('sync: nothing to ship means nothing to merge, and no fetch', async (t) => 
   await s.sync();
   assert.deepEqual(s.calls.filter(Boolean), []);
   assert.equal((await readState(p.repo)).plan.integrationHead, p.Y);
+});
+
+test('sync: no new merge while the final checks of a merged head have no verdict; after it, origin is merged again', async (t) => {
+  const p = await shipProject(t);
+  const O = await otherShip(p, { 'other.txt': 'o\n' });
+  const s = syncRun(p);
+  await s.sync();
+  const H = (await readState(p.repo)).plan.integrationHead;
+  const O2 = await otherShip(p, { 'more.txt': 'm\n' }, O);
+  s.at.now += 6 * 60_000;
+  await s.sync(); // the final gate has not started on H yet
+  await append(p, {
+    type: 'gate-started', unit: 'integration', attempt: 1, headSha: H, pid: 1,
+  });
+  s.at.now += 6 * 60_000;
+  await s.sync(); // it runs on H
+  assert.equal((await readState(p.repo)).plan.integrationHead, H);
+  await append(p, passed(H));
+  await s.sync();
+  const st = await readState(p.repo);
+  assert.deepEqual([st.plan.synced.from, st.plan.synced.base], [H, O2]);
+});
+
+test('sync: the fetch time is kept across orq wait calls, and the fetch gives up after 60 s', async (t) => {
+  const p = await shipProject(t);
+  const calls = [];
+  const first = syncRun(p, calls);
+  await first.sync();
+  const second = syncRun(p, calls, { now: NOW + 60_000 }); // the next `orq wait`
+  await second.sync();
+  assert.deepEqual(calls.filter((c) => c === 'fetch'), ['fetch']);
+  await syncRun(p, calls, { now: NOW + 6 * 60_000 }).sync();
+  assert.deepEqual(calls.filter((c) => c === 'fetch'), ['fetch', 'fetch']);
+  assert.deepEqual(first.timeouts, [60_000]);
+});
+
+test('sync: merges the fetched sha itself, and a merged head that fails its check is reset', async (t) => {
+  const p = await shipProject(t);
+  const O = await otherShip(p, { 'other.txt': 'o\n' });
+  sh(p.repo, 'fetch', '-q', 'origin', '+refs/heads/main:refs/remotes/origin/main');
+  const dir = path.join(p.repo, '.orq', 'integration');
+  const real = createGit({ exec: defaultExec });
+  const args = {
+    repo: p.repo, dir, branch: 'orq/p1/integration', baseSha: p.baseSha, sha: O,
+  };
+  assert.throws(() => mergeBase({ ...args, git: { ...real, isAncestor: () => false } }), /does not contain/);
+  assert.equal(sh(dir, 'rev-parse', 'HEAD'), p.Y); // put back where it was
+  assert.equal(sh(dir, 'status', '--porcelain'), '');
+  const r = mergeBase({ ...args, git: real });
+  assert.equal(sh(dir, 'log', '-1', '--format=%s', r.head), `Merge commit '${O}' into orq/p1/integration`);
+});
+
+test('sync: conflict files are named only while origin is still at the sha that conflicted', async (t) => {
+  const p = await shipProject(t);
+  const O = await otherShip(p, { 'a.txt': 'not a\n' });
+  const s = syncRun(p);
+  await s.sync();
+  let st = await readState(p.repo);
+  assert.deepEqual(staleBase(s.ctx, s.run.config, st.plan).files, ['a.txt']);
+  sh(p.repo, 'branch', '-f', 'other', O);
+  const O2 = await commitOn(p.repo, 'other', { 'z.txt': 'z\n' });
+  sh(p.repo, 'update-ref', 'refs/remotes/origin/main', O2); // fetched, not merged yet
+  st = await readState(p.repo);
+  assert.deepEqual(staleBase(s.ctx, s.run.config, st.plan), { base: 'main', synced: false, files: [] });
 });
