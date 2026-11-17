@@ -1,7 +1,9 @@
 // Baseline-aware unit gate: failures the integration head already had are not the unit's.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { failureLines, checksOutput, excuse } from '../lib/baseline.mjs';
+import {
+  baselineOf, failureLines, checksOutput, excuse,
+} from '../lib/baseline.mjs';
 
 const BASE = 'b'.repeat(40);
 const RED = '\x1b[0m\x1b[31m';
@@ -93,7 +95,7 @@ test('excuse: a unit that fails only what its red base fails passes, flagged pre
   assert.equal(r.verdict, 'pass');
   assert.deepEqual(r.failures, []);
   assert.deepEqual(r.flags, [{
-    kind: 'pre-existing-failures', path: '', detail: `4 failing tests also fail on the integration head ${BASE.slice(0, 12)}: test/legacy-low-spool-migration.test.ts: (fail) legacy-low-spool-migration: migrates thresholds below 50 g; test/merged-schema.test.ts: (fail) merged-schema: has the spool table; (fail) legacy-low-spool-migration: migrates thresholds below 50 g; +1 more`,
+    kind: 'pre-existing-failures', path: '', detail: `4 failing tests also fail on the integration head ${BASE.slice(0, 12)}: test/legacy-low-spool-migration.test.ts: (fail) legacy-low-spool-migration: migrates thresholds below 50 g; test/merged-schema.test.ts: (fail) merged-schema: has the spool table; (fail) legacy-low-spool-migration: migrates thresholds below 50 g; +1 more; checks after the failing step did not run on this unit`,
   }]);
   // a runner that prints no file names, against the base's result tail alone
   const plain = '(pass) spools: lists spools [2.00ms]\n(fail) merged-schema: has the spool table [2.90ms]\n 411 pass\n 1 fail';
@@ -125,6 +127,10 @@ test('excuse: anything else stays a failure, exactly as the gate said', () => {
   // an error no runner pattern knows: a lint or build line not in the base's output
   same(excuse(unit, unitLog(`${BUN_UNIT}\nsrc/x.ts:3:1  error  'y' is unused  no-unused-vars`), base), 'lint error');
   same(excuse(unit, unitLog(`${BUN_UNIT}\nBuild failed with 1 error`), base), 'build error');
+  for (const line of ['Jest: "global" coverage threshold for lines (80%) not met: 78%', "src/x.py:1:1: F401 'os' imported but unused",
+    '[warn] Code style issues found in 2 files. Run Prettier with --write to fix.', 'TypeError: spool.weight is not a function', '1 problem (1 warning)']) {
+    same(excuse(unit, unitLog(`${BUN_UNIT}\n${line}`), base), line);
+  }
   // the same test name in another file
   same(excuse(unit, unitLog('test/b.test.ts:\n(fail) x [1ms]\n 1 fail'), withLog('test/a.test.ts:\n(fail) x [1ms]\n 1 fail')), 'other file');
   // more failures than the base had, by the runner's own count
@@ -136,4 +142,18 @@ test('excuse: never changes its inputs', () => {
   const before = JSON.stringify(unit);
   excuse(unit, unitLog(BUN_UNIT), withLog());
   assert.equal(JSON.stringify(unit), before);
+});
+
+test('baselineOf: what a failed final run printed, kept in its result once its log is gone', () => {
+  const kept = baselineOf(`== setup\nok\n== checks\n${BUN_BASE}\n`);
+  assert.equal(kept.count, 3);
+  assert.ok(kept.failures.includes('test/merged-schema.test.ts: (fail) merged-schema: has the spool table'));
+  assert.ok(kept.errors.includes('error: no such table: spool'));
+  // the head's log was removed after a later head passed: its result still carries what it printed
+  const summary = BUN_BASE.split('\n').slice(-8).join('\n'); // bun's closing list: no file names, no error lines
+  assert.equal(excuse(failed(), unitLog(BUN_UNIT), { sha: BASE, result: baseResult(summary), log: null }).verdict, 'fail');
+  const base = { sha: BASE, result: { ...baseResult(summary), baseline: kept }, log: null };
+  assert.equal(excuse(failed(), unitLog(BUN_UNIT), base).verdict, 'pass');
+  assert.equal(excuse(failed(), unitLog(BUN_UNIT), { ...base, result: { ...base.result, baseline: { ...kept, errors: [] } } }).verdict, 'fail');
+  assert.equal(baselineOf(null), null);
 });

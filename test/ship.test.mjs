@@ -241,6 +241,18 @@ test('ship --title --body-file: the orchestrator writes the title and summary; o
   assert.equal(create[create.indexOf('--body') + 1], `Shops can now export their catalogue.\n\nValidated with the export suite.\n\nCloses #12\nCloses #14\n\nFinal checks passed on ${p.X.slice(0, 12)}.`);
 });
 
+test('ship: an issue split over units is closed by the ship whose head has them all, referenced before', async (t) => {
+  const p = await shipProject(t, {}, [unitSpec('a', { title: '#843 part one' }), unitSpec('b', { title: '#843 part two' }), unitSpec('c')]);
+  const body = (gh) => { const c = gh.calls.find((a) => a[1] === 'create'); return c[c.indexOf('--body') + 1]; };
+  const first = fakeGh({ remote: p.remote });
+  assert.equal((await orq(['ship'], p, { ghExec: first.exec })).code, 0); // X: part one; part two is integrated at Y, after it
+  assert.equal(body(first), `Refs #843\n\nFinal checks passed on ${p.X.slice(0, 12)}.`);
+  await append(p, passed(p.Y));
+  const second = fakeGh({ remote: p.remote });
+  assert.equal((await orq(['ship'], p, { ghExec: second.exec })).code, 0);
+  assert.equal(body(second), `Closes #843\n\nFinal checks passed on ${p.Y.slice(0, 12)}.`);
+});
+
 test('ship: a title or summary that breaks the rules ships nothing', async (t) => {
   const p = await shipProject(t);
   const summary = path.join(p.root, 'summary.md');

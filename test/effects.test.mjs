@@ -572,12 +572,15 @@ test('gate-run: a failed final gate keeps its whole output in head-<sha>.log and
   const failed = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'integration', 1, 'json'), 'utf8'));
   assert.equal(failed.output, rel);
   assert.match(await fs.readFile(log, 'utf8'), /^== checks\nFAIL tests\/x\.test\.ts\nlast\n$/);
+  // what it printed outlives the log, for the units that fork from this head (baseline.mjs)
+  const kept = JSON.parse(await fs.readFile(path.join(s.p.repo, '.orq', 'units', 'integration', `head-${sha.slice(0, 12)}.json`), 'utf8'));
+  assert.deepEqual(kept.baseline, { failures: [], errors: ['FAIL tests/x.test.ts'], count: null });
   await orq(['gate-run', 'integration', '1', sha]); // the same head again: a new log, not one appended to the last
   assert.equal((await fs.readFile(log, 'utf8')).match(/FAIL/g).length, 1);
   code = 0;
   await orq(['gate-run', 'integration', '1', sha]);
   const passed = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'integration', 1, 'json'), 'utf8'));
-  assert.equal(passed.output, undefined);
+  assert.deepEqual([passed.output, passed.baseline], [undefined, undefined]);
   assert.equal(fsSync.existsSync(log), false);
   code = 1;
   const other = path.join(s.p.repo, '.orq/units/integration/head-000000000000.log');
