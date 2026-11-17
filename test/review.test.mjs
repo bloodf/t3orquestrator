@@ -281,3 +281,17 @@ test('S: a review thread is told about linked dependencies and its worktree is l
   assert.ok(start.input.endsWith('Review the integrated diff.\n'));
   assert.deepEqual(r.out.split('\n').slice(1), ['note: review 1: dependencies not linked: node_modules (worktree not found)', '']);
 });
+
+test('show: a review stopped by a usage limit, failed or as its only reply, is replaced; the limited pool cools until the reset', async (t) => {
+  const limit = 'Usage Limit Reached\n\nYou have reached your current quota for this period. Your limit will reset in 5 days, 4 hours.';
+  for (const status of ['failed', 'completed']) {
+    const p = await integratedProject(t);
+    await orq(['review', 'start'], p);
+    const r = await orq(['review', 'show'], p, { status, text: limit, offset: 1 });
+    const [one, two] = (await reviews(p)).reviews;
+    assert.equal(r.out, `review 1: failed on ${one.key}; replaced by review 2 on ${two.key} (thread rv2)\n`, status);
+    const m = (await registry(p)).models[one.key];
+    // counted from when the provider wrote it (the thread's last update), not from when orq read it
+    assert.deepEqual([m.cooldownUntil, m.failures], [Date.parse('2026-11-12T10:00:00.000Z') + (5 * 24 + 4) * 3600_000, 0], status);
+  }
+});

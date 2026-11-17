@@ -694,3 +694,76 @@ test('gate could not complete is marked for a re-gate', () => {
   const r = go([launched('a'), ended('a'), gateStarted('a'), gateStarted('a')], { gates: { a: { running: false, result: null, error: 'boom' } } });
   assert.deepEqual(r.events.map((e) => [e.type, e.reason, e.regate]), [['needs-judgment', 'gate could not complete: boom', true]]);
 });
+
+// Limits: a thread stopped by its provider's quota, sign-out or capacity (the reply classified by limits.mjs)
+const LIMIT = { kind: 'limit', reason: 'Usage Limit Reached', until: NOW + 100 * 60 * MIN };
+const mixed = {
+  version: 1,
+  instances: { a: { ...inst }, b: { ...inst }, c: { ...inst } },
+  models: Object.fromEntries([
+    model('a', 'm2', 2), ['b::g2', { ...model('b', 'g2', 2)[1], family: 'f' }], ['c::o2', { ...model('c', 'o2', 2)[1], family: 'other' }],
+  ]),
+};
+const plan1 = { goal: 'g', units: [unit('a')] };
+
+test('limit: the unit relaunches at once on another instance and family; no failure strike, no attempt, no count', () => {
+  const r = go([launched('a')], { registry: mixed, plan: plan1, threads: { 't-a': thread('t-a', { status: 'failed', limit: LIMIT }) } });
+  assert.deepEqual(r.events.map((e) => [e.type, e.status, e.limit]), [['thread-ended', 'failed', LIMIT]]);
+  assert.deepEqual(r.actions.slice(0, 2), [
+    { type: 'lease-remove', unit: 'a', threadId: 't-a' },
+    { type: 'record-limit', unit: 'a', key: 'a::m2', limit: LIMIT },
+  ]);
+  const [l] = launches(r);
+  assert.deepEqual([l.key, l.attempt], ['c::o2', 1]); // b::g2 is another instance but the same family
+  // the limit cooled a::m2 in this tick's registry: the failed model is not even a fallback now
+  const solo = { ...mixed, instances: { a: inst }, models: { 'a::m2': mixed.models['a::m2'] } };
+  const waits = go([launched('a')], { registry: solo, plan: plan1, threads: { 't-a': thread('t-a', { status: 'failed', limit: LIMIT }) } });
+  assert.deepEqual(launches(waits), []);
+  assert.deepEqual(waits.report.unroutable, [{ unit: 'a', blocked: 'cooling', reason: 'all cooling down', retryAt: LIMIT.until }]);
+});
+
+test('limit: a turn that completed with a limit reply is not gated; it is a limit failure like a failed one', () => {
+  const r = go([launched('a')], { registry: mixed, plan: plan1, threads: { 't-a': thread('t-a', { status: 'completed', updatedAt: NOW, limit: LIMIT }) } });
+  assert.deepEqual(r.events.map((e) => [e.type, e.status]), [['thread-ended', 'failed']]);
+  assert.ok(!types(r).includes('gate-start'));
+  assert.equal(launches(r)[0].key, 'c::o2');
+});
+
+test('limit: every candidate limited waits for the earliest reset, never judged however many limits it hit', () => {
+  const hits = (n) => Array.from({ length: n }, (_, i) => [launched('a', { threadId: `t${i}` }), { ...ended('a', 'failed'), limit: LIMIT }]).flat();
+  const cooled = {
+    ...mixed,
+    models: Object.fromEntries(Object.entries(mixed.models).map(([k, m], i) => [k, { ...m, cooldownUntil: NOW + (i + 1) * 60 * MIN }])),
+  };
+  const r = go(hits(5), { registry: cooled, plan: plan1 });
+  assert.deepEqual(r.events, []);
+  assert.deepEqual(r.report.judgment, []);
+  assert.deepEqual(r.report.unroutable, [{ unit: 'a', blocked: 'cooling', reason: 'all cooling down', retryAt: NOW + 60 * MIN }]);
+  // plain provider failures still go to judgment at three
+  const plain = go([...hits(0), launched('a', { threadId: 'x1' }), ended('a', 'failed'), launched('a', { threadId: 'x2' }), ended('a', 'failed'), launched('a')],
+    { registry: mixed, plan: plan1, threads: { 't-a': thread('t-a', { status: 'failed' }) } });
+  assert.equal(plain.events.at(-1).reason, '3 provider failures');
+});
+
+test('limit: a quiet running thread whose account is used up is given up after 5 min, its lease kept, the unit moved', () => {
+  const full = {
+    ...mixed,
+    instances: { ...mixed.instances, a: { ...inst, usage: { checkedAt: NOW, down: false, stale: false, windows: [{ id: 'weekly', used: 100, resetAt: NOW + 9 * 60 * MIN }] } } },
+  };
+  const quiet = (min, registry = full) => go([launched('a')], {
+    registry, plan: plan1, cap: 2, threads: { 't-a': thread('t-a', { updatedAt: NOW - min * MIN }) }, leases: [lease('t-a', { project: '/p', unit: 'a', instance: 'a' })],
+  });
+  assert.deepEqual(quiet(4).events, []); // still working, or about to end on its own
+  const given = quiet(5);
+  assert.deepEqual(given.events.map((e) => [e.type, e.status, e.limit?.kind]), [['thread-ended', 'stalled', 'limit']]);
+  assert.deepEqual(given.events[0].limit.until, NOW + 9 * 60 * MIN);
+  assert.deepEqual(types(given).slice(0, 2), ['lease-abandon', 'record-limit']);
+  assert.deepEqual(given.report.notes, ['note: unit a gave up on thread t-a (its provider stopped it: usage window weekly at 100%; quiet for 5 min); it still holds a slot until it ends: interrupt it (t3_thread_interrupt)']);
+  assert.equal(launches(given)[0].key, 'c::o2');
+  assert.deepEqual(quiet(5, mixed).events, []); // room left: a quiet thread waits for the stall rules
+  // signed out (T3 reports the instance unauthenticated or in error): the same, and the instance cools
+  const out = { ...mixed, instances: { ...mixed.instances, a: { ...inst, usage: { checkedAt: NOW, down: true, signedOut: true, stale: false, windows: [] } } } };
+  const signedOut = quiet(6, out);
+  assert.deepEqual(signedOut.events.map((e) => [e.status, e.limit?.kind]), [['stalled', 'auth']]);
+  assert.match(signedOut.report.notes[0], /its provider stopped it: instance a is signed out; quiet for 6 min/);
+});

@@ -253,7 +253,7 @@ test('provider failures record the instance; quality failures do not; retry clea
 test('continuation: a provider failure remembers the failed launch; launched records what it continues; old ledgers replay', () => {
   const failed = run(launched('u', { family: 'f' }), ev('thread-ended', 'u', { status: 'failed' }));
   assert.deepEqual(unitOf(failed, 'u').failedLaunch, {
-    threadId: 't1', branch: 'orq/p/u-a1', baseSha: A, key: 'i::m', attempt: 1, continues: null, continuesKey: null, status: 'failed',
+    threadId: 't1', branch: 'orq/p/u-a1', baseSha: A, key: 'i::m', attempt: 1, continues: null, continuesKey: null, status: 'failed', limit: null,
   });
   const cont = apply(failed, launched('u', { threadId: 't2', key: 'j::m', instance: 'j', baseSha: A, continues: B }));
   assert.deepEqual([unitOf(cont, 'u').continues, unitOf(cont, 'u').failedLaunch], [B, null]);

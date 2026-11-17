@@ -17,6 +17,8 @@ import {
 const NOW = Date.parse('2026-11-12T12:00:00Z');
 const GIB = 1024 ** 3;
 const quiet = { write: () => {} };
+const LIMIT_REPLY = 'Usage Limit Reached\n\nYou have reached your current quota for this period. Your limit will reset in 5 days, 4 hours.';
+const CLAUDE_LIMIT_REPLY = "You've hit your Fable limit · resets Nov 13 at 12am (America/Sao_Paulo). Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message, to continue.";
 const row = (t) => ({
   threadId: t.id, projectId: 'p', status: t.status, itemCount: 1, updatedAt: new Date(t.updatedAt).toISOString(),
   title: t.title, providerInstanceId: t.instance, model: t.model, ...(t.settled !== undefined ? { settled: t.settled } : {}),
@@ -73,6 +75,12 @@ function simulator(p, scripts) {
       if (step === 'commit-fail') { // committed its work, then its provider died
         await commitOn(p.repo, t.branch, { [`${t.unit}.txt`]: `${t.unit}\n` }, t.unit);
         t.status = 'failed';
+      }
+      if (step === 'limit') Object.assign(t, { status: 'failed', reply: LIMIT_REPLY }); // seen on antigravity
+      if (step === 'limit-complete') Object.assign(t, { status: 'completed', reply: CLAUDE_LIMIT_REPLY }); // a limit reply as a finished turn
+      if (step === 'commit-limit') { // committed part of its work, then its account ran out
+        await commitOn(p.repo, t.branch, { [`${t.unit}.txt`]: `${t.unit}\n` }, t.unit);
+        Object.assign(t, { status: 'failed', reply: LIMIT_REPLY });
       }
       if (step === 'complete') t.status = 'completed'; // finished without a new commit
       if (step === 'throttle') t.status = 'throttled'; // a status orq does not know; T3 never moves it again
@@ -534,7 +542,7 @@ test('wait: a worker whose provider failed after committing is continued on anot
   const u = unitOf(await readState(p.repo), 'a');
   assert.deepEqual([u.state, u.baseSha], ['integrated', p.baseSha]);
   await fs.stat(path.join(p.repo, '.orq', 'integration', 'a.txt'));
-  assert.match((await orq(['status'], p, sim)).out, /^a integrated attempt=1 model=\S+ tier=2 continued thread=/m);
+  assert.match((await orq(['status'], p, sim)).out, /^a integrated attempt=1 model=\S+ tier=2 continued rerouted=\S+->\S+\(failed\) thread=/m);
 });
 
 test('wait: a unit with setup: false skips checks.setup; others still run it; the warning for outside evidence is a note', async (t) => {
@@ -898,3 +906,48 @@ for (const cleanup of [true, false]) {
     sh(p.repo, 'rev-parse', '--verify', '-q', `refs/heads/${sim.byUnit.a[0].branch}`);
   });
 }
+
+// pa and pb run different model families, so a limit on one sends the unit to the other
+const FAMILIES = {
+  ...REGISTRY,
+  models: Object.fromEntries(Object.entries(REGISTRY.models).map(([k, m]) => [k, { ...m, family: m.instance === 'pa' ? 'fam-a' : 'fam-b' }])),
+};
+
+test('wait: a usage limit mid-work relaunches at once on another instance and family, continuing its commits, with no count', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')], { registry: FAMILIES, checks: { full: 'test -f a.txt' } });
+  const sim = simulator(p, { a: [['commit-limit'], ['complete']] }); // the second only reports: the commit it inherited is the work
+  const r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^done: 1 units integrated/);
+  const [first, second] = sim.byUnit.a;
+  assert.notEqual(first.instance, second.instance);
+  assert.match(second.message, /## Hand-over/); // the new worker starts from the commit the limited one left
+  assert.equal(second.base, sh(p.repo, 'rev-parse', first.branch));
+  const st = unitOf(await readState(p.repo), 'a');
+  assert.deepEqual([st.providerFailures, st.attempt, st.state], [0, 1, 'integrated']);
+  const events = (await readLines(path.join(p.repo, '.orq', 'ledger.jsonl')));
+  const ended = events.find((e) => e.type === 'thread-ended' && e.status === 'failed');
+  assert.deepEqual([ended.limit.kind, ended.limit.reason, ended.limit.until], ['limit', 'Usage Limit Reached', sim.byUnit.a[0].updatedAt + (5 * 24 + 4) * 3600_000]);
+  const moved = events.find((e) => e.type === 'rerouted');
+  assert.deepEqual([moved.from, moved.to, moved.reason, moved.detail], [`${first.instance}::${first.model}`, `${second.instance}::${second.model}`, 'limit', 'Usage Limit Reached']);
+  // the account's pool cools until its reset; the other instance is untouched
+  const reg = JSON.parse(await fs.readFile(path.join(p.home, 'registry.json'), 'utf8'));
+  assert.equal(reg.models[`${first.instance}::${first.model}`].cooldownUntil, ended.limit.until);
+  assert.equal(reg.models[`${first.instance}::${first.model}`].failures, 0);
+  const status = await orq(['status'], p, sim);
+  assert.match(status.out, new RegExp(`rerouted=${first.instance}::${first.model}->${second.instance}::${second.model}\\(limit\\)`));
+});
+
+test('wait: when every instance is at its limit the unit waits for the earliest reset, never judged', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')], { registry: FAMILIES });
+  const sim = simulator(p, { a: [['limit'], ['limit-complete'], ['limit'], ['limit'], ['limit']] });
+  const r = await orq(['wait', '--max-seconds', '300'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  const [line] = r.out.split('\n');
+  assert.match(line, /^idle: no model for a: all cooling down; retry at /);
+  assert.ok(sim.byUnit.a.length <= 4, `${sim.byUnit.a.length} launches`); // every pool hit cools: no launch loop
+  const st = unitOf(await readState(p.repo), 'a');
+  assert.deepEqual([st.state, st.providerFailures, st.attempt], ['queued', 0, 1]);
+  // the claude reply named its reset (Nov 13 00:00 in São Paulo); the earliest reset is when to come back
+  assert.equal(line.split('retry at ')[1], '2026-11-13T03:00:00.000Z');
+});

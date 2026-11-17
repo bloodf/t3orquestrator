@@ -31,7 +31,7 @@ function fakeT3(p, world) {
         thread: {
           threadId: 'ask-th', projectId: 'pr', status, itemCount: 2, updatedAt: '2026-11-12T12:00:00.000Z', providerInstanceId: 'pb', model: 'm4', pendingRequestCount: 0,
         },
-        messages: status === 'completed' ? [{ role: 'assistant', runId: 'r', text: world.reply }] : [],
+        messages: status === 'completed' ? [{ role: 'assistant', runId: 'r', text: world.replies?.[args[2]] ?? world.reply }] : [],
       });
     }
     return { code: 0, stdout: 't3 v1\n', stderr: '' };
@@ -340,4 +340,14 @@ test('M3: an answered decision is a success for the decide job; an escalation or
   await orq(['ask'], p, { reply: 'no idea' });
   const reg = await readJson(path.join(p.home, 'registry.json'));
   assert.deepEqual(reg.models['pb::m4'].outcomes.decide, { attempts: 3, firstPass: 1 });
+});
+
+test('ask: a decision thread stopped by a usage limit is retried on the next model; the limited pool cools until its reset', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const limit = "You've hit your limit · resets Nov 12 at 6pm (UTC). Switch to another model to continue.";
+  const r = await orq(['ask'], p, { replies: { 'ask-th': limit } });
+  assert.equal(r.out, 'answer: use 8080\n  The config sets it.\n');
+  assert.deepEqual((await asks(p)).asks.map((a) => [a.status, a.key]), [['failed', 'pb::m4'], ['answered', 'pa::m3']]);
+  const m4 = (await readJson(path.join(p.home, 'registry.json'))).models['pb::m4'];
+  assert.deepEqual([m4.cooldownUntil, m4.failures], [Date.parse('2026-11-12T18:00:00Z'), 0]);
 });

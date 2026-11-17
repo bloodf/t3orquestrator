@@ -35,7 +35,7 @@ function fakeT3(repo, { fail = false, world = {} } = {}) {
       calls.push(['start', o]);
       if (fail || (world.startFails ?? 0) > 0) {
         world.startFails = Math.max(0, (world.startFails ?? 0) - 1);
-        throw new Error('thread start failed (exit 1): provider down');
+        throw new Error(world.startError ?? 'thread start failed (exit 1): provider down');
       }
       sh(repo, 'branch', o.branch, o.worktree);
       n += 1;
@@ -189,6 +189,33 @@ test('launch: a failed start is a provider failure and leaves no lease', async (
   assert.deepEqual(u.failedKeys, ['pa::m2']);
   assert.deepEqual(await leasesOf(s.p), []);
   assert.equal((await registryOf(s.p)).models['pa::m2'].failures, 1);
+});
+
+test('launch: a start refused for sign-in is a limit: the instance cools, the unit is not counted', async (t) => {
+  const s = await setup(t, [unitSpec('a')], { fail: true, world: { startError: 'thread start failed (exit 1): Not logged in · Please run /login' } });
+  await s.act(launchA());
+  const u = unitOf(await readState(s.p.repo), 'a');
+  assert.deepEqual([u.state, u.providerFailures, u.failedLaunch.limit.kind], ['queued', 0, 'auth']);
+  const reg = await registryOf(s.p);
+  assert.deepEqual([reg.instances.pa.cooldownUntil, reg.models['pa::m2'].failures], [NOW + 30 * 60_000, 0]);
+});
+
+test('launch: the launch after a provider failure records where it moved and why; the same model again is no reroute', async (t) => {
+  const s = await setup(t, [unitSpec('a')], { cap: 4 }); // the ended threads' leases are not removed here
+  await s.act(launchA());
+  const limit = { kind: 'limit', reason: 'Usage Limit Reached', until: NOW + 60_000 };
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'failed', limit });
+  const r = await s.act(launchA('a', { key: 'pb::m4', instance: 'pb', model: 'm4', tier: 4 }));
+  assert.ok(r.notes.includes('note: unit a rerouted from pa::m2 to pb::m4 (limit: Usage Limit Reached)'), r.notes.join('|'));
+  const events = await readLines(path.join(s.p.repo, '.orq', 'ledger.jsonl'));
+  assert.deepEqual(events.filter((e) => e.type === 'rerouted').map(({ at, ...e }) => e), [
+    { type: 'rerouted', unit: 'a', from: 'pa::m2', to: 'pb::m4', reason: 'limit', detail: 'Usage Limit Reached' },
+  ]);
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'failed' });
+  await s.act(launchA('a', { key: 'pb::m4', instance: 'pb', model: 'm4', tier: 4 }));
+  const after = await readLines(path.join(s.p.repo, '.orq', 'ledger.jsonl'));
+  assert.equal(after.filter((e) => e.type === 'rerouted').length, 1);
+  assert.equal(unitOf(await readState(s.p.repo), 'a').rerouted, null);
 });
 
 test('launch base: a dependant branches from an integration head that contains its dependency', async (t) => {
