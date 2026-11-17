@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-17
+
 ### Changed
 
 - `orq` now removes the worktrees of finished work even when they hold files, so disk use stays low (on one machine, 110 worktrees of one project held 8.9 GB). `orq wait` sweeps in the poll where a unit is integrated or dropped or a head ships, and otherwise at most every 10 minutes, starting no new removal after 60 seconds per poll; `orq plan archive` runs the same cleanup. It covers every worktree on an `orq/*` branch this project's ledgers, reviews or decisions name, of an integrated or dropped unit, a finished review or decision, or an archived plan (an `orq/*` branch no ledger names, such as another orq project in a linked worktree, is never touched; `orq ask` now records each decision's branch in `.orq/asks.json` for this), plus gate checkouts no gate uses and registrations of missing worktrees. Uncommitted changes to tracked files and new files git does not ignore are first saved as a patch under `.orq/salvage/` (new files over 256 KiB are named, not saved; a worktree whose patch would pass 2 MiB, or that holds a repository of its own or any initialized submodule, is kept and reported; patches are kept 30 days, and past 7 days at most 100), then the worktree is removed with `--force`. Never removed: a branch, the integration worktree, an open unit's worktree, one whose thread holds a lease or where T3 shows a thread at work, a dropped unit's until T3 shows its thread stopped, a locked one. Before, any worktree with an untracked or modified file was kept forever. `orq config set cleanup false` restores the old behavior. See [Cleanup](docs/how-it-works.md#cleanup).
