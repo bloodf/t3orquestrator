@@ -165,3 +165,10 @@ test('scan: a node warning reads the same whatever process printed it', () => {
   const b = scan('(node:977) ExperimentalWarning: VM Modules is experimental');
   assert.deepEqual([...a.errors], [...b.errors]);
 });
+
+test('excuse: a unit gate scoped to its changed files fails a subset of the base, and its count may not exceed the base count', () => {
+  const scoped = 'test/merged-schema.test.ts:\n(fail) merged-schema: has the spool table [2.90ms]\nerror: no such table: spool\n\n 4 pass\n 1 fail';
+  assert.equal(excuse(failed(), unitLog(scoped), withLog()).verdict, 'pass'); // 1 of the base's 3
+  const over = scoped.replace(' 1 fail', ' 4 fail');
+  assert.equal(excuse(failed(), unitLog(over), withLog()).verdict, 'fail');
+});

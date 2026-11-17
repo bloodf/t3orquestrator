@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Gate steps learn what the unit changed, so `checks.unit` can run only the related tests while the final gate keeps running `checks.full` whole. Every step gets `ORQ_GATE` (`unit` or `final`); a unit's gate steps also get `ORQ_BASE_SHA` (the integration head the unit was launched on) and `ORQ_CHANGED_FILES` and `ORQ_DELETED_FILES`, absolute paths to lists of the repository-relative paths `git diff --name-only <base>...<head>` shows as added, copied, modified or renamed, and as deleted; the lists are removed when the gate ends. When the diff cannot be computed the lists are not set, and a command should then run everything. orq stays project-agnostic: the command decides what to run. See [config](docs/commands.md#config) for a `vitest related` example.
+
 ## [0.10.0] - 2026-11-17
 
 ### Changed

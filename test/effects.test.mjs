@@ -597,6 +597,48 @@ test('gate-run: a failed final gate keeps its whole output in head-<sha>.log and
   assert.equal(fsSync.existsSync(gateFile(s.p.repo, 'a', 1, 'output.log')), false); // a unit gate keeps no log
 });
 
+test('gate-run: a unit gate tells its commands what changed; the final gate only that it is final', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await s.act(launchA());
+  const u = unitOf(await readState(s.p.repo), 'a');
+  await commitOn(s.p.repo, u.branch, { 'a.txt': 'A\n', 'shared.txt': 'changed\n' });
+  const dir = path.join(s.p.root, 'del');
+  sh(s.p.repo, 'worktree', 'add', '-q', dir, u.branch);
+  sh(dir, 'rm', '-q', 'shared.txt');
+  sh(dir, 'commit', '-q', '-m', 'drop shared; add a again');
+  const sha = sh(dir, 'rev-parse', 'HEAD');
+  sh(s.p.repo, 'worktree', 'remove', '--force', dir);
+  const quiet = { write: () => {} };
+  const seen = [];
+  const run = async (command, { env }) => {
+    const read = (f) => (f && fsSync.existsSync(f) ? fsSync.readFileSync(f, 'utf8') : null);
+    seen.push({
+      command, gate: env?.ORQ_GATE, base: env?.ORQ_BASE_SHA, changed: read(env?.ORQ_CHANGED_FILES), deleted: read(env?.ORQ_DELETED_FILES), files: [env?.ORQ_CHANGED_FILES, env?.ORQ_DELETED_FILES],
+    });
+    return { code: 0, output: '', timedOut: false };
+  };
+  const orq = (args, gitExec) => cli(args, { stdout: quiet, stderr: quiet, env: s.p.env, cwd: s.p.repo, deps: { run, ...(gitExec ? { gitExec } : {}) } });
+  assert.equal(await orq(['config', 'set', 'checks.setup', 'setup']), 0);
+  assert.equal(await orq(['config', 'set', 'checks.unit', 'unit']), 0);
+  assert.equal(await orq(['config', 'set', 'checks.full', 'full']), 0);
+  await orq(['gate-run', 'a', '1', sha]);
+  assert.deepEqual(seen.map((x) => x.command), ['setup', 'test -f a.txt', 'unit']);
+  for (const x of seen) {
+    assert.deepEqual([x.gate, x.base, x.changed, x.deleted], ['unit', u.baseSha, 'a.txt\n', 'shared.txt\n']);
+    assert.ok(x.files.every((f) => path.isAbsolute(f) && path.dirname(f) === path.join(s.p.repo, '.orq', 'units', 'a')), x.files.join(' '));
+  }
+  assert.ok(seen[0].files.every((f) => !fsSync.existsSync(f))); // removed after the gate
+  assert.equal(JSON.parse(await fs.readFile(gateFile(s.p.repo, 'a', 1, 'json'), 'utf8')).verdict, 'pass');
+  // the diff cannot be had: no changed-file vars, so the commands run everything
+  seen.length = 0;
+  const broken = (cmd, args, opts) => (args.includes('--name-only') ? { code: 128, stdout: '', stderr: 'fatal: bad object' } : defaultExec(cmd, args, opts));
+  await orq(['gate-run', 'a', '1', sha], broken);
+  assert.deepEqual(seen.map((x) => [x.gate, x.base, x.files]), Array(3).fill(['unit', u.baseSha, [undefined, undefined]]));
+  seen.length = 0;
+  await orq(['gate-run', 'integration', '1', sha]);
+  assert.deepEqual(seen.map((x) => [x.command, x.gate, x.base, x.files]), [['setup', 'final', undefined, [undefined, undefined]], ['full', 'final', undefined, [undefined, undefined]]]);
+});
+
 test('gate-run: a unit that fails only the tests its red base head fails passes, flagged; one more failure fails it', async (t) => {
   const s = await setup(t, [unitSpec('a')]);
   await s.act(launchA());

@@ -253,6 +253,14 @@ test('defaultRun merges output, caps it, reports exit code and timeout', async (
   assert.equal(lines.at(-1), 'l299');
   const slow = await defaultRun('sleep 30', { ...opts, timeoutMs: 2000 });
   assert.equal(slow.timedOut, true);
+  // env adds to the inherited environment
+  const env = await defaultRun('echo "$ORQ_GATE:$HOME"', { ...opts, env: { ORQ_GATE: 'unit' } });
+  assert.equal(env.output.trim(), `unit:${process.env.HOME}`);
+});
+
+test('runGate hands env to every step', async () => {
+  const r = await gate({ checks: { setup: 'su', unit: 'cu' }, env: { ORQ_GATE: 'unit' } });
+  assert.deepEqual(r.calls.map((c) => [c.command, c.env]), [['su', { ORQ_GATE: 'unit' }], ['ev', { ORQ_GATE: 'unit' }], ['cu', { ORQ_GATE: 'unit' }]]);
 });
 
 test('defaultRun with logFile appends the whole output there, past the 200 lines it returns', async (t) => {

@@ -130,6 +130,14 @@ Lists the eligible models in the order `orq` would use them:
 
 `checks.unit` runs in every unit's gate after the evidence. `checks.full` runs once on the integration head.
 
+Every gate step (`checks.setup`, the evidence, `checks.unit` or `checks.full`) gets `ORQ_GATE` in its environment: `unit` in a unit's gate, `final` in the final gate. A unit's gate also gets `ORQ_BASE_SHA`, the integration head the unit was launched on, and `ORQ_CHANGED_FILES` and `ORQ_DELETED_FILES`: absolute paths to files listing, one repository-relative path a line, what `git diff --name-only <base>...<head>` shows as added, copied, modified or renamed (`--diff-filter=ACMR`) and as deleted (`D`). The lists are removed when the gate ends. When the diff cannot be computed, neither list is set: a command that scopes its tests must then run them all. The final gate gets no lists and runs `checks.full` whole. A `checks.unit` that runs only the tests related to the unit's change:
+
+```
+orq config set checks.unit 'if [ -n "$ORQ_CHANGED_FILES" ]; then vitest related --run $(cat "$ORQ_CHANGED_FILES"); else vitest run; fi'
+```
+
+A scoped unit run that fails tests the integration head already failed is still excused as below (its failures are a subset of the head's, and its failure count is no higher).
+
 `cap` exists in both scopes. With `--machine` it is the machine-wide cap, as before. Without it, it is this project's own optional limit (a positive integer; `null` removes it): the project's threads (units, reviews, decisions) never exceed it, and the machine cap still applies to all projects together. A value that is not a positive integer is refused (`orq: cap must be a positive integer, got <value>`, exit 1). See [The cap](scheduling.md#the-cap).
 
 `goal` is the project's standing goal, for work larger than one plan. Set it with `orq config set goal "<sentence>"`; `null` clears it (a config file that holds `"goal": null` reads as no goal). The value is cut to one line (whitespace runs, including newlines, become one space) and control characters are removed. It must not be empty and is at most 500 characters (`orq: goal must be at most 500 characters, got <n>`, exit 1). `set` prints the stored value. If `orq plan archive` cannot read the config after archiving, it prints `note: config unreadable: <why>` and still exits 0. While it is set, `orq wait`, `orq plan archive` and `orq status` print it (see below).
