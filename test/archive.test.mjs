@@ -12,18 +12,18 @@ import {
 
 const NOW = Date.parse('2026-11-13T12:00:00Z');
 const GIB = 1024 ** 3;
-const ctxFor = (p, out = [], err = []) => ({
+const ctxFor = (p, out = [], err = [], threads = []) => ({
   stdout: { write: (x) => out.push(x) }, stderr: { write: (x) => err.push(x) }, env: p.env, cwd: p.repo, now: () => NOW,
   deps: {
     readMachine: () => ({ cores: 8, availableMemBytes: 16 * GIB, load1: 0 }),
-    exec: (_bin, args) => ({ code: 0, stdout: args[1] === 'list' ? '[]' : '{}', stderr: '' }), // never a real t3
+    exec: (_bin, args) => ({ code: 0, stdout: args[1] === 'list' ? JSON.stringify(threads) : '{}', stderr: '' }), // never a real t3
   },
 });
 
-async function orq(args, p) {
+async function orq(args, p, threads = []) {
   const out = [];
   const err = [];
-  const code = await run(args, ctxFor(p, out, err));
+  const code = await run(args, ctxFor(p, out, err, threads));
   return { code, out: out.join(''), err: err.join('') };
 }
 
@@ -324,12 +324,15 @@ test('archive leaves worktrees on non-orq branches alone', async (t) => {
   assert.equal(await exists(dir), true);
 });
 
-test('archive leaves the worktree of a unit dropped from this plan (its thread may still run) and removes the others', async (t) => {
+test('archive leaves the worktree of a unit dropped from this plan while T3 shows its thread running, and removes the others', async (t) => {
   const { p } = await finished(t);
   await append(p, launched(p, 'c', 'th3'), { type: 'dropped', unit: 'c' });
   const kept = addWorker(p, 'wc', 'orq/p1/c-a1');
   const other = addWorker(p, 'w1', 'orq/p1/a-a1-w');
-  const r = await orq(['plan', 'archive'], p);
+  const running = {
+    threadId: 'th3', projectId: 'p', status: 'running', itemCount: 1, updatedAt: new Date(NOW).toISOString(),
+  };
+  const r = await orq(['plan', 'archive'], p, [running]);
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /\nremoved 1 worker worktrees, freed /);
   assert.equal(await exists(kept), true);

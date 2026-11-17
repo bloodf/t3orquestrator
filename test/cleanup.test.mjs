@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createGit, defaultExec } from '../lib/git.mjs';
-import { cleanAll, sweepIfDue, SWEEP_MINUTES } from '../lib/cleanup.mjs';
+import { cleanAll } from '../lib/cleanup.mjs';
+import { sweepIfDue, SWEEP_MINUTES } from '../lib/sweep.mjs';
 import { writeLease } from '../lib/leases.mjs';
 import { readState } from '../lib/ledger.mjs';
 import { run } from '../lib/cli.mjs';
@@ -142,7 +143,7 @@ test('cleanup: changes over the salvage cap keep the worktree; a missing worktre
   assert.deepEqual(r.kept.map((k) => k.path), [big]);
   assert.match(r.kept[0].why, /over the .* salvage cap/);
   assert.equal(await exists(big), true);
-  assert.doesNotMatch(listed(p), /b1/);
+  assert.doesNotMatch(listed(p), /wt\/b1\n/);
   assert.equal(await exists(orqDir(p, 'salvage')), false);
 });
 
@@ -216,4 +217,38 @@ test('orq status counts the orq worktrees and the salvage patches; config set cl
   assert.equal((await orq(p, ['config', 'set', 'cleanup', 'false'])).out, 'cleanup = false\n');
   assert.equal(JSON.parse(await fs.readFile(orqDir(p, 'config.json'), 'utf8')).cleanup, false);
   assert.notEqual((await orq(p, ['config', 'set', 'cleanup', 'maybe'])).code, 0);
+});
+
+test('cleanup review fixes: patch applies under diff.noprefix; a nested repository keeps the worktree; T3 at work on an unknown branch keeps it', async (t) => {
+  const p = await makeProject(t, [unitSpec('a'), unitSpec('b')]);
+  sh(p.repo, 'config', 'diff.noprefix', 'true');
+  const dir = worktreeOn(p, 'a1', 'orq/p/a-a1');
+  await fs.writeFile(path.join(dir, 'shared.txt'), 'changed\n');
+  await fs.writeFile(path.join(dir, 'big.log'), Buffer.alloc(300 * 1024, 1));
+  const nested = worktreeOn(p, 'b1', 'orq/p/b-a1');
+  sh(nested, 'init', '-q', 'inner');
+  const foreign = worktreeOn(p, 'z1', 'orq/zz/z-a1'); // no plan knows it, but T3 shows a thread at work there
+  await ledger(p, [launch('a', 'orq/p/a-a1'), ...merged('a'), launch('b', 'orq/p/b-a1'), ...merged('b')]);
+  const r = await cleanAll(fxOf(p), { threads: [{ id: 'tz', status: 'running', branch: 'orq/zz/z-a1', worktreePath: foreign }] });
+  assert.deepEqual(r.removed.map((w) => [w.path, w.skipped]), [[dir, 1]]);
+  assert.deepEqual(r.kept.map((k) => k.path), [nested]);
+  assert.match(r.kept[0].why, /nested repository/);
+  assert.equal(await exists(foreign), true);
+  const check = path.join(p.root, 'check');
+  sh(p.repo, 'worktree', 'add', '-q', check, 'orq/p/a-a1');
+  sh(check, 'apply', path.join(p.repo, r.removed[0].patch));
+  assert.equal(await fs.readFile(path.join(check, 'shared.txt'), 'utf8'), 'changed\n');
+});
+
+test('archive: when T3 cannot be read, the cleanup removes nothing by force', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  await ledger(p, [launch('a', 'orq/p/a-a1'), ...merged('a')]);
+  const dirty = worktreeOn(p, 'old', 'orq/p/a-a1');
+  await fs.writeFile(path.join(dirty, 'notes.txt'), 'uncommitted\n');
+  const r = await orq(p, ['plan', 'archive'], {
+    readMachine: () => ({ cores: 8, availableMemBytes: 16 * 1024 ** 3, load1: 0 }), exec: () => ({ code: 1, stdout: '', stderr: 't3 down' }),
+  });
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /note: kept worktree .*old: /);
+  assert.equal(await exists(path.join(dirty, 'notes.txt')), true);
 });
