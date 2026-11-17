@@ -130,11 +130,13 @@ Lists the eligible models in the order `orq` would use them:
 
 `checks.unit` runs in every unit's gate after the evidence. `checks.full` runs once on the integration head.
 
-Every gate step (`checks.setup`, the evidence, `checks.unit` or `checks.full`) gets `ORQ_GATE` in its environment: `unit` in a unit's gate, `final` in the final gate. A unit's gate also gets `ORQ_BASE_SHA`, the integration head the unit was launched on, and `ORQ_CHANGED_FILES` and `ORQ_DELETED_FILES`: absolute paths to files listing, one repository-relative path a line, what `git diff --name-only <base>...<head>` shows as added, copied, modified or renamed (`--diff-filter=ACMR`) and as deleted (`D`). The lists are removed when the gate ends. When the diff cannot be computed, neither list is set: a command that scopes its tests must then run them all. The final gate gets no lists and runs `checks.full` whole. A `checks.unit` that runs only the tests related to the unit's change:
+Every gate step (`checks.setup`, the evidence, `checks.unit` or `checks.full`) gets `ORQ_GATE` in its environment: `unit` in a unit's gate, `final` in the final gate. A unit's gate also gets `ORQ_BASE_SHA`, the commit the unit's work is judged against, `ORQ_UNIT_JOB` (its job class), and `ORQ_CHANGED_FILES` and `ORQ_DELETED_FILES`: absolute paths to files listing, one repository-relative path a line, the files the unit added, copied, modified or renamed (the new path) and the files it deleted (including the old path of a rename), from the diff of the base to the unit's commit. The lists are removed when the gate ends. Neither list is set for a unit with job `fix` (it fixes what the whole suite fails), when the diff cannot be computed, or when a changed path contains a newline: a command that scopes its tests must then run them all. The final gate gets only `ORQ_GATE=final` and runs `checks.full` whole; orq's own variables are never passed down from the environment orq runs in. A `checks.unit` that runs only the tests related to the unit's change, and everything when a file was deleted (a deleted module's tests are not related to anything left):
 
 ```
-orq config set checks.unit 'if [ -n "$ORQ_CHANGED_FILES" ]; then vitest related --run $(cat "$ORQ_CHANGED_FILES"); else vitest run; fi'
+orq config set checks.unit 'if [ -s "$ORQ_CHANGED_FILES" ] && [ ! -s "$ORQ_DELETED_FILES" ]; then tr "\n" "\0" < "$ORQ_CHANGED_FILES" | xargs -0 vitest related --run --passWithNoTests; else vitest run; fi'
 ```
+
+`tr`/`xargs -0` keeps paths with spaces whole.
 
 A scoped unit run that fails tests the integration head already failed is still excused as below (its failures are a subset of the head's, and its failure count is no higher).
 

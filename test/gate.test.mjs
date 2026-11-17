@@ -256,6 +256,15 @@ test('defaultRun merges output, caps it, reports exit code and timeout', async (
   // env adds to the inherited environment
   const env = await defaultRun('echo "$ORQ_GATE:$HOME"', { ...opts, env: { ORQ_GATE: 'unit' } });
   assert.equal(env.output.trim(), `unit:${process.env.HOME}`);
+  // orq's own variables are never inherited: a stale list must not reach a final gate
+  const stale = ['ORQ_GATE', 'ORQ_BASE_SHA', 'ORQ_CHANGED_FILES', 'ORQ_DELETED_FILES', 'ORQ_UNIT_JOB'];
+  for (const k of stale) process.env[k] = 'stale';
+  try {
+    const clean = await defaultRun('echo "$ORQ_GATE|$ORQ_BASE_SHA|$ORQ_CHANGED_FILES|$ORQ_DELETED_FILES|$ORQ_UNIT_JOB"', { ...opts, env: { ORQ_GATE: 'final' } });
+    assert.equal(clean.output.trim(), 'final||||');
+  } finally {
+    for (const k of stale) delete process.env[k];
+  }
 });
 
 test('runGate hands env to every step', async () => {
