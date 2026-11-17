@@ -2,8 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { createGit, defaultExec } from '../lib/git.mjs';
 import { cleanAll } from '../lib/cleanup.mjs';
 import { sweepIfDue, SWEEP_MINUTES } from '../lib/sweep.mjs';
 import { writeLease } from '../lib/leases.mjs';
@@ -11,29 +9,9 @@ import { readState } from '../lib/ledger.mjs';
 import { run } from '../lib/cli.mjs';
 import { makeProject, unitSpec, sh } from './support/project.mjs';
 
-const git = createGit({ exec: defaultExec });
-const NOW = Date.parse('2026-11-17T12:00:00Z');
-const exists = (f) => fs.lstat(f).then(() => true, () => false);
-const fxOf = (p, now = NOW) => ({ cwd: p.repo, env: p.env, git, now: () => now });
-const orqDir = (p, ...f) => path.join(p.repo, '.orq', ...f);
-
-const plan = (p, id = 'p') => ({ type: 'plan-started', unit: null, at: 1, planId: id, baseSha: p.baseSha, integrationBranch: `orq/${id}/integration` });
-const launch = (unit, branch, at = 2) => ({
-  type: 'launched', unit, at, attempt: 1, threadId: `t-${branch.split('/').at(-1)}`, branch, key: 'pa::m2', instance: 'pa', model: 'm2', tier: 2,
-});
-const merged = (unit, at = 5) => [
-  { type: 'thread-ended', unit, at, status: 'completed' },
-  { type: 'gated', unit, at, attempt: 1, verdict: 'pass', failures: [], headSha: 'h' }, { type: 'integrated', unit, at: at + 1, head: 'h' },
-];
-const writeLedger = (file, events) => fs.writeFile(file, `${events.map((e) => JSON.stringify(e)).join('\n')}\n`);
-const ledger = (p, events) => writeLedger(orqDir(p, 'ledger.jsonl'), [plan(p), ...events]);
-const worktreeOn = (p, name, branch) => {
-  const dir = path.join(p.root, 'wt', name);
-  sh(p.repo, 'worktree', 'add', '-q', '-b', branch, dir, p.baseSha);
-  return dir;
-};
-const hasBranch = (p, b) => spawnSync('git', ['rev-parse', '--verify', '-q', `refs/heads/${b}`], { cwd: p.repo }).status === 0;
-const listed = (p) => sh(p.repo, 'worktree', 'list', '--porcelain');
+import {
+  NOW, exists, fxOf, orqDir, plan, launch, merged, writeLedger, ledger, worktreeOn, hasBranch, listed,
+} from './support/cleanup.mjs';
 
 test('cleanup: a worktree dirty only with ignored build files goes without a patch; links are removed, never their target', async (t) => {
   const p = await makeProject(t, [unitSpec('a')]);
@@ -98,10 +76,10 @@ test('cleanup keeps: a leased thread, a running unit, an unknown launch of the r
   for (const d of [leased, running, unknown, locked, integration]) assert.equal(await exists(d), true, d);
 });
 
-test('cleanup removes worktrees of archived and earlier plans, finished reviews and decisions; keeps running ones', async (t) => {
+test('cleanup removes worktrees of archived plans, finished reviews and decisions; keeps running ones and a plan no ledger names', async (t) => {
   const p = await makeProject(t, [unitSpec('a')]);
   const archived = worktreeOn(p, 'old', 'orq/old/x-a1');
-  const earlier = worktreeOn(p, 'p0', 'orq/p0/review-1'); // a plan with no archive left
+  const earlier = worktreeOn(p, 'p0', 'orq/p0/review-1'); // a plan this project has no record of: not this project's
   const reviewDone = worktreeOn(p, 'r1', 'orq/p/review-1');
   const reviewRunning = worktreeOn(p, 'r2', 'orq/p/review-2');
   const askDone = worktreeOn(p, 'k1', 'orq/ask-1-abc');
@@ -113,9 +91,9 @@ test('cleanup removes worktrees of archived and earlier plans, finished reviews 
   await fs.writeFile(orqDir(p, 'reviews.json'), JSON.stringify({ reviews: [{ n: 1, threadId: 'r1', status: 'done' }, { n: 2, threadId: 'r2', status: 'running' }] }));
   await fs.writeFile(orqDir(p, 'asks.json'), JSON.stringify({ asks: [{ n: 1, threadId: 'k1', status: 'answered' }, { n: 2, threadId: null, status: 'starting' }] }));
   const r = await cleanAll(fxOf(p));
-  assert.deepEqual(r.removed.map((w) => w.path).sort(), [archived, earlier, reviewDone, askDone].sort());
+  assert.deepEqual(r.removed.map((w) => w.path).sort(), [archived, reviewDone, askDone].sort());
   assert.equal(r.removed.find((w) => w.path === archived).patch, path.join('.orq', 'salvage', `x-a1-${NOW}.patch`));
-  for (const d of [reviewRunning, askRunning]) assert.equal(await exists(d), true, d);
+  for (const d of [reviewRunning, askRunning, earlier]) assert.equal(await exists(d), true, d);
 });
 
 test('cleanup: a dropped unit keeps its worktree until T3 shows its thread is not active; an active thread always keeps it', async (t) => {
@@ -213,7 +191,7 @@ test('orq status counts the orq worktrees and the salvage patches; config set cl
   await fs.writeFile(orqDir(p, 'salvage', 'a-a1-1.patch'), '# x\n');
   const s = await orq(p, ['status'], { readMachine: () => ({ cores: 8, availableMemBytes: 16 * 1024 ** 3, load1: 0 }) });
   assert.equal(s.code, 0, s.err);
-  assert.match(s.out, /\nworktrees: 1 on orq branches; 1 salvage patch in \.orq\/salvage\/\n/);
+  assert.match(s.out, /\nworktrees: 1 on orq branches; 1 salvage patch in \.orq\/salvage\/ \(kept 30 days, at most 100\)\n/);
   assert.equal((await orq(p, ['config', 'set', 'cleanup', 'false'])).out, 'cleanup = false\n');
   assert.equal(JSON.parse(await fs.readFile(orqDir(p, 'config.json'), 'utf8')).cleanup, false);
   assert.notEqual((await orq(p, ['config', 'set', 'cleanup', 'maybe'])).code, 0);
