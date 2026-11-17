@@ -437,3 +437,12 @@ test('ship: commits already integrated with tool or model credit are named in a 
   assert.match(r.out, new RegExp(`\nnote: 1 commits still credit a tool or model \\(${Z.slice(0, 12)}\\)\n`));
   assert.equal(p.remoteSha('refs/heads/main'), Z);
 });
+
+test('creditIn: a tool name inside a person name is not credit', async () => {
+  const { creditIn } = await import('../lib/ship.mjs');
+  assert.equal(creditIn('Co-authored-by: Kevin Devine <k@x.com>'), null);
+  assert.equal(creditIn('Co-authored-by: Ann Raider <a@x.com>'), null);
+  assert.equal(creditIn('Reviewed by the Octopus team'), null);
+  assert.ok(creditIn('Co-authored-by: Devin <d@x.com>'));
+  assert.ok(creditIn('Written by Claude Sonnet 5.5'));
+});
