@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-11-17
+
 ### Added
 
 - Limit failures. When a thread's provider stops it at a quota or rate limit, a sign-out, or a lack of capacity, and writes that as the thread's last reply (as antigravity, claude and codex do), `orq wait` recognises the text, cools what it names until the reset time the text gives (the instance's models of that family for a limit, the instance for a sign-out, the model for capacity), and relaunches the unit at once on another instance, preferring another model family, continuing the commits the limited worker left. A limit failure costs no attempt, records no failure strike, and does not count toward `3 provider failures`: when every candidate is cooling the unit waits for the earliest reset (`idle: … retry at <time>`) instead of being judged. A turn that completed with a limit reply is not gated. A running thread that went quiet for 5 minutes while T3 shows its account used up (100%) or signed out is given up as a limit failure. Only a short reply whose first line is a provider's error phrasing counts, so worker reports and reviews that mention a rate limit or a login do not. Review and decision threads stopped by a limit cool the same way and are replaced on another model. See [Failure ladders](docs/scheduling.md#failure-ladders).
