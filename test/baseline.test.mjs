@@ -1,6 +1,7 @@
 // Baseline-aware unit gate: failures the integration head already had are not the unit's.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as baseline from '../lib/baseline.mjs';
 import {
   baselineOf, failureLines, checksOutput, excuse,
 } from '../lib/baseline.mjs';
@@ -156,4 +157,11 @@ test('baselineOf: what a failed final run printed, kept in its result once its l
   assert.equal(excuse(failed(), unitLog(BUN_UNIT), base).verdict, 'pass');
   assert.equal(excuse(failed(), unitLog(BUN_UNIT), { ...base, result: { ...base.result, baseline: { ...kept, errors: [] } } }).verdict, 'fail');
   assert.equal(baselineOf(null), null);
+});
+
+test('scan: a node warning reads the same whatever process printed it', () => {
+  const { scan } = baseline;
+  const a = scan('(node:4242) ExperimentalWarning: VM Modules is experimental');
+  const b = scan('(node:977) ExperimentalWarning: VM Modules is experimental');
+  assert.deepEqual([...a.errors], [...b.errors]);
 });
