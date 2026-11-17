@@ -43,7 +43,7 @@ function simulator(p, scripts) {
       Object.assign(t, { status: 'running', updatedAt: sim.now + 1, step: 0, script: [sim.afterSend ?? (sim.stubborn ? 'complete' : 'commit-complete')] });
       return ok({ threadId: t.id, runId: 'r', status: 'queued', delivery: 'queued' });
     }
-    const unit = /^orq (\S+):/.exec(opt(args, '--title'))[1];
+    const unit = /^orq\/[^/]+\/(.+)-a\d+(?:-l\d+)?$/.exec(opt(args, '--branch'))[1];
     sh(p.repo, 'branch', opt(args, '--branch'), opt(args, '--worktree'));
     sim.onStart?.(unit);
     sim.n += 1;
@@ -434,7 +434,8 @@ test('wait: with one routable model a provider failure waits out the backoff and
     if (m) sim.now = Date.parse(m[1]) + 1;
   }
   assert.match(outs[0], /^idle: no model for a: all cooling down; retry at /);
-  assert.equal(outs.at(-1), 'judgment: a: 3 provider failures\n');
+  assert.equal(outs.at(-1).split('\n')[0], 'judgment: a: 3 provider failures');
+  assert.ok(outs.some((o) => o.includes('note: unit a relaunched on pa::m2, a model an earlier attempt used: no unused model is eligible\n'))); // the only model: said so
   assert.equal(sim.byUnit.a.length, 3);
   assert.ok(sim.byUnit.a.every((x) => x.model === 'm2'));
 });
@@ -449,7 +450,7 @@ test('wait and status name a unit launched below its wanted tier, and the model 
   assert.match(first, /^done: 1 units integrated/);
   assert.deepEqual(rest, ['note: unit a wanted tier 3; launched on pa::m2 (tier 2), the best available']);
   const s = await orq(['status'], p, sim);
-  assert.match(s.out, /^a integrated attempt=1 model=pa::m2 tier=2 wanted_tier=3 thread=/m);
+  assert.match(s.out, /^a integrated attempt=1 model=pa::m2 tier=2 wanted_tier=3 tried=pa::m2 thread=/m);
 });
 
 const foreign = { threadId: 'other-th', project: '/other-project', unit: 'z', instance: 'pb', model: 'm2', startedAt: NOW, heartbeatAt: NOW, blocked: false };
@@ -542,7 +543,7 @@ test('wait: a worker whose provider failed after committing is continued on anot
   const u = unitOf(await readState(p.repo), 'a');
   assert.deepEqual([u.state, u.baseSha], ['integrated', p.baseSha]);
   await fs.stat(path.join(p.repo, '.orq', 'integration', 'a.txt'));
-  assert.match((await orq(['status'], p, sim)).out, /^a integrated attempt=1 model=\S+ tier=2 continued rerouted=\S+->\S+\(failed\) thread=/m);
+  assert.match((await orq(['status'], p, sim)).out, /^a integrated attempt=1 model=\S+ tier=2 tried=\S+,\S+ continued rerouted=\S+->\S+\(failed\) thread=/m);
 });
 
 test('wait: a unit with setup: false skips checks.setup; others still run it; the warning for outside evidence is a note', async (t) => {

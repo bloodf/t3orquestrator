@@ -116,7 +116,7 @@ test('launch: starts from the integration head, swaps the reservation for a leas
   const planId = Math.floor(NOW / 1000).toString(36);
   assert.deepEqual(o, {
     project: s.p.repo, message: 'Work order for a.\n', provider: 'pa', model: 'm2', worktree: s.p.baseSha,
-    branch: `orq/${planId}/a-a1`, title: 'orq a: do a',
+    branch: `orq/${planId}/a-a1`, title: 'Implement - a | do a',
   });
   const u = unitOf(await readState(s.p.repo), 'a');
   assert.equal(u.state, 'running');

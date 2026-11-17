@@ -110,7 +110,7 @@ Prints `tier <key> = <n> (<by>)`. `--by` defaults to `orchestrator`. A tier set 
 Lists the eligible models in the order `orq` would use them:
 
 ```
-1 <instance> <model> tier=<n> family=<family> confirmed|unconfirmed[ same-family][ below-tier][ score=<rate|-> n=<attempts>][ demoted][ headroom=<n>%]
+1 <instance> <model> tier=<n> family=<family> confirmed|unconfirmed[ free][ same-family][ below-tier][ score=<rate|-> n=<attempts>][ demoted][ headroom=<n>%]
 ```
 
 `headroom` is what is left of the fullest usage window that binds the model, when T3 reports [account usage](scheduling.md#account-usage).
@@ -126,7 +126,7 @@ Lists the eligible models in the order `orq` would use them:
 | Scope | Keys |
 |---|---|
 | project (`.orq/config.json`) | `autonomy`, `base`, `cap`, `checks.setup`, `checks.unit`, `checks.full`, `pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`, `finalTimeoutMinutes`, `questions`, `share`, `goal`, `cleanup` |
-| machine (`~/.t3orq/config.json`) | `cap`, `perInstanceLimit`, `usageThreshold` (1-100, default 90: see [Account usage](scheduling.md#account-usage)); `t3Home` is recorded by `sync` |
+| machine (`~/.t3orq/config.json`) | `cap`, `perInstanceLimit`, `usageThreshold` (1-100, default 90: see [Account usage](scheduling.md#account-usage)), `freeModels`, `excludeModels`, `decisionOnly`, `instanceFamilies` (see [Machine routing policy](scheduling.md#machine-routing-policy)); `t3Home` is recorded by `sync` |
 
 `checks.unit` runs in every unit's gate after the evidence. `checks.full` runs once on the integration head.
 

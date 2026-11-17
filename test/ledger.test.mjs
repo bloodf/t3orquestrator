@@ -193,7 +193,7 @@ test('reduce on a realistic sequence of two units', () => {
   assert.equal(state(s, 'a'), 'integrated');
   assert.deepEqual({ ...unitOf(s, 'b'), since: null }, {
     ...unitOf(emptyState(), 'b'),
-    state: 'blocked', attempt: 1, launches: 2, providerFailures: 1, failedKeys: ['i::m'], triedInstances: ['i'], threadId: 't3', key: 'j::m', instance: 'j',
+    state: 'blocked', attempt: 1, launches: 2, providerFailures: 1, failedKeys: ['i::m'], triedInstances: ['i'], used: ['i::m', 'j::m'], threadId: 't3', key: 'j::m', instance: 'j',
     model: 'm', branch: 'orq/p/b-a1', baseSha: C, tier: 2, blockedReported: true, since: null,
   });
   assert.equal(s.plan.integrationHead, C);

@@ -3,6 +3,17 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Thread titles say what a thread is for: `<Type> - <Ticket> | <Name>`, at most 100 characters, cut on a word. A unit's type comes from its job (`Implement`, `Fix`, `Test`, `Docs`, `Chore` for `mechanical`, `Explore`, `Summary`, `Plan` for `plan` and `architecture`, `Debug`, `Review`, `Decision`), its ticket from the `#<n>` refs its title starts with (else the unit id), its name from the rest of the title. A review is `Review - <the integrated units' refs, or the plan id> | <the plan's goal, or Integration review <n>>`, a decision `Decision - ask-<n> | <the question's first line>`. Before: `orq <unit>: <title>`, `orq review <n>`, `orq ask <n>`. Nothing in orq reads thread titles.
+- Machine routing policy (`orq config set --machine <key> <value>`; see [Machine routing policy](docs/scheduling.md#machine-routing-policy)): `freeModels` (default `[":free$"]`) are routed first among eligible candidates, except for `decide`, and `orq route` marks them `free`; `excludeModels` (default `["^ollama-local/"]`) are never routed; `decisionOnly` (default `["astra", "fable"]`) are routed only for `decide`, so a top model no longer implements, fixes, tests, documents or reviews, and a job left with only such models waits, saying so; `instanceFamilies` (default: `antigravity` and `antigravity-2`, and any instance id starting `antigravity`, run only `google` models) limits the families an instance may run. The `providers:` line of `orq status` and `orq sync` ends with the free and excluded models and the family limits.
+
+### Changed
+
+- Every relaunch of a unit goes to a model none of its launches used, of another family first, whatever ended the launch before it, `orq unit retry` included; a used model is launched again only when no unused one is eligible, with a note. Each unit records the models it was launched on (`used`); `orq status` shows them as `tried=<key>,…`.
+
 ## [0.10.1] - 2026-11-17
 
 ### Added

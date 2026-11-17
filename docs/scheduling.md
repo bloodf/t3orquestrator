@@ -57,8 +57,9 @@ Until some unit has passed its gate, only one unit is in flight. A plan with a b
 
 `orq` picks a model for each launch from `playbook/routing.json`. Each job class has a minimum tier (4 strongest, 1 smallest). `review` and `fix` use the author's tier: the highest tier among the integrated units. `review` also prefers a different model family.
 
-Among enabled, available models at or above the minimum tier, candidates are ordered by:
+Among enabled, available models at or above the minimum tier that the [machine policy](#machine-routing-policy) allows, candidates are ordered by:
 
+0. a free model first (machine `freeModels`), except for `decide`;
 1. lowest tier first (highest first for `decide`, the job `orq ask` routes: it wants the strongest model, and when every tier-4 model is cooling down or at its limit it takes the strongest free model rather than wait);
 2. then the model with more headroom, when T3 reports [account usage](#account-usage): in quarters (75% or more left, 50-74%, 25-49%, under 25%), an instance whose usage is unknown counting as 50-74%, so small differences fall through to the rules below;
 3. then the better record for this job class: the share of the model's last 10 recorded results that passed, once it has at least 3 (fewer count as neutral, 0.5, so a new model is not starved);
@@ -71,6 +72,19 @@ For `review`, models from the author's family, and models whose family is unknow
 A result is recorded once per worker launch: the first gate verdict after the launch, pass or fail, for the model and job class of that launch. Later verdicts of the same launch (attempt 2, after feedback on the same thread) are not recorded. Attempt 3 is a new launch, so its first verdict is recorded for its own model. Not recorded: a launch that continued another worker's commits, a setup failure, and provider failures (they only drive cooldowns). A model with at least 4 recorded results of which under 34% passed is demoted: it is tried only after every other eligible model, at any adequate tier, and stays usable when it is all there is. A demotion lapses 24 hours after the model's last recorded result for that job class, so the model gets another chance. `orq route` prints `score=<rate> n=<results>` and `demoted`. `review` and `decide` are never scored: their threads are not gated. Records kept before this version (`outcomes` in the registry) are not read for scoring.
 
 A model is skipped while it or its instance is cooling down, or while its instance is at its limit. A model whose work failed the gate twice for this unit is excluded for that unit (the quality ladder's third attempt). A model, instance or model family on which this unit hit a provider failure moves to the end of the order, a failed model behind a failed instance behind a failed family (`unknown` is no family), but it is not excluded: when nothing else is eligible it is used again once its cooldown has passed. So a relaunch goes to another instance first and, among those, to another family first.
+
+Every relaunch of a unit, whatever ended the launch before it (a gate failure, an unfinished or stopped worker, a provider or limit failure, a stalled thread given up, a judgment and `orq unit retry`), goes to a model no launch of that unit used, of another family first: each model a unit was launched on is recorded (`used` in its state, `tried=<key>,…` in `orq status`) and never forgotten, and those models move to the end of the order as above. The tier escalation is unchanged. Only when no unused model is eligible is a used one launched again, with `note: unit <id> relaunched on <key>, a model an earlier attempt used: no unused model is eligible`. Feedback sent to the same running thread is not a relaunch.
+
+### Machine routing policy
+
+Four machine settings (`orq config set --machine <key> <value>`; a value is a JSON list, a comma-separated list, or for `instanceFamilies` a JSON object; `null` restores the default) shape what may run where, for every job. Model patterns are regular expressions on the model id, case-insensitive.
+
+- `freeModels` (default `[":free$"]`): models that cost nothing, such as a hosted provider's free tier. Among eligible candidates they go first, before the order above, except for `decide`, which keeps the strongest first. Eligibility, cooldowns and the failure ladders are unchanged: a free model that fails is cooled and rerouted like any other. `orq route` marks them `free`; `[]` turns this off.
+- `excludeModels` (default `["^ollama-local/"]`): never routed, for any job.
+- `decisionOnly` (default `["astra", "fable"]`): models too expensive for anything but decisions: only `decide` routes them. A job whose only usable models are these waits as if it had none (`idle: no model for <unit>: only decision-only models are usable (kept for decisions: machine config decisionOnly)`), and with a lower tier available it takes that one, below its tier, instead.
+- `instanceFamilies` (default `{"antigravity":["google"],"antigravity-2":["google"]}`; any instance whose id starts with `antigravity` runs only `google` models unless the map names it): the model families an instance may run, when T3 lists others on it.
+
+`orq status` and `orq sync` show the policy at the end of the `providers:` line: `<n> free models`, `<n> excluded models (<keys>)` and `families: <instance>=<families>, …`.
 
 ### Account usage
 

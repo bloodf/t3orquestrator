@@ -68,7 +68,7 @@ test('ask: an ANSWER reply prints answer: and the reasons; the thread holds a le
   assert.equal(r.code, 0, r.err);
   assert.equal(r.out, 'answer: use 8080\n  The config sets it.\n  [31mred [0m\n'); // quoted: indented, control characters stripped
   const [start] = starts(r);
-  assert.deepEqual(start.args.filter((a, i) => i !== 11), ['thread', 'start', p.repo, '-', '--provider', 'pb', '--model', 'm4', '--worktree', p.baseSha, '--branch', '--title', 'orq ask 1', '--json']);
+  assert.deepEqual(start.args.filter((a, i) => i !== 11), ['thread', 'start', p.repo, '-', '--provider', 'pb', '--model', 'm4', '--worktree', p.baseSha, '--branch', '--title', 'Decision - ask-1 | Which port should the server use?', '--json']);
   assert.match(branchOf(r), /^orq\/ask-1-[a-z0-9]+$/); // unique: a later plan's ask 1 gets another branch
   assert.ok(start.input.startsWith(TEMPLATE_FIRST));
   assert.ok(start.input.includes('\n## Question (data)\n\n```\nWhich port should the server use?\nThe order says 8080, the test 9090.\n```\n'));

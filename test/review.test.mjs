@@ -80,7 +80,7 @@ test('start: launches on the integration head with a lease and a record', async 
   const start = r.calls.find((c) => c.args[1] === 'start');
   assert.equal(start.input, 'Review the integrated diff.\n');
   assert.deepEqual(start.args, [
-    'thread', 'start', p.repo, '-', '--provider', 'pa', '--model', 'm2', '--worktree', p.baseSha, '--branch', 'orq/p1/review-1', '--title', 'orq review 1', '--json',
+    'thread', 'start', p.repo, '-', '--provider', 'pa', '--model', 'm2', '--worktree', p.baseSha, '--branch', 'orq/p1/review-1', '--title', 'Review - p1 | test goal', '--json',
   ]);
   const doc = await reviews(p);
   assert.deepEqual(doc.reviews.map(({ n, threadId, key, status, head, tier, family }) => [n, threadId, key, status, head, tier, family]),
