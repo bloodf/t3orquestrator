@@ -807,26 +807,49 @@ test('wait in continuous mode: the final checks run while a unit still works, an
   const st = await readState(p.repo);
   assert.equal(st.plan.green, st.plan.integrationHead);
   assert.equal(st.plan.greenChecks, 'test -f a.txt'); // the command the green run used
-  assert.equal(r.out.split('\n')[0], `ship-ready: ${st.plan.green.slice(0, 12)} passed the final checks; 1 units not shipped yet; run "orq ship"`);
+  assert.equal(r.out.split('\n')[0], `ship-ready: ${st.plan.green.slice(0, 12)} passed the final checks; 1 units not shipped yet; run "orq ship --title <conventional title> --body-file <summary file>"`);
   assert.equal(unitOf(st, 'b').state, 'running');
 });
 
-test('wait in continuous mode: a passed head that origin\'s base moved past is not ship-ready again; wait keeps working', async (t) => {
+test('wait in continuous mode: origin\'s base moved past a passed head: wait merges it, and the merged head is ship-ready', async (t) => {
   const p = await continuousProject(t, 'test -f a.txt');
   const sim = simulator(p, { a: [['commit-complete']], b: [['idle']] });
   assert.match((await orq(['wait'], p, sim)).out, /^ship-ready: /);
   const { green } = (await readState(p.repo)).plan;
-  // `orq ship` fetched the base and refused: origin/main has a commit the green head lacks
+  // another machine shipped: origin/main (as last fetched; this repo has no remote to fetch) has a commit the head lacks
   const git = (...a) => spawnSync('git', a, { cwd: p.repo, encoding: 'utf8' });
   const moved = git('commit-tree', `${green}^{tree}`, '-p', green, '-m', 'other machine').stdout.trim();
   assert.equal(git('update-ref', 'refs/remotes/origin/main', moved).status, 0);
-  const r = await orq(['wait', '--max-seconds', '1'], p, sim);
+  const r = await orq(['wait'], p, sim);
   assert.equal(r.code, 0, r.err);
+  const st = await readState(p.repo);
+  assert.deepEqual([st.plan.synced.from, st.plan.synced.base], [green, moved]);
+  assert.equal(st.plan.green, st.plan.synced.to); // the final checks ran on the merged head and passed
+  assert.equal(git('merge-base', '--is-ancestor', moved, st.plan.green).status, 0); // it fast-forwards the base
+  assert.equal(r.out.split('\n')[0], `ship-ready: ${st.plan.green.slice(0, 12)} passed the final checks; 1 units not shipped yet; run "orq ship --title <conventional title> --body-file <summary file>"`);
+  assert.match(r.out, new RegExp(`\nnote: merged origin/main \\(${moved.slice(0, 12)}\\) into the integration branch at ${st.plan.green.slice(0, 12)}; the final checks run on it\n`));
+});
+
+test('wait in continuous mode: a base that conflicts with the integration branch is tried once per origin sha and reported', async (t) => {
+  const p = await continuousProject(t, 'test -f a.txt');
+  const sim = simulator(p, { a: [['commit-complete']], b: [['idle']] });
+  assert.match((await orq(['wait'], p, sim)).out, /^ship-ready: /);
+  const { green, integrationHead } = (await readState(p.repo)).plan;
+  sh(p.repo, 'branch', 'other', p.baseSha);
+  const moved = await commitOn(p.repo, 'other', { 'a.txt': 'not a\n' }, 'other machine');
+  sh(p.repo, 'update-ref', 'refs/remotes/origin/main', moved);
+  const r = await orq(['wait', '--max-seconds', '1'], p, sim);
   assert.match(r.out, /^timeout: /);
-  assert.match(r.out, new RegExp(`note: ${green.slice(0, 12)} passed the final checks but origin/main moved past it; it ships once a unit merges origin/main`));
-  // a base that has not moved past it (or no fetched base at all) leaves it ship-ready
-  assert.equal(git('update-ref', 'refs/remotes/origin/main', green).status, 0);
-  assert.match((await orq(['wait', '--max-seconds', '1'], p, sim)).out, /^ship-ready: /);
+  assert.match(r.out, new RegExp(`\nnote: origin/main \\(${moved.slice(0, 12)}\\) conflicts with the integration branch in a\\.txt; a unit with job "fix" has to merge it\n`));
+  assert.match(r.out, new RegExp(`\nnote: ${green.slice(0, 12)} passed the final checks but origin/main moved past it; it ships once a unit merges origin/main \\(conflicts in a\\.txt\\)\n`));
+  const st = await readState(p.repo);
+  assert.deepEqual([st.plan.integrationHead, st.plan.syncConflict.base, st.plan.syncConflict.files], [integrationHead, moved, ['a.txt']]);
+  assert.equal(sh(path.join(p.repo, '.orq', 'integration'), 'status', '--porcelain'), ''); // the merge was aborted
+  const again = await orq(['wait', '--max-seconds', '1'], p, sim);
+  assert.doesNotMatch(again.out, /conflicts with the integration branch/); // tried once until origin moves
+  const events = (await readLines(path.join(p.repo, '.orq', 'ledger.jsonl'))).filter((e) => e.type === 'sync-conflicted');
+  assert.equal(events.length, 1);
+  assert.ok((await orq(['status'], p, sim)).out.includes(`sync-conflict=${moved.slice(0, 12)} in a.txt`));
 });
 
 test('wait in continuous mode: a failing head is reported once while units are open', async (t) => {

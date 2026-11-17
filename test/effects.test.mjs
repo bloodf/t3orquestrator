@@ -590,7 +590,40 @@ test('gate-run: a failed final gate keeps its whole output in head-<sha>.log and
   const seen = [];
   const unitRun = async (_c, opts) => { seen.push(opts.logFile); return { code: 0, output: '', timedOut: false }; };
   await cli(['gate-run', 'a', '1', sha], { stdout: quiet, stderr: quiet, env: s.p.env, cwd: s.p.repo, deps: { run: unitRun } });
-  assert.ok(seen.length > 0 && seen.every((f) => f === undefined)); // a unit gate keeps no log
+  assert.ok(seen.length > 0 && seen.every((f) => f === gateFile(s.p.repo, 'a', 1, 'output.log'))); // read for its failures only
+  assert.equal(fsSync.existsSync(gateFile(s.p.repo, 'a', 1, 'output.log')), false); // a unit gate keeps no log
+});
+
+test('gate-run: a unit that fails only the tests its red base head fails passes, flagged; one more failure fails it', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await s.act(launchA());
+  const u = unitOf(await readState(s.p.repo), 'a');
+  const sha = await commitOn(s.p.repo, u.branch, { 'a.txt': 'A\n' });
+  const quiet = { write: () => {} };
+  const baseTail = '(fail) merged-schema: has the spool table [3.20ms]\n(fail) legacy-low-spool-migration: keeps custom thresholds [12.01ms]\n 410 pass\n 2 fail';
+  const head = path.join(s.p.repo, '.orq', 'units', 'integration', `head-${u.baseSha.slice(0, 12)}.json`);
+  await fs.mkdir(path.dirname(head), { recursive: true });
+  await fs.writeFile(head, JSON.stringify({
+    verdict: 'fail', failures: ['checks failed (exit 1)'], flags: [], headSha: u.baseSha, steps: [{ name: 'checks', code: 1, durationMs: 9, tail: baseTail }],
+  }));
+  let output = '(pass) spools: lists spools [2.00ms]\n(fail) merged-schema: has the spool table [2.90ms]\n 411 pass\n 1 fail\n';
+  const run = async (c, { logFile }) => {
+    if (c !== 'false') return { code: 0, output: '', timedOut: false }; // the evidence passes
+    if (logFile) fsSync.appendFileSync(logFile, output);
+    return { code: 1, output, timedOut: false };
+  };
+  const orq = (args) => cli(args, { stdout: quiet, stderr: quiet, env: s.p.env, cwd: s.p.repo, deps: { run } });
+  assert.equal(await orq(['config', 'set', 'checks.setup', 'null']), 0);
+  assert.equal(await orq(['config', 'set', 'checks.unit', 'false']), 0);
+  await orq(['gate-run', 'a', '1', sha]);
+  const passed = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'a', 1, 'json'), 'utf8'));
+  assert.deepEqual([passed.verdict, passed.failures, passed.flags.map((f) => f.kind)], ['pass', [], ['pre-existing-failures']]);
+  assert.deepEqual(passed.steps.map((x) => x.name), ['evidence', 'checks', 'checks (retry)']); // as they ran
+  assert.equal(fsSync.existsSync(gateFile(s.p.repo, 'a', 1, 'output.log')), false);
+  output += '(fail) spools: rejects a negative weight [1.00ms]\n';
+  await orq(['gate-run', 'a', '1', sha]);
+  const failed = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'a', 1, 'json'), 'utf8'));
+  assert.deepEqual([failed.verdict, failed.failures, failed.flags], ['fail', ['checks failed (exit 1)'], []]);
 });
 
 test('gate-run: a final gate that fails before any step names no output', async (t) => {

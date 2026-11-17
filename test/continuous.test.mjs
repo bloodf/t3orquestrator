@@ -5,7 +5,9 @@ import { readFileSync } from 'node:fs';
 import { tick } from '../lib/tick.mjs';
 import { reduce, apply, FINAL } from '../lib/ledger.mjs';
 import { decide } from '../lib/commands/wait-report.mjs';
-import { shipTitle, shipUnits, newerThanShipped } from '../lib/ship.mjs';
+import {
+  shipBody, shipTextError, shipTitle, shipUnits, newerThanShipped,
+} from '../lib/ship.mjs';
 
 const rules = JSON.parse(readFileSync(new URL('../playbook/routing.json', import.meta.url), 'utf8'));
 const NOW = Date.parse('2026-11-12T12:00:00Z');
@@ -140,20 +142,48 @@ const say = (s, over = {}, continuous = true, stale = null) => decide({
 
 test('decide in continuous: ship-ready when a passed head is not shipped, after judgment and blocked lines', () => {
   const ready = st(aIn, { green: C, final: { verdict: 'pass', failures: [], head: C }, integrations: integrations.slice(0, 1) });
-  assert.deepEqual(say(ready), [`ship-ready: ${C.slice(0, 12)} passed the final checks; 1 units not shipped yet; run "orq ship"`]);
+  const run = 'run "orq ship --title <conventional title> --body-file <summary file>"';
+  assert.deepEqual(say(ready), [`ship-ready: ${C.slice(0, 12)} passed the final checks; 1 units not shipped yet; ${run}`]);
   const withShip = st(bothIn, { green: D, shipped: C, final: { verdict: 'pass', failures: [], head: D } });
-  assert.deepEqual(say(withShip, { done: true }), [`ship-ready: ${D.slice(0, 12)} passed the final checks; 1 units not shipped yet; run "orq ship"`]);
+  assert.deepEqual(say(withShip, { done: true }), [`ship-ready: ${D.slice(0, 12)} passed the final checks; 1 units not shipped yet; ${run}`]);
   assert.deepEqual(say(st({ a: { state: 'failed', reason: 'x' }, b: { state: 'integrated' } }, { green: C })), ['judgment: a: x']);
   assert.match(say(ready, { newlyBlocked: [{ unit: 'b', threadId: 't' }] })[0], /^blocked: /);
   assert.equal(say(st(aIn, { green: C, shipped: C })), null); // shipped: b still runs
   assert.equal(say(ready, {}, false), null); // other modes never print it
-  assert.equal(say(ready, {}, true, 'main'), null); // origin's base moved past it: `orq ship` would refuse; units still run, keep polling
+  const behind = { base: 'main', synced: false, files: [] };
+  assert.equal(say(ready, {}, true, behind), null); // origin's base moved past it: `orq ship` would refuse; units still run, keep polling
   // nothing left in flight: say what unblocks it, never `done` for a head that did not ship
-  assert.deepEqual(say(withShip, { done: true }, true, 'main'), [`ship-blocked: ${D.slice(0, 12)} passed the final checks, but origin/main moved past it; append a unit with job "fix" that merges origin/main into the integration branch`]);
+  const fix = 'append a unit with job "fix" that merges origin/main into the integration branch';
+  assert.deepEqual(say(withShip, { done: true }, true, behind), [`ship-blocked: ${D.slice(0, 12)} passed the final checks, but origin/main moved past it; ${fix}`]);
+  const conflicts = { ...behind, files: ['a.txt', 'b/c.ts'] }; // orq tried to merge it
+  assert.deepEqual(say(withShip, { done: true }, true, conflicts), [`ship-blocked: ${D.slice(0, 12)} passed the final checks, but origin/main moved past it and merging it conflicts in a.txt, b/c.ts; ${fix}`]);
+  // orq merged origin's base into the integration branch: neither line, the final checks run on the merged head
+  const merged = st(bothIn, {
+    green: D, shipped: C, final: { verdict: 'pass', failures: [], head: D }, integrationHead: E,
+  });
+  assert.equal(say(merged, {}, true, { ...behind, synced: true }), null);
+  assert.equal(say(ready, {}, true, { ...behind, synced: true }), null);
   assert.equal(say({ ...ready, plan: { ...ready.plan, greenVerdict: 'no-evidence' } }), null); // proved nothing: not ready
   // the merge unit landed and the newer head fails: the failure is the line, not another merge
   const mergedFails = st(bothIn, { green: C, final: { verdict: 'fail', failures: ['boom'], head: D } });
-  assert.deepEqual(say(mergedFails, { done: true }, true, 'main'), [`final-fail: 2 units integrated at ${D.slice(0, 12)}; boom`]);
+  assert.deepEqual(say(mergedFails, { done: true }, true, behind), [`final-fail: 2 units integrated at ${D.slice(0, 12)}; boom`]);
+});
+
+test('ledger: orq merging origin\'s base moves the head like an integration with no unit; a conflict is kept per base sha', () => {
+  let s = reduce([started, ...aInC, finalStart(C), finalGated(C)]);
+  s = apply(s, { type: 'sync-conflicted', unit: null, at: 9, base: E, files: ['a.txt'] });
+  assert.deepEqual(s.plan.syncConflict, { base: E, files: ['a.txt'], at: 9 });
+  assert.equal(s.plan.integrationHead, C);
+  s = apply(s, {
+    type: 'synced', unit: null, at: 10, from: C, to: D, base: B,
+  });
+  assert.deepEqual([s.plan.integrationHead, s.plan.finalGateStarts, s.plan.syncConflict], [D, 0, null]);
+  assert.deepEqual(s.plan.synced, {
+    from: C, to: D, base: B, at: 10,
+  });
+  assert.deepEqual(s.plan.integrations, [{ unit: 'a', head: C }, { unit: null, head: D }]);
+  assert.equal(newerThanShipped({ ...s.plan, shipped: C }, D), true); // a merged head ships
+  assert.equal(go([...aInC, finalStart(C), finalGated(C), { type: 'synced', unit: null, at: 10, from: C, to: D, base: B }, ...bRunning]).actions.filter((a) => a.type === 'final-gate').length, 1);
 });
 
 test('decide in continuous: an early final-fail once per failing head while units are open', () => {
@@ -174,13 +204,49 @@ test('decide in continuous: done only when every unit is in and the head is ship
   assert.match(say(st(bothIn, { final: passed }), { done: true }, false)[0], /^done: 2 units/);
 });
 
-test('a ship carries the units integrated since the last ship; its title names up to 3, then +k more', () => {
+test('a ship carries the units integrated since the last ship, never a merge of the base', () => {
   const p = { integrations: [{ unit: 'a', head: C }, { unit: 'b', head: D }, { unit: 'c', head: E }], shipped: C, green: E };
   assert.deepEqual(shipUnits(p), ['b', 'c']);
   assert.deepEqual(shipUnits({ ...p, shipped: undefined, green: D }), ['a', 'b']);
   assert.deepEqual(shipUnits({ green: D }), []); // a ledger from before 0.8.0
-  assert.equal(shipTitle('p1', 2, ['a', 'b', 'c', 'd', 'e']), 'p1 ship 2: a, b, c +2 more');
-  assert.equal(shipTitle('p1', 1, ['a']), 'p1 ship 1: a');
+  const synced = { ...p, integrations: [...p.integrations, { unit: null, head: A }] }; // orq merged origin's base
+  assert.deepEqual(shipUnits({ ...synced, green: A }), ['b', 'c']);
+  assert.deepEqual(shipUnits({ ...synced, shipped: E, green: A }), []); // only a merge since the last ship
+  assert.deepEqual(shipUnits(synced, E), ['b', 'c']); // up to any head
+});
+
+const titled = (pairs) => ({ goal: 'g', units: pairs.map(([id, title]) => ({ ...unit(id), title })) });
+
+test('the default ship title is the work, never plan, ship or unit ids', () => {
+  const one = titled([['issue-843', '#843 Bound model parsing']]);
+  assert.equal(shipTitle(one, ['issue-843']), 'Bound model parsing');
+  const many = titled([['issue-843', '#843 #850: restore export checks'], ['issue-858', '#858 b'], ['x', 'c']]);
+  assert.equal(shipTitle(many, ['issue-843', 'issue-858', 'x']), 'restore export checks and 2 more');
+  assert.equal(shipTitle(titled([['issue-1', 'issue-1: fix the shop']]), ['issue-1']), 'fix the shop');
+  const long = shipTitle(titled([['a', `#1 ${'x'.repeat(80)}`], ['b', 'b']]), ['a', 'b']);
+  assert.equal(long.length, 72);
+  assert.match(long, /^x+… and 1 more$/);
+  assert.equal(shipTitle({ goal: 'Ship the export', units: [] }, []), 'Ship the export'); // a ledger from before 0.8.0
+  assert.equal(shipTitle(null, []), 'Ship integrated work');
+});
+
+test('the ship body: the orchestrator summary, a Closes line per issue, then one checks line', () => {
+  const plan = titled([['a', '#843 add a'], ['b', '#850, #851 add b'], ['c', '#843: more a'], ['d', 'no issue']]);
+  assert.equal(shipBody(plan, ['a', 'b', 'c', 'd'], E, 'Users can now export.\n'), `Users can now export.\n\nCloses #843\nCloses #850\nCloses #851\n\nFinal checks passed on ${E.slice(0, 12)}.`);
+  assert.equal(shipBody(plan, ['d'], E), `Final checks passed on ${E.slice(0, 12)}.`);
+  assert.equal(shipBody(plan, ['a'], E, '  '), `Closes #843\n\nFinal checks passed on ${E.slice(0, 12)}.`);
+});
+
+test('ship text: a one-line title of at most 72 characters, and no tool or model credit anywhere', () => {
+  assert.equal(shipTextError({ title: 'fix(shop): bound model parsing and restore export checks', body: 'Users can now export.' }), null);
+  assert.equal(shipTextError({}), null);
+  for (const title of ['', 'x'.repeat(73), 'feat: a\nb']) assert.equal(shipTextError({ title }), 'ship: --title must be one line of 1 to 72 characters; nothing was shipped');
+  const credits = [['feat: add a 🤖', '🤖'], ['feat(gpt-5): x', 'gpt-'], ['fix: Claude flow', 'Claude'], ['fix: per Opus', 'Opus']];
+  for (const [title, hit] of credits) assert.equal(shipTextError({ title }), `ship: --title credits a tool or model ("${hit}"); write it as the maintainer; nothing was shipped`);
+  for (const body of ['Generated with a tool', 'x\nCo-Authored-By: a <b>', 'Done on behalf of bot', 'by gemini', 'kimi', 'minimax', 'grok', 'sonnet']) {
+    assert.match(shipTextError({ title: 'fix: a', body }), /^ship: --body-file credits a tool or model \(".+"\); write it as the maintainer; nothing was shipped$/, body);
+  }
+  assert.equal(shipTextError({ title: 'fix: grokking corpus opusculum' }), null); // whole words only
 });
 
 test('a shipped head must come later in the integration order than the one shipped before', () => {
