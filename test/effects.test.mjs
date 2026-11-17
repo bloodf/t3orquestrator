@@ -344,6 +344,22 @@ test('integrate: a unit\'s commits lose their tool or model credit before the me
   assert.equal(unitOf(st, 'a').headSha, sha); // the gated commit stays on record
 });
 
+test('integrate: a credited unit that conflicts keeps its branch where the worker left it', async (t) => {
+  const s = await setup(t, [unitSpec('a', { paths: ['shared.txt'] }), unitSpec('b', { paths: ['shared.txt'] })]);
+  await s.act(launchA());
+  await s.act(launchA('b', { key: 'pb::m2', instance: 'pb' }));
+  await toPassed(s, 'a', { 'shared.txt': 'from a\n' });
+  const b = unitOf(await readState(s.p.repo), 'b');
+  const sha = await commitOn(s.p.repo, b.branch, { 'shared.txt': 'from b\n' }, 'feat: b\n\nCo-Authored-By: Claude <noreply@anthropic.com>');
+  await append(s, { type: 'thread-ended', unit: 'b', status: 'completed' }, { type: 'gate-started', unit: 'b', attempt: 1, headSha: sha, pid: 1 },
+    { type: 'gated', unit: 'b', attempt: 1, verdict: 'pass', failures: [], flags: [], headSha: sha });
+  await s.act({ type: 'integrate', unit: 'a' });
+  await s.act({ type: 'integrate', unit: 'b' });
+  const after = unitOf(await readState(s.p.repo), 'b');
+  assert.equal(after.state, 'queued'); // conflicted: back to its worker
+  assert.equal(sh(s.p.repo, 'rev-parse', b.branch), sha); // the worker's checkout is untouched
+});
+
 async function waitForResult(fx, unit, attempt) {
   for (let i = 0; i < 300; i += 1) {
     const g = await collectGate(fx, unit, attempt);

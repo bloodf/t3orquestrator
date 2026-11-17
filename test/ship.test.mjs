@@ -434,6 +434,6 @@ test('ship: commits already integrated with tool or model credit are named in a 
   await append(p, ...through('c', Z), passed(Z));
   const r = await orq(['ship'], p, { ghExec: fakeGh({ remote: p.remote }).exec });
   assert.equal(r.code, 0, r.err);
-  assert.match(r.out, new RegExp(`\nnote: 1 shipped commits credit a tool or model in their message \\(${Z.slice(0, 12)}\\); orq removes it from commits it integrates from now on\n`));
+  assert.match(r.out, new RegExp(`\nnote: 1 commits still credit a tool or model \\(${Z.slice(0, 12)}\\)\n`));
   assert.equal(p.remoteSha('refs/heads/main'), Z);
 });
