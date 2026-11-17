@@ -321,6 +321,29 @@ test('integrate: the worker merges the head it was given, and the unit then inte
   assert.equal(unitOf(await readState(s.p.repo), 'b').state, 'integrated');
 });
 
+test('integrate: a unit\'s commits lose their tool or model credit before the merge; the ledger keeps both heads', async (t) => {
+  const s = await setup(t, [unitSpec('a'), unitSpec('b')]);
+  await s.act(launchA());
+  await s.act(launchA('b', { key: 'pb::m2', instance: 'pb' }));
+  const a = unitOf(await readState(s.p.repo), 'a');
+  const sha = await commitOn(s.p.repo, a.branch, { 'a.txt': 'A\n' }, 'feat: a\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>');
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'completed' }, { type: 'gate-started', unit: 'a', attempt: 1, headSha: sha, pid: 1 },
+    { type: 'gated', unit: 'a', attempt: 1, verdict: 'pass', failures: [], flags: [], headSha: sha });
+  const plain = await toPassed(s, 'b', { 'b.txt': 'B\n' });
+  await s.act({ type: 'integrate', unit: 'a' });
+  await s.act({ type: 'integrate', unit: 'b' });
+  const events = (await readLines(path.join(s.p.repo, '.orq', 'ledger.jsonl'))).filter((e) => e.type === 'integrated');
+  const [ea, eb] = events;
+  assert.equal(ea.original, sha);
+  assert.notEqual(ea.sha, sha);
+  assert.equal(sh(s.p.repo, 'rev-parse', `${ea.sha}^{tree}`), sh(s.p.repo, 'rev-parse', `${sha}^{tree}`));
+  assert.equal(sh(s.p.repo, 'rev-parse', a.branch), ea.sha);
+  assert.deepEqual([eb.sha, eb.original], [plain, undefined]); // nothing to drop: as before
+  const st = await readState(s.p.repo);
+  assert.equal(sh(s.p.repo, 'log', '--format=%B', `${st.plan.baseSha}..${st.plan.integrationHead}`).includes('anthropic'), false);
+  assert.equal(unitOf(st, 'a').headSha, sha); // the gated commit stays on record
+});
+
 async function waitForResult(fx, unit, attempt) {
   for (let i = 0; i < 300; i += 1) {
     const g = await collectGate(fx, unit, attempt);

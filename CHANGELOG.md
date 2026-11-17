@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- No tool or model credit reaches the host from a worker's commits. Worker agents add trailers such as `Co-Authored-By: <model> <noreply@…>` or `Co-authored-by: Cursor <…>` to their commits. Before a unit is merged into the integration branch (fix and conflict-merge units included), orq now rewrites the messages of the unit's own commits, those the integration head and every remote-tracking ref lack, dropping `Co-authored-by:`, `Assisted-by:` and `Generated-by:` lines that name a model, a tool or an AI vendor, and `🤖 Generated with …` lines. People named as co-authors stay. Trees, author, committer, dates and the rest of each message are kept byte for byte, and merge commits keep their parents; the new commits are written with `git hash-object`, the unit's local branch moves to them (never pushed, never forced), and the `integrated` event records the new head as `sha` and the gated one as `original`. Identical trees keep the gate's verdict. A unit with nothing to drop keeps its commits. A commit message in a non-UTF-8 encoding is left as it is. `orq ship` names, in a note, commits on the shipped head that still carry credit (integrated before this release); it does not stop the ship.
+
 ## [0.11.0] - 2026-11-17
 
 ### Added

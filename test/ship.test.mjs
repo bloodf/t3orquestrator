@@ -426,3 +426,14 @@ test('sync: conflict files are named only while origin is still at the sha that 
   st = await readState(p.repo);
   assert.deepEqual(staleBase(s.ctx, s.run.config, st.plan), { base: 'main', synced: false, files: [] });
 });
+
+test('ship: commits already integrated with tool or model credit are named in a note; the ship goes on', async (t) => {
+  const p = await shipProject(t);
+  sh(p.repo, 'branch', '-f', 'credited', p.X);
+  const Z = await commitOn(p.repo, 'credited', { 'z.txt': 'z\n' }, 'feat: z\n\nCo-Authored-By: Claude <noreply@anthropic.com>');
+  await append(p, ...through('c', Z), passed(Z));
+  const r = await orq(['ship'], p, { ghExec: fakeGh({ remote: p.remote }).exec });
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, new RegExp(`\nnote: 1 shipped commits credit a tool or model in their message \\(${Z.slice(0, 12)}\\); orq removes it from commits it integrates from now on\n`));
+  assert.equal(p.remoteSha('refs/heads/main'), Z);
+});
