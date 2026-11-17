@@ -351,3 +351,12 @@ test('ask: a decision thread stopped by a usage limit is retried on the next mod
   const m4 = (await readJson(path.join(p.home, 'registry.json'))).models['pb::m4'];
   assert.deepEqual([m4.cooldownUntil, m4.failures], [Date.parse('2026-11-12T18:00:00Z'), 0]);
 });
+
+test('ask: self ignores models the machine policy keeps from routing', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  await setConfig(p, { orchestrator: { instance: 'pa', model: 'm3', threadId: 'orch-1' } });
+  assert.equal(starts(await orq(['ask'], p, {}, { env: { T3CODE_THREAD_ID: 'orch-1' } })).length, 1); // pb::m4 is stronger
+  await fs.writeFile(path.join(p.home, 'config.json'), JSON.stringify({ cap: 2, excludeModels: ['^m4$'] }));
+  const self = await orq(['ask'], p, {}, { env: { T3CODE_THREAD_ID: 'orch-1' } });
+  assert.deepEqual([self.out, starts(self).length], ['self: you run on the strongest enabled tier; decide it yourself\n', 0]);
+});

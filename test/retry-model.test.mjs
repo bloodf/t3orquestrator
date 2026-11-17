@@ -58,5 +58,5 @@ test('orq status shows the models a unit was tried on', async (t) => {
     deps: { readMachine: () => ({ cores: 8, availableMemBytes: 16 * 1024 ** 3, load1: 0 }), exec: () => ({ code: 1, stdout: '', stderr: '' }) },
   });
   assert.equal(code, 0);
-  assert.match(out.join(''), /\nu running attempt=1 model=pb::m2 tier=2 tried=pa::m2,pb::m2 thread=t2\n/);
+  assert.match(out.join(''), /\nu running attempt=1 model=pb::m2 tier=2 used=pa::m2,pb::m2 thread=t2\n/);
 });

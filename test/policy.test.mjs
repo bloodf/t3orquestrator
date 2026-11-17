@@ -78,3 +78,15 @@ test('config set --machine: freeModels and decisionOnly take a JSON list or a co
   assert.throws(() => setConfigValue({}, 'freeModels', '["("]', 'machine'), /freeModels: "\(" is not a valid regular expression/);
   assert.throws(() => setConfigValue({}, 'instanceFamilies', '{"ag":"google"}', 'machine'), /instanceFamilies must be a JSON object of instance ids to lists of families/);
 });
+
+test('review fixes: any antigravity instance runs google only; prototype-named instances route; decision-only patterns are anchored', () => {
+  const r = reg([mod('codex-antigravity-proxy', 'gpt-x', 3, 'openai'), mod('codex-antigravity-proxy', 'gemini', 3, 'google'), mod('constructor', 'm', 2), mod('toString', 'n', 2)]);
+  assert.deepEqual(keys(go(r)).sort(), ['codex-antigravity-proxy::gemini', 'constructor::m', 'toString::n']);
+  const d = reg([mod('cx', 'cx/gpt-6-astra', 4), mod('a', 'claude-fable-5-2', 4), mod('o', 'anthropic/claude-fable-5-1', 4), mod('p', 'castrate-1', 4), mod('q', 'fabled-coder', 4), mod('z', 'FABLE', 4)]);
+  assert.deepEqual(keys(go(d, {}, { job: 'plan' })).sort(), ['p::castrate-1', 'q::fabled-coder']);
+});
+
+test('config: a regex with a comma needs the JSON list form', () => {
+  assert.deepEqual(setConfigValue({}, 'freeModels', '["a{1,2}"]', 'machine').freeModels, ['a{1,2}']);
+  assert.deepEqual(setConfigValue({}, 'freeModels', 'a{1,2}', 'machine').freeModels, ['a{1', '2}']);
+});

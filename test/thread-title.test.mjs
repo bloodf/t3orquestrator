@@ -25,3 +25,10 @@ test('reviewTitle and askTitle', () => {
   assert.equal(askTitle(4, 'Which port should the server use?\nThe order says 8080.'), 'Decision - ask-4 | Which port should the server use?');
   assert.ok(askTitle(1, 'why '.repeat(50)).length <= 100);
 });
+
+test('titles: a cut never splits an emoji; at most 3 refs, then +N', () => {
+  const t = unitTitle({ id: 'u', job: 'docs', title: `#1 ${'😀'.repeat(120)}` });
+  assert.ok(Array.from(t).length <= 100, t);
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(t), 'no lone high surrogate');
+  assert.equal(unitTitle({ id: 'u', job: 'fix', title: '#1 #2 #3 #4 #5 many' }), 'Fix - #1, #2, #3 +2 | many');
+});
