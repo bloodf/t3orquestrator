@@ -42,6 +42,7 @@ A plan can grow. Append units to `plan.json` after `done` and call `orq wait` ag
 | `.orq/units/<id>/gate-<n>.json` | project | Gate result per attempt, with `.log` beside it |
 | `.orq/integration/` | project | The integration worktree |
 | `.orq/reviews.json`, `.orq/asks.json`, `.orq/summary.md` | project | Review threads, decisions taken by `orq ask`, and the pull request body |
+| `.orq/salvage/`, `.orq/cleanup.json` | project | Uncommitted work saved from removed worktrees, and when `orq wait` last swept (see [Cleanup](#cleanup)) |
 
 Set `T3ORQ_HOME` to an absolute path to move the machine state.
 
@@ -49,7 +50,7 @@ Set `T3ORQ_HOME` to an absolute path to move the machine state.
 
 ### Shared dependency directories
 
-Each worker, review and decision thread runs in its own worktree, and each gate in its own checkout. Installing dependencies in every one of them costs gigabytes per thread, so `orq` links the main checkout's dependency directories into them instead (the `share` config key). `orq init` detects only `node_modules` directories whose installer was tested safe with a link (below): pnpm (`pnpm-lock.yaml`) and bun (`bun.lock`, `bun.lockb`). `.venv`, `vendor` and other directories are never detected, since their installers are untested; they are linked only when you list them in `share` yourself. When `orq init` finds a `node_modules` it will not share, it says why: `share: none (npm projects are not shared: "npm ci" empties a linked node_modules)`, `share: none (yarn is untested)` or `share: none (no lockfile)`. A path is linked as a symlink to the main checkout's directory only when all of these hold: The worktrees of a unit's threads are removed as soon as the unit is integrated (its branches stay; a worktree with uncommitted or untracked files is kept, and so is that of a thread `orq` gave up on while it may still run; files git ignores go with the worktree); the rest go at `orq plan archive`.
+Each worker, review and decision thread runs in its own worktree, and each gate in its own checkout. Installing dependencies in every one of them costs gigabytes per thread, so `orq` links the main checkout's dependency directories into them instead (the `share` config key). `orq init` detects only `node_modules` directories whose installer was tested safe with a link (below): pnpm (`pnpm-lock.yaml`) and bun (`bun.lock`, `bun.lockb`). `.venv`, `vendor` and other directories are never detected, since their installers are untested; they are linked only when you list them in `share` yourself. When `orq init` finds a `node_modules` it will not share, it says why: `share: none (npm projects are not shared: "npm ci" empties a linked node_modules)`, `share: none (yarn is untested)` or `share: none (no lockfile)`. A path is linked as a symlink to the main checkout's directory only when all of these hold:
 
 - for a `node_modules`: the lockfile next to it or at the repository root is pnpm's or bun's, and there is no `package-lock.json`, `npm-shrinkwrap.json` (npm: `npm ci` empties a linked directory) or `yarn.lock` (untested) there; with no lockfile at all it is not linked either. This holds whatever `share` says;
 - the directory exists in the main checkout, and nothing exists at that path in the worktree (nothing is ever replaced or deleted); for a `node_modules`, a `package.json` sits next to it in the main checkout;
@@ -76,7 +77,18 @@ What package managers do when run in a checkout whose `node_modules` is such a l
 
 That is why npm and yarn projects are never shared, and why the gate never links when a setup step runs. A worker in a shared pnpm or bun project can still write through its link (an install there writes into the main checkout's `node_modules`); turn sharing off with `orq config set share null`, or set `"share": false` on units that may install, if that is not acceptable.
 
-Each request gets its own plan. When a request is finished, `orq plan archive` moves that plan's state into `.orq/archive/<planId>/` and keeps its integration branch, so the next request starts a fresh plan from the base branch. It also removes the worker and review worktrees; one with uncommitted or untracked files is kept and reported, and no branch is deleted.
+Each request gets its own plan. When a request is finished, `orq plan archive` moves that plan's state into `.orq/archive/<planId>/` and keeps its integration branch, so the next request starts a fresh plan from the base branch. It also runs the cleanup below over the worker, review and decision worktrees; no branch is deleted.
+
+### Cleanup
+
+Every worker, review and decision thread leaves a worktree, and every gate a checkout; a long-running project otherwise fills the disk with them. `orq` removes what it made once nothing uses it, by default (`orq config set cleanup false` turns it off):
+
+- **When.** `orq wait` sweeps in the poll where a unit is integrated or dropped or a head ships, and otherwise at most every 10 minutes (`.orq/cleanup.json` records the last sweep). `orq plan archive` runs it once the plan is archived, and `orq worktree prune --force` on demand. One cleanup runs at a time (`.orq/cleanup.lock`).
+- **What.** Only worktrees on an `orq/*` branch, picked by branch: those of units that are integrated or dropped, of reviews and decisions no longer running, and every one of an earlier plan (archived or not). Gate directories under `.orq/gate/` whose gate is not running. Registrations of worktrees whose directory is gone (`git worktree prune`).
+- **Never.** A branch; the integration worktree; a worktree of a unit that is still open, or on a branch of the running plan the ledger does not know yet (a launch being recorded); one whose thread holds a lease or that T3 reports active; one of a dropped unit until T3 shows its thread stopped (`orq unit drop` leaves it running); a locked one; anything not on an `orq/*` branch.
+- **Uncommitted work.** Files git ignores (installs, build output) go with the worktree. Changes to tracked files and new files git does not ignore are first saved as `.orq/salvage/<branch name>-<ms>.patch`, made against the worktree's `HEAD`, which is on the branch that stays: restore it with `git apply` in a checkout of that branch. A new file over 256 KiB is named in the patch header, not saved. When the patch would exceed 2 MiB the worktree is kept and reported instead. The worktree is then removed with `git worktree remove --force`; a shared dependency link goes as a link, never its target.
+
+With `cleanup: false`, a unit's worktrees are removed at integration and at archive with a plain `git worktree remove` (git keeps one with uncommitted or untracked files), as in 0.9.0, and `orq wait` does not sweep.
 
 ## Capability slots
 

@@ -164,4 +164,5 @@ Project settings, set with `orq config set <key> <n>`:
 - When a blocked thread resumes, it takes its slot back even if the cap is full. Each thread that resumes this way can push the count one over the cap until something finishes.
 - A crash between T3 starting a thread and `orq` recording its lease can leave one extra thread. Its reservation expires after 2 minutes and the unit launches again, so that work runs twice. The first thread keeps running untracked until you interrupt it.
 - A dropped unit's thread keeps running in T3. `orq unit drop` prints its id so you can stop it.
+- Each `orq wait` poll that is due for a [cleanup](how-it-works.md#cleanup) removes worktrees inside the poll; a large backlog (the first sweep after an upgrade) delays that one poll. When it saved uncommitted work, the call prints `note: cleanup saved the uncommitted work of <n> removed worktrees under .orq/salvage/`.
 - T3 does not report why a thread failed, so a wrong model name and a provider outage look the same. Both lead to a cooldown.

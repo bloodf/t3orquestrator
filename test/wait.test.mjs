@@ -868,3 +868,33 @@ test('wait: an instance at its usage limit gets no launch, and the registry keep
   const reg = JSON.parse(await fs.readFile(path.join(p.home, 'registry.json'), 'utf8'));
   assert.equal(reg.models['pa::m2'].cooldownUntil, null);
 });
+
+for (const cleanup of [true, false]) {
+  test(`wait: ${cleanup ? 'cleans up the worktree of an integrated unit, salvaging its uncommitted work' : 'with cleanup false keeps the worktree of an integrated unit'}`, async (t) => {
+    const p = await makeProject(t, [unitSpec('a')], { checks: { full: 'test -f a.txt' } });
+    if (!cleanup) {
+      const file = path.join(p.repo, '.orq', 'config.json');
+      await fs.writeFile(file, JSON.stringify({ ...JSON.parse(await fs.readFile(file, 'utf8')), cleanup: false }));
+    }
+    const sim = simulator(p, { a: [['commit-complete']] });
+    const first = await orq(['wait'], p, sim);
+    assert.match(first.out, /^done: 1 units integrated/, first.err);
+    const dir = path.join(p.root, 'wt-a'); // T3's worktree, left with work the worker never committed
+    sh(p.repo, 'worktree', 'add', '-q', dir, sim.byUnit.a[0].branch);
+    await fs.writeFile(path.join(dir, 'shared.txt'), 'uncommitted\n');
+    sim.now += 11 * 60_000;
+    const second = await orq(['wait'], p, sim);
+    assert.equal(second.code, 0, second.err);
+    const salvage = path.join(p.repo, '.orq', 'salvage');
+    if (cleanup) {
+      assert.match(second.out, /\nnote: cleanup saved the uncommitted work of 1 removed worktrees under \.orq\/salvage\/\n/);
+      assert.equal(fsSync.existsSync(dir), false);
+      assert.equal(fsSync.readdirSync(salvage).length, 1);
+    } else {
+      assert.doesNotMatch(second.out, /cleanup/);
+      assert.equal(fsSync.existsSync(dir), true);
+      assert.equal(fsSync.existsSync(salvage), false);
+    }
+    sh(p.repo, 'rev-parse', '--verify', '-q', `refs/heads/${sim.byUnit.a[0].branch}`);
+  });
+}

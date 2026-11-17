@@ -126,7 +126,7 @@ test('worktree prune: nothing to do, bad usage, and a frozen project', async (t)
   for (const args of [['worktree'], ['worktree', 'remove'], ['worktree', 'prune', 'x']]) {
     const r = await orq(p, ...args);
     assert.equal(r.code, 2);
-    assert.match(r.err, /usage: worktree prune \[--dry-run\]/);
+    assert.match(r.err, /usage: worktree prune \[--force\] \[--dry-run\]/);
   }
   await fs.writeFile(path.join(p.repo, '.orq', 'archiving.json'), JSON.stringify({ planId: 'p' }));
   assert.equal((await orq(p, 'worktree', 'prune')).code, 4);

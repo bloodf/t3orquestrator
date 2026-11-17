@@ -284,13 +284,27 @@ test('archive removes a clean worker worktree and keeps its branch', async (t) =
   const before = branches(p);
   const r = await orq(['plan', 'archive'], p);
   assert.equal(r.code, 0, r.err);
-  assert.match(r.out, /\nremoved 1 worker worktrees\n/);
+  assert.match(r.out, /\nremoved 1 worker worktrees, freed /);
   assert.equal(await exists(dir), false);
   assert.deepEqual(branches(p), before);
 });
 
-test('archive keeps a worker worktree with an untracked file and says so, exit 0', async (t) => {
+test('archive saves the uncommitted work of a worker worktree as a patch, then removes it; the branch stays', async (t) => {
   const { p } = await finished(t);
+  const dir = addWorker(p, 'w1', 'orq/p1/a-a1-w');
+  await fs.writeFile(path.join(dir, 'stray.txt'), 'x\n');
+  const r = await orq(['plan', 'archive'], p);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, new RegExp(`\nremoved 1 worker worktrees, freed .*\nsaved uncommitted work of orq/p1/a-a1-w to .orq/salvage/a-a1-w-${NOW}.patch\n`));
+  assert.match(await fs.readFile(orqPath(p, 'salvage', `a-a1-w-${NOW}.patch`), 'utf8'), /\+\+\+ b\/stray.txt/);
+  assert.equal(await exists(dir), false);
+  assert.ok(branches(p).includes('orq/p1/a-a1-w'));
+});
+
+test('archive with cleanup false keeps a worker worktree with an untracked file and says so, exit 0', async (t) => {
+  const { p } = await finished(t);
+  const file = orqPath(p, 'config.json');
+  await fs.writeFile(file, JSON.stringify({ ...JSON.parse(await fs.readFile(file, 'utf8')), cleanup: false }));
   const dir = addWorker(p, 'w1', 'orq/p1/a-a1-w');
   await fs.writeFile(path.join(dir, 'stray.txt'), 'x\n');
   const r = await orq(['plan', 'archive'], p);
@@ -317,7 +331,7 @@ test('archive leaves the worktree of a unit dropped from this plan (its thread m
   const other = addWorker(p, 'w1', 'orq/p1/a-a1-w');
   const r = await orq(['plan', 'archive'], p);
   assert.equal(r.code, 0, r.err);
-  assert.match(r.out, /\nremoved 1 worker worktrees\n/);
+  assert.match(r.out, /\nremoved 1 worker worktrees, freed /);
   assert.equal(await exists(kept), true);
   assert.equal(await exists(other), false);
 });
@@ -326,7 +340,7 @@ test('archive also removes clean leftovers from an earlier plan', async (t) => {
   const { p } = await finished(t);
   const dir = addWorker(p, 'old', 'orq/p0/review-1');
   const r = await orq(['plan', 'archive'], p);
-  assert.match(r.out, /\nremoved 1 worker worktrees\n/);
+  assert.match(r.out, /\nremoved 1 worker worktrees, freed /);
   assert.equal(await exists(dir), false);
   assert.ok(branches(p).includes('orq/p0/review-1'));
 });
@@ -335,7 +349,7 @@ test('archive removes decision worktrees, with and without a plan id in the bran
   const { p } = await finished(t);
   const dirs = [addWorker(p, 'ask1', 'orq/ask-1'), addWorker(p, 'ask2', 'orq/p1/ask-2')];
   const r = await orq(['plan', 'archive'], p);
-  assert.match(r.out, /\nremoved 2 worker worktrees\n/);
+  assert.match(r.out, /\nremoved 2 worker worktrees, freed /);
   for (const d of dirs) assert.equal(await exists(d), false);
 });
 
