@@ -100,3 +100,43 @@ test('a reset time in the past or absurdly far ahead is ignored for the default'
   assert.equal(classifyFailure('You\'ve hit your limit · resets Nov 18 at 9:30pm (UTC)', NOW).until, Date.parse('2026-11-18T21:30:00Z'));
   assert.equal(classifyFailure('You\'ve hit your limit · resets Nov 18 at 9am (Nowhere/Zone)', NOW).until, Date.parse('2026-11-18T09:00:00Z')); // unknown zone: UTC
 });
+
+test('review fix 1: worker narration on a failed thread is no limit; a code needs error context', () => {
+  for (const t of ['429 tests pass, 0 fail', '401 files changed', 'Rate limited the retry loop to 3 attempts.', 'Too many requests handling added to the client.',
+    'Overloaded constructor fixed', '503 handler added for the status page', 'Rate limit reached in the docs example is now explained.']) {
+    assert.equal(classifyFailure(t, NOW), null, t);
+  }
+  for (const [t, kind] of [['429 Too Many Requests', 'limit'], ['Error: 429 rate limited', 'limit'], ['Rate limited: try again in 30 seconds', 'limit'],
+    ['Too many requests. Retry after 60s.', 'limit'], ['503 Service Unavailable', 'capacity'], ['Error: 529 {"type":"overloaded_error"}', 'capacity'],
+    ['401 Unauthorized', 'auth'], ['Error: rate_limit_error', 'limit']]) {
+    assert.equal(classifyFailure(t, NOW)?.kind, kind, t);
+  }
+});
+
+test('review fix 2: current claude and gemini texts', () => {
+  const local = (y, mo, d, h) => new Date(y, mo, d, h).getTime();
+  const five = classifyFailure('5-hour limit reached ∙ resets 3pm', NOW, { strict: true });
+  assert.equal(five.kind, 'limit');
+  assert.ok(five.until > NOW && five.until <= NOW + 24 * HOUR && new Date(five.until).getHours() === 15);
+  assert.equal(classifyFailure('Weekly limit reached ∙ resets Nov 20, 5pm', NOW, { strict: true }).until, local(2026, 10, 20, 17));
+  assert.equal(classifyFailure('Claude usage limit reached. Your limit will reset at 3pm (America/Los_Angeles)', NOW, { strict: true }).until, Date.parse('2026-11-16T23:00:00Z'));
+  const epoch = Math.floor((NOW + 2 * HOUR) / 1000);
+  assert.equal(classifyFailure(`Claude AI usage limit reached|${epoch}`, NOW, { strict: true }).until, epoch * 1000);
+  assert.equal(classifyFailure('RESOURCE_EXHAUSTED: Quota exceeded for quota metric generate_content_requests', NOW, { strict: true }).kind, 'limit');
+  assert.equal(classifyFailure('OAuth token has expired. Please re-authenticate.', NOW, { strict: true }).kind, 'auth');
+  assert.equal(classifyFailure('Limit reached for the pagination helper; tests pass.', NOW, { strict: true }), null);
+});
+
+test('review fix 4: compact durations', () => {
+  assert.equal(classifyFailure('Rate limit reached. Please try again in 1h30m.', NOW).until, NOW + 90 * MIN);
+  assert.equal(classifyFailure('Rate limit reached. Please try again in 6m0s.', NOW).until, NOW + 6 * MIN);
+});
+
+test('review fix 9: a zoned reset on a daylight-saving change uses the offset at the reset itself', () => {
+  // 2026-11-01 is the US fall-back day: 3pm in Los Angeles that day is PST (UTC-8), the morning was PDT (UTC-7)
+  const morning = Date.parse('2026-11-01T08:30:00Z'); // 01:30 PDT
+  assert.equal(classifyFailure("You've hit your limit · resets Nov 1 at 3pm (America/Los_Angeles)", morning).until, Date.parse('2026-11-01T23:00:00Z'));
+  // 2026-03-08 spring forward: 9am is PDT (UTC-7), the night before PST
+  const night = Date.parse('2026-03-08T07:00:00Z'); // 23:00 PST Mar 7
+  assert.equal(classifyFailure("You've hit your limit · resets Mar 8 at 9am (America/Los_Angeles)", night).until, Date.parse('2026-03-08T16:00:00Z'));
+});

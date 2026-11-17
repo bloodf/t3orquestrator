@@ -19,7 +19,7 @@ function fakeT3(world) {
     calls.push({ args, input: opts?.input });
     if (args[1] === 'start') {
       world.started = (world.started ?? 0) + 1;
-      return world.startFail ? { code: 1, stdout: '', stderr: 'boom' } : ok({ threadId: `rv${world.started + (world.offset ?? 0)}`, projectId: 'pr', runId: 'r1' });
+      return world.startFail ? { code: 1, stdout: '', stderr: world.startStderr ?? 'boom' } : ok({ threadId: `rv${world.started + (world.offset ?? 0)}`, projectId: 'pr', runId: 'r1' });
     }
     return ok({
       thread: {
@@ -294,4 +294,23 @@ test('show: a review stopped by a usage limit, failed or as its only reply, is r
     // counted from when the provider wrote it (the thread's last update), not from when orq read it
     assert.deepEqual([m.cooldownUntil, m.failures], [Date.parse('2026-11-12T10:00:00.000Z') + (5 * 24 + 4) * 3600_000, 0], status);
   }
+});
+
+test('review fix 5: a review that fails to start because its provider is signed out cools the instance, not a failure strike', async (t) => {
+  const p = await integratedProject(t);
+  const r = await orq(['review', 'start'], p, { startFail: true, startStderr: 'Not logged in · Please run /login' });
+  const key = /start failed on (\S+);/.exec(r.err)[1];
+  const reg = await registry(p);
+  const m = reg.models[key];
+  assert.deepEqual([reg.instances[m.instance].cooldownUntil, m.failures], [NOW + 30 * 60_000, 0]);
+});
+
+test('review fix 6: replacements after a limit do not use up the replacement budget', async (t) => {
+  const p = await integratedProject(t);
+  await orq(['review', 'start'], p);
+  const capacity = 'No capacity available for model m2 on the server';
+  let out = '';
+  for (let i = 1; i <= 3; i += 1) out = (await orq(['review', 'show'], p, { status: 'failed', text: capacity, offset: i })).out;
+  assert.match(out, /^review 3: failed on \S+; replaced by review 4 on \S+ \(thread rv4\)\n$/);
+  assert.deepEqual((await reviews(p)).reviews.slice(0, 3).map((x) => x.limited), [true, true, true]);
 });

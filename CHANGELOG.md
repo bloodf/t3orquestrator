@@ -13,6 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - After a provider failure, routing prefers another model family as well as another instance (a failed model, then a failed instance, then a failed family go last).
+- Limit failures are counted apart: after 10 the unit goes to judgment (`10 limit failures`), and a second sign-out goes to judgment at once naming the instance to sign in to. A failed thread's narration (`429 tests pass`, `Rate limited the retry loop`) is no longer read as a limit: a bare code or word needs error context. Claude's `5-hour`/`Weekly limit reached ∙ resets …`, `Claude usage limit reached …`, `Claude AI usage limit reached|<epoch>` and Gemini's `RESOURCE_EXHAUSTED` and `OAuth token has expired` are recognised; compact durations (`1h30m`) and daylight-saving changes are read right. A gate pass no longer lifts a limit cooldown; a give-up on T3's usage is not written to the registry; review and decision start failures are classified too, and a review replaced after a limit does not use up its replacements.
 
 ## [0.9.1] - 2026-11-17
 

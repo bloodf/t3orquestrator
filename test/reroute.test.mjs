@@ -61,7 +61,7 @@ const reading = (windows, over = {}) => ({ checkedAt: NOW, down: false, stale: f
 test('exhausted: a window that binds the model at 100%, or a signed-out instance, from the usage T3 reported', () => {
   assert.equal(exhausted(REG, 'ag::gemini-4-argon', NOW), null); // no usage known
   const full = withUsageOn('ag', reading([{ id: 'gemini-weekly', used: 100, resetAt: NOW + 50 * H }, { id: '3p-weekly', used: 10, resetAt: NOW + H }]));
-  assert.deepEqual(exhausted(full, 'ag::gemini-4-argon', NOW), { kind: 'limit', reason: 'usage window gemini-weekly at 100%', until: NOW + 50 * H });
+  assert.deepEqual(exhausted(full, 'ag::gemini-4-argon', NOW), { kind: 'limit', reason: 'usage window gemini-weekly at 100%', until: NOW + 50 * H, source: 'usage' });
   assert.equal(exhausted(full, 'ag::claude-sonnet-5-5', NOW), null); // its own pool has room
   const near = withUsageOn('codex', reading([{ id: 'primary', used: 95, resetAt: NOW + H }]));
   assert.equal(exhausted(near, 'codex::gpt-6.1-terra', NOW), null); // near the limit still runs
@@ -114,4 +114,29 @@ test('ledger: a limit failure does not count toward the provider-failure judgmen
   assert.equal(unitOf(apply(next, ev('feedback-sent', 'u', { attempt: 2, threadId: 't2' })), 'u').rerouted.to, 'codex::gpt-6.1-terra');
   assert.throws(() => apply(limited, ev('rerouted', 'u', { from: 'a', to: 'b', reason: 'limit' })), /illegal transition/);
   assert.equal(unitOf(run(launched('u')), 'u').rerouted, null);
+});
+
+test('review fix 1/3: the ledger counts limit and sign-out failures apart; a retry clears them', () => {
+  const AUTH = { kind: 'auth', reason: 'Not logged in', until: NOW + H };
+  const s = run(launched('u'), ev('thread-ended', 'u', { status: 'failed', limit: LIMIT }), launched('u', { threadId: 't2' }),
+    ev('thread-ended', 'u', { status: 'failed', limit: AUTH }));
+  const u = unitOf(s, 'u');
+  assert.deepEqual([u.providerFailures, u.limitFailures, u.authFailures], [0, 2, 1]);
+  const judged = apply(s, ev('needs-judgment', 'u', { reason: 'x', provider: true }));
+  const back = unitOf(apply(judged, ev('retried', 'u')), 'u');
+  assert.deepEqual([back.limitFailures, back.authFailures], [0, 0]);
+  assert.deepEqual([unitOf(run(launched('u')), 'u').limitFailures, unitOf(run(launched('u')), 'u').authFailures], [0, 0]); // old ledgers
+});
+
+test('review fix 8: a gate pass or a completed thread does not lift a limit or sign-out cooldown', async () => {
+  const { recordSuccess, markAlive } = await import('../lib/health.mjs');
+  const limited = recordLimit(REG, 'codex::gpt-6.1-terra', { kind: 'limit', until: NOW + 9 * H });
+  const passed = recordSuccess(limited, 'codex::gpt-6.1-terra', { now: NOW });
+  assert.deepEqual([until(passed, 'codex::gpt-6.1-terra'), passed.instances.codex.cooldownUntil], [NOW + 9 * H, NOW + 9 * H]);
+  const signedOut = recordLimit(REG, 'ag::gemini-4-argon', { kind: 'auth', until: NOW + H });
+  assert.equal(markAlive(signedOut, 'ag::claude-sonnet-5-5', NOW).instances.ag.cooldownUntil, NOW + H);
+  // a plain failure cooldown is still lifted as before; a lapsed limit no longer holds
+  const plain = { ...REG, models: { ...REG.models, 'codex::gpt-6.1-terra': { ...REG.models['codex::gpt-6.1-terra'], cooldownUntil: NOW + H } } };
+  assert.equal(until(recordSuccess(plain, 'codex::gpt-6.1-terra', { now: NOW }), 'codex::gpt-6.1-terra'), null);
+  assert.equal(until(recordSuccess(limited, 'codex::gpt-6.1-terra', { now: NOW + 10 * H }), 'codex::gpt-6.1-terra'), null);
 });

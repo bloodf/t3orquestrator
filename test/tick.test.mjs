@@ -757,7 +757,7 @@ test('limit: a quiet running thread whose account is used up is given up after 5
   const given = quiet(5);
   assert.deepEqual(given.events.map((e) => [e.type, e.status, e.limit?.kind]), [['thread-ended', 'stalled', 'limit']]);
   assert.deepEqual(given.events[0].limit.until, NOW + 9 * 60 * MIN);
-  assert.deepEqual(types(given).slice(0, 2), ['lease-abandon', 'record-limit']);
+  assert.deepEqual(types(given).slice(0, 2), ['lease-abandon', 'launch']); // the usage cooldown is computed, never stored
   assert.deepEqual(given.report.notes, ['note: unit a gave up on thread t-a (its provider stopped it: usage window weekly at 100%; quiet for 5 min); it still holds a slot until it ends: interrupt it (t3_thread_interrupt)']);
   assert.equal(launches(given)[0].key, 'c::o2');
   assert.deepEqual(quiet(5, mixed).events, []); // room left: a quiet thread waits for the stall rules
@@ -766,4 +766,31 @@ test('limit: a quiet running thread whose account is used up is given up after 5
   const signedOut = quiet(6, out);
   assert.deepEqual(signedOut.events.map((e) => [e.status, e.limit?.kind]), [['stalled', 'auth']]);
   assert.match(signedOut.report.notes[0], /its provider stopped it: instance a is signed out; quiet for 6 min/);
+});
+
+test('review fix 1/3: ten limit failures, or a second sign-out, go to judgment naming why', () => {
+  const hit = (i, limit) => [launched('a', { threadId: `t${i}` }), { ...ended('a', 'failed'), limit }];
+  const ten = Array.from({ length: 10 }, (_, i) => hit(i, LIMIT)).flat();
+  const r = go(ten, { registry: mixed, plan: plan1 });
+  assert.deepEqual(r.events.map((e) => [e.type, e.reason, e.provider]), [['needs-judgment', '10 limit failures', true]]);
+  assert.deepEqual(go(ten.slice(0, 18), { registry: mixed, plan: plan1 }).report.judgment, []);
+  const AUTH = { kind: 'auth', reason: 'Not logged in · Please run /login', until: NOW + 30 * MIN };
+  const out = go([...hit(1, AUTH), ...hit(2, AUTH)], { registry: mixed, plan: plan1 });
+  assert.deepEqual(out.events.map((e) => [e.type, e.reason]), [['needs-judgment', 'instance a is signed out: sign in to it in T3, then "orq unit retry a"']]);
+  assert.deepEqual(go(hit(1, AUTH), { registry: mixed, plan: plan1 }).report.judgment, []);
+});
+
+test('review fix 7: a give-up on account usage is not written to the registry; only windows binding the model count', () => {
+  const ag = { ...inst, driverKind: 'antigravity', usage: { checkedAt: NOW, down: false, stale: false, windows: [{ id: 'gemini-weekly', used: 100, resetAt: NOW + 60 * MIN }] } };
+  const reg = {
+    version: 1, instances: { ag, c: { ...inst } },
+    models: Object.fromEntries([['ag::gemini-x', { ...model('ag', 'gemini-x', 2)[1] }], ['ag::claude-x', { ...model('ag', 'claude-x', 2)[1], family: 'other' }], model('c', 'o2', 2)]),
+  };
+  const on = (key) => go([launched('a', { key, instance: 'ag', model: key.split('::')[1] })], {
+    registry: reg, plan: plan1, cap: 2, threads: { 't-a': thread('t-a', { updatedAt: NOW - 6 * MIN }) }, leases: [lease('t-a', { project: '/p', unit: 'a', instance: 'ag' })],
+  });
+  const given = on('ag::gemini-x');
+  assert.deepEqual(given.events.map((e) => [e.status, e.limit?.kind]), [['stalled', 'limit']]);
+  assert.ok(!types(given).includes('record-limit') && !types(given).includes('record-failure'), types(given).join());
+  assert.deepEqual(on('ag::claude-x').events, []); // the full gemini window does not bind a claude model
 });
