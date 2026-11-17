@@ -81,6 +81,7 @@ test('ask: an ANSWER reply prints answer: and the reasons; the thread holds a le
     [[1, 'pb::m4', 'ask-th', null, 'Which port should the server use?', 'answered', 'use 8080']]);
   assert.equal(typeof doc.asks[0].startedAt, 'number');
   assert.equal(typeof doc.asks[0].endedAt, 'number');
+  assert.equal(doc.asks[0].branch, branchOf(r)); // the cleanup removes its worktree by this exact branch
   const reg = await readJson(path.join(p.home, 'registry.json'));
   assert.equal(reg.models['pb::m4'].lastUsedAt, NOW);
 });

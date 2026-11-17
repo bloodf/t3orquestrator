@@ -113,28 +113,70 @@ test('prune --force with T3 unreadable removes only clean worktrees; --dry-run r
   assert.equal(await exists(orqDir(p, 'salvage')), false);
 });
 
-test('salvage keeps at most 30 days and 100 patches; status names the limit; a broken archive is skipped with a note', async (t) => {
+const patches = async (dir, n, ageMs, prefix) => {
+  for (let i = 0; i < n; i += 1) {
+    const f = path.join(dir, `${prefix}-${i}.patch`);
+    await fs.writeFile(f, '# x\n');
+    const at = (NOW - ageMs - i * 1000) / 1000;
+    await fs.utimes(f, at, at);
+  }
+};
+const DAY = 86_400_000;
+
+test('salvage: never a patch under 7 days old; past 7 days at most 100; none past 30 days; a broken archive is skipped with a note', async (t) => {
   const p = await makeProject(t, [unitSpec('a')]);
   const dir = orqDir(p, 'salvage');
   await fs.mkdir(dir);
-  for (let i = 0; i < 102; i += 1) {
-    const f = path.join(dir, `u-a1-${NOW - i}.patch`);
-    await fs.writeFile(f, '# x\n');
-    await fs.utimes(f, (NOW - i * 1000) / 1000, (NOW - i * 1000) / 1000);
-  }
-  const old = path.join(dir, 'old-a1-1.patch');
-  await fs.writeFile(old, '# x\n');
-  const month = (NOW - 31 * 86_400_000) / 1000;
-  await fs.utimes(old, month, month);
+  await patches(dir, 110, 0, 'fresh'); // a prune --force that just saved 110
+  await patches(dir, 95, 8 * DAY, 'week');
+  await patches(dir, 1, 31 * DAY, 'month');
   await fs.mkdir(orqDir(p, 'archive', 'bad'), { recursive: true });
   await fs.writeFile(orqDir(p, 'archive', 'bad', 'ledger.jsonl'), '{not json\n');
   await ledger(p, []);
   const r = await cleanAll(fxOf(p));
   assert.deepEqual(r.notes, ['note: skipped archive bad: its files cannot be read']);
   const left = await fs.readdir(dir);
-  assert.equal(left.length, 100);
-  assert.equal(left.includes('old-a1-1.patch'), false);
-  assert.equal(left.includes(`u-a1-${NOW}.patch`), true);
+  assert.equal(left.filter((f) => f.startsWith('fresh')).length, 110);
+  assert.equal(left.filter((f) => f.startsWith('week')).length, 0); // beyond the 100 newest and over 7 days old
+  assert.equal(left.includes('month-0.patch'), false);
+  await fs.rm(dir, { recursive: true });
+  await fs.mkdir(dir);
+  await patches(dir, 5, 0, 'fresh');
+  await patches(dir, 100, 8 * DAY, 'week');
+  await cleanAll(fxOf(p));
+  const kept = await fs.readdir(dir);
+  assert.equal(kept.length, 100);
+  assert.equal(kept.filter((f) => f.startsWith('fresh')).length, 5);
   const s = await orq(p, ['status']);
-  assert.match(s.out, /\nworktrees: 0 on orq branches; 100 salvage patches in \.orq\/salvage\/ \(kept 30 days, at most 100\)\n/);
+  assert.match(s.out, /\nworktrees: 0 on orq branches; 100 salvage patches in \.orq\/salvage\/ \(kept 30 days; past 7 days, at most 100\)\n/);
+});
+
+test('decisions asked before a plan started match only by the branch recorded with them', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const recorded = worktreeOn(p, 'k1', 'orq/ask-1-aa');
+  const other = worktreeOn(p, 'k2', 'orq/ask-1-zz'); // the same number, another project's (or a person's) live decision
+  const unrecorded = worktreeOn(p, 'k3', 'orq/ask-2-bb'); // an older record with no branch: cannot be told apart
+  await ledger(p, []);
+  await fs.writeFile(orqDir(p, 'asks.json'), JSON.stringify({ asks: [
+    { n: 1, threadId: 'k1', status: 'answered', branch: 'orq/ask-1-aa' }, { n: 2, threadId: 'k2', status: 'answered' },
+  ] }));
+  const r = await cleanAll(fxOf(p), { threads: [] });
+  assert.deepEqual(r.removed.map((w) => w.path), [recorded]);
+  for (const d of [other, unrecorded]) assert.equal(await exists(d), true, d);
+});
+
+test('a clean worktree with an initialized submodule is kept: its module may hold commits found nowhere else', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const src = path.join(p.root, 'src');
+  sh(p.root, 'init', '-q', src);
+  await fs.writeFile(path.join(src, 'f.txt'), 'one\n');
+  sh(src, 'add', '-A');
+  sh(src, '-c', 'user.name=T', '-c', 'user.email=t@example.invalid', 'commit', '-q', '-m', 'one');
+  const dir = worktreeOn(p, 'a1', 'orq/p/a-a1');
+  sh(dir, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', src, 'sub');
+  sh(dir, '-c', 'user.name=T', '-c', 'user.email=t@example.invalid', 'commit', '-q', '-m', 'add sub');
+  await ledger(p, [launch('a', 'orq/p/a-a1'), ...merged('a')]);
+  const r = await cleanAll(fxOf(p));
+  assert.deepEqual(r.kept.map((k) => [k.path, /submodule/.test(k.why)]), [[dir, true]]);
+  assert.equal(await exists(dir), true);
 });

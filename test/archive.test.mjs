@@ -352,7 +352,7 @@ test('archive leaves an orq/* worktree no ledger of this project names (another 
 
 test('archive removes decision worktrees, with and without a plan id in the branch', async (t) => {
   const { p } = await finished(t);
-  await fs.writeFile(orqPath(p, 'asks.json'), JSON.stringify({ asks: [{ n: 1, threadId: 'k1', status: 'answered' }, { n: 2, threadId: 'k2', status: 'answered' }] }));
+  await fs.writeFile(orqPath(p, 'asks.json'), JSON.stringify({ asks: [{ n: 1, threadId: 'k1', status: 'answered', branch: 'orq/ask-1' }, { n: 2, threadId: 'k2', status: 'answered' }] }));
   const dirs = [addWorker(p, 'ask1', 'orq/ask-1'), addWorker(p, 'ask2', 'orq/p1/ask-2')];
   const r = await orq(['plan', 'archive'], p);
   assert.match(r.out, /\nremoved 2 worker worktrees, freed /);

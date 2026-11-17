@@ -89,7 +89,7 @@ test('cleanup removes worktrees of archived plans, finished reviews and decision
   await writeLedger(orqDir(p, 'archive', 'old', 'ledger.jsonl'), [plan(p, 'old'), launch('x', 'orq/old/x-a1')]);
   await ledger(p, []);
   await fs.writeFile(orqDir(p, 'reviews.json'), JSON.stringify({ reviews: [{ n: 1, threadId: 'r1', status: 'done' }, { n: 2, threadId: 'r2', status: 'running' }] }));
-  await fs.writeFile(orqDir(p, 'asks.json'), JSON.stringify({ asks: [{ n: 1, threadId: 'k1', status: 'answered' }, { n: 2, threadId: null, status: 'starting' }] }));
+  await fs.writeFile(orqDir(p, 'asks.json'), JSON.stringify({ asks: [{ n: 1, threadId: 'k1', status: 'answered', branch: 'orq/ask-1-abc' }, { n: 2, threadId: null, status: 'starting' }] }));
   const r = await cleanAll(fxOf(p));
   assert.deepEqual(r.removed.map((w) => w.path).sort(), [archived, reviewDone, askDone].sort());
   assert.equal(r.removed.find((w) => w.path === archived).patch, path.join('.orq', 'salvage', `x-a1-${NOW}.patch`));
@@ -191,7 +191,7 @@ test('orq status counts the orq worktrees and the salvage patches; config set cl
   await fs.writeFile(orqDir(p, 'salvage', 'a-a1-1.patch'), '# x\n');
   const s = await orq(p, ['status'], { readMachine: () => ({ cores: 8, availableMemBytes: 16 * 1024 ** 3, load1: 0 }) });
   assert.equal(s.code, 0, s.err);
-  assert.match(s.out, /\nworktrees: 1 on orq branches; 1 salvage patch in \.orq\/salvage\/ \(kept 30 days, at most 100\)\n/);
+  assert.match(s.out, /\nworktrees: 1 on orq branches; 1 salvage patch in \.orq\/salvage\/ \(kept 30 days; past 7 days, at most 100\)\n/);
   assert.equal((await orq(p, ['config', 'set', 'cleanup', 'false'])).out, 'cleanup = false\n');
   assert.equal(JSON.parse(await fs.readFile(orqDir(p, 'config.json'), 'utf8')).cleanup, false);
   assert.notEqual((await orq(p, ['config', 'set', 'cleanup', 'maybe'])).code, 0);
