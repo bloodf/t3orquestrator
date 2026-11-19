@@ -885,6 +885,35 @@ test('same commit after feedback: no second gate, straight to the next rung', as
   assert.notEqual(fresh, sha);
 });
 
+test('same commit after a gate that only timed out: the commit is gated again', async (t) => {
+  const spawned = [];
+  const s = await setup(t, [unitSpec('a')], { cap: 3, fx: { spawnGate: async () => { spawned.push(1); return 1; } } });
+  await s.act(launchA());
+  const u = unitOf(await readState(s.p.repo), 'a');
+  const sha = await commitOn(s.p.repo, u.branch, { 'a.txt': 'A\n' });
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'completed' }, { type: 'gate-started', unit: 'a', attempt: 1, headSha: sha, pid: 1 },
+    { type: 'gated', unit: 'a', attempt: 1, verdict: 'fail', failures: ['checks timed out after 20 min: raise the limit'], flags: [], headSha: sha },
+    { type: 'feedback-sent', unit: 'a', attempt: 2, threadId: 'th1' }, { type: 'thread-ended', unit: 'a', status: 'completed' });
+  await s.act({ type: 'gate-start', unit: 'a', attempt: 2 });
+  assert.equal(spawned.length, 1);
+  const after = unitOf(await readState(s.p.repo), 'a');
+  assert.deepEqual([after.state, after.attempt, after.headSha], ['gating', 2, sha]);
+});
+
+test('same commit after a timeout mixed with a real failure: still the next rung', async (t) => {
+  const spawned = [];
+  const s = await setup(t, [unitSpec('a')], { cap: 3, fx: { spawnGate: async () => { spawned.push(1); return 1; } } });
+  await s.act(launchA());
+  const u = unitOf(await readState(s.p.repo), 'a');
+  const sha = await commitOn(s.p.repo, u.branch, { 'a.txt': 'A\n' });
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'completed' }, { type: 'gate-started', unit: 'a', attempt: 1, headSha: sha, pid: 1 },
+    { type: 'gated', unit: 'a', attempt: 1, verdict: 'fail', failures: ['checks timed out', 'forbidden paths: x'], flags: [], headSha: sha },
+    { type: 'feedback-sent', unit: 'a', attempt: 2, threadId: 'th1' }, { type: 'thread-ended', unit: 'a', status: 'completed' });
+  await s.act({ type: 'gate-start', unit: 'a', attempt: 2 });
+  assert.equal(spawned.length, 0);
+  assert.equal(unitOf(await readState(s.p.repo), 'a').attempt, 3);
+});
+
 test('after a nudge the gate runs even when the branch did not move: the shortcut is only for judged work', async (t) => {
   const spawned = [];
   const s = await setup(t, [unitSpec('a')], { cap: 3, fx: { spawnGate: async () => { spawned.push(1); return 1; } } });
