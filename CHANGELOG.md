@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.2] - 2026-11-19
+
+### Fixed
+
+- A unit whose gate failed only because a step timed out is gated again on the same commit after the feedback round. Before, the worker (rightly) committed nothing, and orq recorded "no new commit after feedback" as a quality failure, moving good work to a new attempt. A failure list with anything besides timeouts still takes the next rung.
+
 ## [0.12.1] - 2026-11-19
 
 ### Fixed
