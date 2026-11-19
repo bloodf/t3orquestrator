@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.1] - 2026-11-19
+
+### Fixed
+
+- A T3 CLI call that fails with `Failed to issue session token` is retried up to four times, two seconds apart. Each CLI call writes a session row to the T3 server's SQLite database; while the server is busy writing, that insert fails with `database is locked`, and orq used to read the failure as the thread being gone.
+
 ## [0.12.0] - 2026-11-17
 
 ### Changed
