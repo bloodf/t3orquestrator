@@ -769,6 +769,9 @@ test('gate-run: the final gate gets finalTimeoutMinutes (default 60), a unit gat
   assert.equal(await orq(['config', 'set', 'finalTimeoutMinutes', '45']), 0);
   await orq(['gate-run', 'integration', '1', sha]);
   assert.deepEqual(seen, [20 * 60000, 60 * 60000, 45 * 60000]);
+  assert.equal(await orq(['config', 'set', 'unitTimeoutMinutes', '50']), 0);
+  await orq(['gate-run', 'a', '1', sha]);
+  assert.equal(seen.at(-1), 50 * 60000);
   const result = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'integration', 1, 'json'), 'utf8'));
   assert.deepEqual(result.failures, [
     'checks timed out after 45 min: raise the limit with "orq config set finalTimeoutMinutes <minutes>" or narrow checks.full, then "orq unit retry integration"',
