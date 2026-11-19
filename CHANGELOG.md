@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.0] - 2026-11-19
+
+### Added
+
+- `unitTimeoutMinutes` (project scheduler key, default 20, at most 1440) sets the limit of each step of a unit gate. A fix unit gets no changed-file lists, so its `checks.unit` runs the whole suite, which on a loaded machine passes 20 minutes and failed as a timeout three times in a row.
+
 ## [0.12.2] - 2026-11-19
 
 ### Fixed
