@@ -90,3 +90,17 @@ test('config: a regex with a comma needs the JSON list form', () => {
   assert.deepEqual(setConfigValue({}, 'freeModels', '["a{1,2}"]', 'machine').freeModels, ['a{1,2}']);
   assert.deepEqual(setConfigValue({}, 'freeModels', 'a{1,2}', 'machine').freeModels, ['a{1', '2}']);
 });
+
+test('a free model earns its tier: tier 1 first, tier 2 after 3 passes at 60%+, its own tier after 8 passes at 70%+', async () => {
+  const { earnedTier } = await import('../lib/route.mjs');
+  const res = (pass, fail) => ({ implement: [...Array(pass).fill({ pass: true, at: 1 }), ...Array(fail).fill({ pass: false, at: 1 })] });
+  const free = (tier, results, extra = {}) => ({ free: true, tier, tierSource: 'inferred', results, ...extra });
+  assert.equal(earnedTier(free(3, undefined)), 1);
+  assert.equal(earnedTier(free(3, res(2, 0))), 1);
+  assert.equal(earnedTier(free(3, res(3, 2))), 2);
+  assert.equal(earnedTier(free(3, res(3, 3))), 1); // 50%: not trusted yet
+  assert.equal(earnedTier(free(3, res(8, 2))), 3);
+  assert.equal(earnedTier(free(2, res(9, 0))), 2); // never above the registry tier
+  assert.equal(earnedTier(free(3, undefined, { tierSource: 'user' })), 3); // the user's tier stands
+  assert.equal(earnedTier({ free: false, tier: 3 }), 3); // paid models keep theirs
+});

@@ -74,7 +74,7 @@ Run `orq plan check` and fix every `error:` line until it prints `plan ok`.
 
 ## Run
 
-Call `orq wait`. It returns one line (a `message:` returns the message too). Act on it, then call `orq wait` again, until it returns `done`.
+Call `orq wait`. It returns one line (a `message:` returns the message too). Act on it, then call `orq wait` again, until it returns `done`. Any orq command that exits 6 (`T3 is busy`) only hit T3 under load: wait a minute and run it again; never end your turn over it.
 
 | Return | Action |
 |---|---|

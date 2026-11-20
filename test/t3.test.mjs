@@ -179,3 +179,18 @@ test('defaultExec takes a reply over 1 MB (a worker pasting a diff must not wedg
   assert.equal(r.code, 0);
   assert.equal(r.stdout.length, 3 * 1024 * 1024);
 });
+
+test('retryTokenErrors retries session-token failures with backoff, then throws exit 6', async () => {
+  const { retryTokenErrors, T3_BUSY_EXIT } = await import('../lib/t3.mjs');
+  const busy = { status: 1, stderr: 'ServerAuthSessionTokenIssueError: Failed to issue session token.' };
+  const slept = [];
+  let calls = 0;
+  const ok = retryTokenErrors(() => (++calls < 3 ? busy : { status: 0, stdout: 'x', stderr: '' }), (s) => slept.push(s), [1, 2, 3, 4]);
+  assert.equal(ok.status, 0);
+  assert.deepEqual(slept, [1, 2]);
+  calls = 0;
+  assert.throws(() => retryTokenErrors(() => { calls++; return busy; }, () => {}, [1, 2, 3, 4]), (e) => e.exitCode === T3_BUSY_EXIT && /call the same orq command again/.test(e.message));
+  assert.equal(calls, 5);
+  const other = retryTokenErrors(() => ({ status: 1, stderr: 'no such thread' }), () => { throw new Error('no sleep'); });
+  assert.equal(other.status, 1);
+});
