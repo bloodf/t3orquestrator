@@ -3,6 +3,13 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.14.0] - 2026-11-20
+
+### Changed
+
+- A T3 `Failed to issue session token` error is retried five times over about a minute (was four times over six seconds). If it still fails, the orq command exits 6 with `T3 is busy`, and the playbook tells the orchestrator to run the same command again instead of ending its turn. Under heavy load orchestrators had been stopping on this error.
+- A free model earns its tier instead of being trusted with the one inferred for it: it starts on tier 1 jobs, reaches tier 2 after 3 passing gates at 60%+ and its own tier after 8 passes at 70%+, never above the registry tier. A tier set with `orq tier set --by user` is kept.
+
 ## [0.13.0] - 2026-11-19
 
 ### Added
