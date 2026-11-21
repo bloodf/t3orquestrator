@@ -3,6 +3,18 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.16.0] - 2026-11-21
+
+### Changed
+
+- `orq status` and `orq sync` show an Antigravity account's usage per quota group, named as T3 labels them (`antigravity Gemini 14% gemini-weekly resets …, Claude & GPT (shared) 100% 3p-weekly resets …`). The line used to show the account's fullest window alone, so an account with Claude and GPT used up read as out of quota while its Gemini group was nearly unused.
+- On Antigravity, a usage reading taken at least 10 minutes after a provider's limit refusal ends that hold for a model when every window of the model's own quota group is under `usageThreshold`. A refusal holds the whole family on the instance until the reset it names; the Gemini quota came back days before that time and the models stayed out of routing. Other providers, and an instance T3 reports no usage for, keep the hold until its time.
+- A model's own usage window (`gemini-argon-wtu-weekly`) binds the models T3 lists with that name in the slug or the display name, so `gemini-pro-orchestrator-g1-pro` ("Orchestrator (Argon)") waits with `gemini-4-argon`.
+
+### Fixed
+
+- The Antigravity 1.5 refusal `⚠ Individual quota reached. … Resets in 113h11m4s.` is read as a limit with its reset time. It was counted as an unknown provider failure, so the models were launched again after each short backoff into the same used-up quota.
+
 ## [0.15.0] - 2026-11-21
 
 ### Changed
