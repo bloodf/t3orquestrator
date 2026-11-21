@@ -794,3 +794,14 @@ test('review fix 7: a give-up on account usage is not written to the registry; o
   assert.ok(!types(given).includes('record-limit') && !types(given).includes('record-failure'), types(given).join());
   assert.deepEqual(on('ag::claude-x').events, []); // the full gemini window does not bind a claude model
 });
+
+test('a long gate queue holds new launches: over 2x gateConcurrency waiting, new units wait and a note says why', () => {
+  const p = { goal: 'g', units: ['a', 'b', 'c', 'd', 'e'].map((id) => unit(id)) };
+  const done = ['a', 'b', 'c', 'd'].flatMap((id) => [launched(id), ended(id)]);
+  const held = go(done, { plan: p, config: { gateConcurrency: 1, proven: true }, cap: 8 });
+  assert.equal(types(held).filter((x) => x === 'gate-start').length, 1);
+  assert.deepEqual(launches(held), []);
+  assert.ok(held.report.notes.some((n) => /3 units wait for checks/.test(n)));
+  const open = go(done, { plan: p, config: { gateConcurrency: 2, proven: true }, cap: 8 });
+  assert.deepEqual(launches(open).map((a) => a.unit), ['e']); // 2 waiting after 2 starts: not over 2x2
+});

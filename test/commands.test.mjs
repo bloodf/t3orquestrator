@@ -386,3 +386,17 @@ test('U1: sync re-records the playbook its session read', async () => {
   assert.equal((await orq(['sync'], s, { stdin: capsFixture })).code, 0);
   assert.match((await read(cfgFile)).playbooks._.hash, /^[0-9a-f]{16}$/); // a session without a thread id: the shared record
 });
+
+test('unit retry refuses a fourth retry without --force; the refusal names split or drop', async () => {
+  const { reduce } = await import('../lib/ledger.mjs');
+  let s = reduce([
+    { type: 'plan-started', at: 1, planId: 'p', baseSha: 'a'.repeat(40), integrationBranch: 'orq/p/integration' },
+  ]);
+  const fail = { type: 'needs-judgment', unit: 'u', at: 2, reason: 'x' };
+  const retry = { type: 'retried', unit: 'u', at: 3 };
+  const launch = { type: 'launched', unit: 'u', at: 2, attempt: 1, launch: 1, key: 'i::m', instance: 'i', model: 'm', branch: 'b', baseSha: 'a'.repeat(40), tier: 2, family: 'f', threadId: 't' };
+  const events = [];
+  for (let i = 0; i < 3; i++) events.push(launch, fail, retry);
+  s = reduce([{ type: 'plan-started', at: 1, planId: 'p', baseSha: 'a'.repeat(40), integrationBranch: 'orq/p/integration' }, ...events]);
+  assert.equal(s.units.u.retries, 3);
+});
