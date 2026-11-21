@@ -11,6 +11,7 @@ const DAY = 24 * HOUR;
 const REAL = {
   antigravity: 'Usage Limit Reached\n\nYou have reached your current quota for this period. Your limit will reset in 5 days, 4 hours.',
   antigravityMinutes: 'Usage Limit Reached\n\nYou have reached your current quota for this period. Your limit will reset in 4 days, 33 minutes.',
+  antigravity15: '\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 113h11m4s.\n', // CLI 1.5.13, stormtrooper 2026-11-20
   claude: "You've hit your Fable limit · resets Nov 17 at 12am (America/Sao_Paulo). Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message, to continue.",
   codex: 'You’ve hit your usage limit. Visit <url> to purchase more credits or try again at Nov 9th, 2026 11:58 AM.',
   capacity: 'No capacity available for model gemini-3.8-flash-high on the server',
@@ -20,6 +21,11 @@ test('real usage-limit replies are limits, with the reset time the provider gave
   const ag = classifyFailure(REAL.antigravity, NOW);
   assert.deepEqual([ag.kind, ag.until, ag.reason], ['limit', NOW + 5 * DAY + 4 * HOUR, 'Usage Limit Reached']);
   assert.equal(classifyFailure(REAL.antigravityMinutes, NOW).until, NOW + 4 * DAY + 33 * MIN);
+  for (const strict of [false, true]) {
+    const ag15 = classifyFailure(REAL.antigravity15, NOW, { strict });
+    assert.deepEqual([ag15.kind, ag15.until], ['limit', NOW + 113 * HOUR + 11 * MIN + 4000]);
+    assert.match(ag15.reason, /Individual quota reached/);
+  }
   // Nov 17 00:00 in São Paulo (UTC-3) is 03:00 UTC
   const claude = classifyFailure(REAL.claude, NOW);
   assert.deepEqual([claude.kind, claude.until], ['limit', Date.parse('2026-11-17T03:00:00Z')]);

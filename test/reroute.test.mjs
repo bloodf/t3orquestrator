@@ -55,6 +55,12 @@ test('recordLimit: sign-out cools the instance; capacity cools the model; a long
   assert.throws(() => recordLimit(REG, 'ag::gemini-4-argon', { kind: 'nope', until: NOW }), /unknown limit kind/);
 });
 
+test('recordLimit: the time of the refusal is kept with the hold, so a later usage reading can end it (usage.mjs)', () => {
+  const r = recordLimit(REG, 'ag::gemini-4-argon', { kind: 'limit', until: NOW + 9 * H }, NOW);
+  assert.deepEqual([r.models['ag::gemini-4-argon'].limitAt, r.models['ag::gemini-3.8-flash'].limitAt, r.models['ag::claude-sonnet-5-5'].limitAt], [NOW, NOW, undefined]);
+  assert.equal(recordLimit(REG, 'ag::gemini-4-argon', { kind: 'auth', until: NOW + H }, NOW).instances.ag.limitAt, NOW);
+});
+
 const withUsageOn = (id, usage) => ({ ...REG, instances: { ...REG.instances, [id]: { ...REG.instances[id], usage } } });
 const reading = (windows, over = {}) => ({ checkedAt: NOW, down: false, stale: false, windows, ...over });
 

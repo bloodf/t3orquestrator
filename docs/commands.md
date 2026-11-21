@@ -201,7 +201,7 @@ integration: <branch> head=<sha> base=<sha>
 ship: green=<sha12|none> shipped=<sha12|none> ships=<n>[ synced=<base12>-><head12>][ sync-conflict=<base12> in <files>]   (continuous mode only)
 cap=<n> active=<n> blocked=<n> gates=<n> machine_leases=<n>[ expired_leases=<n>][ project_cap=<n> project_leases=<n>]
 providers: … (as for init)
-usage: <instance> <used>% <window>[ resets <iso time>]|down|stale|unreadable; …   or   usage: no T3 provider cache in <dir>
+usage: <instance> <used>% <window>[ resets <iso time>]|<group> <used>% <window>[ resets <iso time>], …|down|stale|unreadable; …   or   usage: no T3 provider cache in <dir>
 worktrees: <n> on orq branches[; <k> salvage patches in .orq/salvage/ (kept 30 days; past 7 days, at most 100)]   (only when there are any)
 <unit> <state>[ attempt=<n>][ model=<key>][ tier=<n>][ wanted_tier=<n>][ continued][ rerouted=<from>-><to>(<reason>)][ thread=<id>][ flags=<kinds>][ <reason>]
 authors: max_tier=<n> family=<family>

@@ -31,6 +31,24 @@ test('instanceUsage reads the windows of a T3 provider snapshot', () => {
   assert.equal(instanceUsage(null, NOW), null);
 });
 
+// As T3 lists an antigravity account's models (slug and display name).
+const AG_MODELS = [
+  { slug: 'gemini-4-neon', name: 'Gemini 4 Neon' }, { slug: 'gemini-4-argon', name: 'Gemini 4 Argon' },
+  { slug: 'gemini-pro-orchestrator-g1-pro', name: 'Orchestrator (Argon)' }, { slug: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' },
+];
+
+test('instanceUsage: an antigravity window carries its quota group, and a model\'s own window its member models', () => {
+  const u = instanceUsage({ ...cache('antigravity'), models: AG_MODELS }, NOW);
+  assert.deepEqual(u.windows.map((x) => [x.id, x.group]), [
+    ['3p-5h', 'Claude & GPT (shared)'], ['gemini-5h', 'Gemini'], ['3p-weekly', 'Claude & GPT (shared)'],
+    ['gemini-argon-wtu-weekly', 'Gemini 4 Argon'], ['gemini-weekly', 'Gemini'],
+  ]);
+  // by slug or by display name: T3 names gemini-pro-orchestrator-g1-pro "Orchestrator (Argon)"
+  assert.deepEqual(u.windows.map((x) => x.members), [undefined, undefined, undefined, ['gemini-4-argon', 'gemini-pro-orchestrator-g1-pro'], undefined]);
+  assert.equal(instanceUsage(cache('antigravity'), NOW).windows[3].members, undefined); // no model list: bound by slug, as before
+  assert.equal(instanceUsage(cache('claudeAgent'), NOW).windows.some((x) => 'group' in x), false); // other drivers: one group
+});
+
 test('instanceUsage: an errored or signed-out instance is down, only while its snapshot is fresh', () => {
   assert.equal(instanceUsage(cache('codex-2'), NOW).down, true);
   assert.equal(instanceUsage({ ...cache('codex'), status: 'error' }, NOW).down, true);
@@ -111,6 +129,62 @@ test('withUsage: antigravity windows apply to their model family, 3p to claude a
   assert.equal(argon.models['ag::gemini-argon-1'].cooldownUntil, NOW + H);
 });
 
+test('withUsage: a model\'s own window binds the member models T3 lists, whatever their slug', () => {
+  const reg = { ...REG, models: { ...REG.models, ...Object.fromEntries([mod('ag', 'gemini-pro-orchestrator-g1-pro')]) } };
+  const argon = { ...w('gemini-argon-wtu-weekly', 100), members: ['gemini-argon-1', 'gemini-pro-orchestrator-g1-pro'] };
+  const v = withUsage(reg, { ag: usage([argon, w('gemini-weekly', 20)]) }, { now: NOW });
+  assert.equal(v.models['ag::gemini-pro-orchestrator-g1-pro'].cooldownUntil, NOW + H);
+  assert.equal(v.models['ag::gemini-argon-1'].cooldownUntil, NOW + H);
+  assert.deepEqual([v.models['ag::gemini-3-flash'].cooldownUntil, v.models['ag::gemini-3-flash'].headroom], [null, 0.8]);
+});
+
+// A provider refusal holds the whole family on the instance until the reset it named (health.mjs recordLimit).
+const held = (key, until, over = {}) => ({ ...REG, models: { ...REG.models, [key]: { ...REG.models[key], cooldownUntil: until, limitUntil: until, ...over } } });
+const MIN = 60_000;
+
+test('withUsage: a limit hold ends once a later reading shows room in the model\'s own quota group', () => {
+  const room = { ag: usage([w('gemini-weekly', 14), w('gemini-5h', 0), w('3p-weekly', 100)]) };
+  const view = (reg, u = room, opts = {}) => withUsage(reg, u, { now: NOW, ...opts }).models['ag::gemini-3-flash'];
+  const reg = held('ag::gemini-3-flash', NOW + 90 * H);
+  assert.deepEqual([view(reg).cooldownUntil, view(reg).headroom], [null, 0.86]); // a hold from before limitAt was recorded
+  assert.equal(reg.models['ag::gemini-3-flash'].cooldownUntil, NOW + 90 * H); // the registry itself is untouched
+  // the reading must come 10 minutes after the refusal: T3's numbers can trail the provider's
+  assert.equal(view(held('ag::gemini-3-flash', NOW + 90 * H, { limitAt: NOW - 10 * MIN })).cooldownUntil, null);
+  assert.equal(view(held('ag::gemini-3-flash', NOW + 90 * H, { limitAt: NOW - 9 * MIN })).cooldownUntil, NOW + 90 * H);
+  // the group is at the threshold, or T3 reports nothing for it: the hold stands
+  assert.equal(view(reg, { ag: usage([w('gemini-weekly', 96, NOW + 2 * H), w('3p-weekly', 0)]) }, { threshold: 95 }).cooldownUntil, NOW + 90 * H);
+  assert.equal(view(reg, { ag: usage([w('3p-weekly', 0)]) }).cooldownUntil, NOW + 90 * H);
+  assert.equal(view(reg, { ag: usage([], { stale: true }) }).cooldownUntil, NOW + 90 * H);
+  // a failure backoff longer than the hold is not the provider's: kept
+  assert.equal(view(held('ag::gemini-3-flash', NOW + 90 * H, { cooldownUntil: NOW + 99 * H })).cooldownUntil, NOW + 99 * H);
+  // a shorter cooldown is a failure backoff written after the hold: it runs out on its own
+  assert.equal(view(held('ag::gemini-3-flash', NOW + 90 * H, { cooldownUntil: NOW + 5 * MIN })).cooldownUntil, NOW + 5 * MIN);
+  // a reading dated ahead of the clock counts as taken now
+  assert.equal(view(held('ag::gemini-3-flash', NOW + 90 * H, { limitAt: NOW - 5 * MIN }), { ag: usage(room.ag.windows, { checkedAt: NOW + 30 * MIN }) }).cooldownUntil, NOW + 90 * H);
+  // the claude and gpt group of the same account is still full
+  assert.equal(withUsage(held('ag::claude-sonnet', NOW + 90 * H), room, { now: NOW }).models['ag::claude-sonnet'].cooldownUntil, NOW + 90 * H);
+});
+
+test('withUsage: an instance held because every model of it was refused is free once all of them are', () => {
+  const only = (over = {}, instOver = {}) => deepFreeze({
+    version: 1,
+    instances: { ag: inst('antigravity', { cooldownUntil: NOW + 90 * H, limitUntil: NOW + 90 * H, ...instOver }) },
+    models: Object.fromEntries([mod('ag', 'gemini-3-flash'), mod('ag', 'gemini-3-pro')].map(([k, m]) => [k, { ...m, cooldownUntil: NOW + 90 * H, limitUntil: NOW + 90 * H, ...over }])),
+  });
+  const room = { ag: usage([w('gemini-weekly', 14)]) };
+  const until = (reg, u = room) => withUsage(reg, u, { now: NOW }).instances.ag.cooldownUntil;
+  assert.equal(until(only()), null);
+  assert.equal(until(only(), { ag: usage([w('gemini-weekly', 100)]) }), NOW + 90 * H); // the group is full
+  assert.equal(until(only({ limitUntil: undefined, cooldownUntil: null })), NOW + 90 * H); // a sign-out hold: no model was refused
+  assert.equal(until(only({}, { cooldownUntil: NOW + 99 * H })), NOW + 99 * H); // a longer failure cooldown on the instance
+  assert.ok(until(only(), { ag: usage([w('gemini-weekly', 14)], { down: true }) }) > NOW); // T3 reports it down
+});
+
+test('withUsage: a limit hold stands where usage is not per quota group', () => {
+  const v = withUsage(held('cx::gpt-x', NOW + 90 * H), { cx: usage([w('p', 10)]) }, { now: NOW });
+  assert.equal(v.models['cx::gpt-x'].cooldownUntil, NOW + 90 * H); // codex: a limit its windows do not show may be the one
+});
+
 test('withUsage: a down instance cools until the next reading; a stale one is unknown', () => {
   const down = withUsage(REG, { cx: usage([], { down: true }) }, { now: NOW });
   assert.ok(down.instances.cx.cooldownUntil > NOW);
@@ -167,4 +241,17 @@ test('usageLine: windows, down, stale, unreadable; nothing applies, nothing; no 
   }), ['usage: a 100% p resets 2026-11-17T00:00:00.000Z; b down; c stale; d unreadable']);
   assert.deepEqual(line({ e: usage([]) }), []);
   assert.deepEqual(line({}), ['usage: no T3 provider cache in /t3/caches']);
+});
+
+test('usageLine: an account with several quota groups shows each, so one full group does not read as the account', () => {
+  const now = Date.parse('2026-11-21T15:20:00Z');
+  const live = { ...cache('antigravity'), usageLimits: { checkedAt: '2026-11-21T15:19:14.483Z', windows: [
+    { id: 'gemini-5h', label: 'Gemini · 5-hour', usedPercent: 0 },
+    { id: '3p-weekly', label: 'Claude & GPT (shared) · Weekly', usedPercent: 100, resetsAt: '2026-11-25T18:30:40.000Z' },
+    { id: 'gemini-argon-wtu-weekly', label: 'Gemini 4 Argon · Weekly', usedPercent: 0 },
+    { id: 'gemini-weekly', label: 'Gemini · Weekly', usedPercent: 13.72, resetsAt: '2026-11-28T09:19:12.000Z' },
+  ] } };
+  assert.deepEqual(usageLine({ dir: '/t3/caches', instances: { ag: instanceUsage(live, now), cx: usage([w('p', 40, null)]) } }), [
+    'usage: ag Gemini 14% gemini-weekly resets 2026-11-28T09:19:12.000Z, Claude & GPT (shared) 100% 3p-weekly resets 2026-11-25T18:30:40.000Z, Gemini 4 Argon 0% gemini-argon-wtu-weekly; cx 40% p',
+  ]);
 });
