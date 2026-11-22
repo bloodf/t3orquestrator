@@ -151,12 +151,62 @@ test('ship: a failed base push names the open pull request; running it again reu
     ? { code: 1, stdout: '', stderr: ' ! [rejected] main (non-fast-forward)' } : defaultExec(cmd, args, opts));
   const r = await orq(['ship'], p, { ghExec: gh.exec, gitExec: rejecting });
   assert.equal(r.code, 1);
-  assert.equal(r.err, `orq: ship: ${URL1} is open, but pushing ${p.X.slice(0, 12)} to main failed: ! [rejected] main (non-fast-forward); fix that and run "orq ship" again (it reuses the pull request)\n`);
+  assert.equal(r.err, `orq: ship: ${URL1} is open, but pushing ${p.X.slice(0, 12)} to main failed: ! [rejected] main (non-fast-forward) and the host refused to merge it; fix that, or merge it on the host, and run "orq ship" again (it reuses or records the pull request)\n`);
   assert.equal((await readState(p.repo)).plan.shipped, undefined);
   const again = await orq(['ship'], p, { ghExec: gh.exec });
   assert.equal(again.code, 0, again.err);
   assert.equal(gh.calls.filter((a) => a[1] === 'create').length, 1);
   assert.equal(p.remoteSha('refs/heads/main'), p.X);
+});
+
+test('ship: a protected base refuses the push; the pull request is merged on the host and recorded', async (t) => {
+  const p = await shipProject(t);
+  const gh = fakeGh({ remote: p.remote });
+  const inner = gh.exec;
+  gh.exec = (bin, args) => (args[1] === 'merge' ? (gh.calls.push(args), { code: args[3] === '--squash' ? 0 : 1, stdout: '', stderr: '' }) : inner(bin, args));
+  const protectedBase = (cmd, args, opts) => (args.includes(`${p.X}:refs/heads/main`)
+    ? { code: 1, stdout: '', stderr: ' ! [remote rejected] main (protected branch hook declined)' } : defaultExec(cmd, args, opts));
+  const r = await orq(['ship'], p, { ghExec: gh.exec, gitExec: protectedBase });
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(gh.calls.filter((a) => a[1] === 'merge').map((a) => a[3]), ['--merge', '--squash']);
+  assert.equal((await readState(p.repo)).plan.shipped, p.X);
+});
+
+test('ship: a pull request squashed by hand is recorded, even after the base moved on', async (t) => {
+  const p = await shipProject(t);
+  sh(p.repo, 'push', '-q', 'origin', `${p.X}:refs/heads/orq/p1/ship-1`);
+  const gh = fakeGh({ remote: p.remote, prs: { 'orq/p1/ship-1': { url: URL1, state: 'MERGED' } } });
+  sh(p.repo, 'branch', 'sq', p.baseSha);
+  const squash = await commitOn(p.repo, 'sq', { 'a.txt': 'a\n', 'z.txt': 'later\n' }, 'squashed a, then more');
+  sh(p.repo, 'push', '-q', 'origin', `${squash}:refs/heads/main`);
+  const r = await orq(['ship'], p, { ghExec: gh.exec });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out, `recorded ${p.X.slice(0, 12)} as shipped: ${URL1} was merged on the host\n`);
+  assert.equal((await readState(p.repo)).plan.shipped, p.X);
+});
+
+test('ship: a base that already has the head content is recorded as shipped, no pull request', async (t) => {
+  const p = await shipProject(t);
+  sh(p.repo, 'branch', 'sq', p.baseSha);
+  const squash = await commitOn(p.repo, 'sq', { 'a.txt': 'a\n' }, 'squashed a');
+  sh(p.repo, 'push', '-q', 'origin', `${squash}:refs/heads/main`);
+  const gh = fakeGh({ remote: p.remote });
+  const r = await orq(['ship'], p, { ghExec: gh.exec });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out, `recorded ${p.X.slice(0, 12)} as shipped: main on origin already has its content\n`);
+  assert.ok(!gh.calls.some((a) => a[1] === 'create'));
+  assert.equal((await readState(p.repo)).plan.shipped, p.X);
+});
+
+test('ship: a ship branch whose pull request was merged on the host is recorded, not shipped again', async (t) => {
+  const p = await shipProject(t);
+  sh(p.repo, 'push', '-q', 'origin', `${p.X}:refs/heads/orq/p1/ship-1`);
+  const gh = fakeGh({ remote: p.remote, prs: { 'orq/p1/ship-1': { url: URL1, state: 'MERGED' } } });
+  const r = await orq(['ship'], p, { ghExec: gh.exec });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out, `recorded ${p.X.slice(0, 12)} as shipped: ${URL1} was merged on the host\n`);
+  assert.ok(!gh.calls.some((a) => a[1] === 'create'));
+  assert.equal(p.remoteSha('refs/heads/main'), p.baseSha);
 });
 
 test('unit retry integration in continuous mode: counts the starts on the head the final gate ran on', async (t) => {
