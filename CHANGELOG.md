@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.18.0] - 2026-11-22
+
+### Fixed
+
+- `orq ship` on a protected base. The direct push to the base is refused there, so orchestrators squash-merged the pull request by hand, `orq` never recorded the ship, and `orq wait` kept offering heads whose content was already merged. Now a refused base push merges the pull request on the host (`gh pr merge --merge`, else `--squash`) and records it. `orq ship` also records, without pushing anything, a head whose ship pull request was merged on the host and a head whose exact content origin's base already has.
+
 ## [0.17.0] - 2026-11-21
 
 ### Added
