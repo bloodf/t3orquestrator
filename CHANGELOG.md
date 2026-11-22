@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.20.0] - 2026-11-22
+
+### Added
+
+- Machine setting `preferInstances`: instance ids (regular expressions) routed first among eligible candidates, at any adequate tier and before free models, for every job except `decide`.
+
 ## [0.19.0] - 2026-11-22
 
 ### Added

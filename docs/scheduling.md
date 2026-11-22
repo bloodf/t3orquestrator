@@ -104,13 +104,14 @@ Every relaunch of a unit, whatever ended the launch before it (a gate failure, a
 
 ### Machine routing policy
 
-Five machine settings (`orq config set --machine <key> <value>`; a value is a JSON list, a comma-separated list, or for `instanceFamilies` a JSON object; a value starting with `[`, `{` or `"` is read as JSON, so a pattern that contains a comma needs the JSON list form, `'["a{1,2}"]'`; `null` restores the default) shape what may run where, for every job. Model patterns are regular expressions on the model id, case-insensitive.
+Six machine settings (`orq config set --machine <key> <value>`; a value is a JSON list, a comma-separated list, or for `instanceFamilies` a JSON object; a value starting with `[`, `{` or `"` is read as JSON, so a pattern that contains a comma needs the JSON list form, `'["a{1,2}"]'`; `null` restores the default) shape what may run where, for every job. Model patterns are regular expressions on the model id, case-insensitive.
 
 - `freeModels` (default `[":free$"]`): models that cost nothing, such as a hosted provider's free tier. Among eligible candidates they go first, before the order above, except for `decide`, which keeps the strongest first. Eligibility, cooldowns and the failure ladders are unchanged: a free model that fails is cooled and rerouted like any other. `orq route` marks them `free`; `[]` turns this off.
 - `excludeModels` (default `["^ollama-local/"]`): never routed, for any job.
 - `decisionOnly` (default `["(^|[/-])astra($|[-/:])", "(^|[/-])fable($|[-/:])"]`: `astra` or `fable` as a part of the model id, as in `cx/gpt-6-astra` or `claude-fable-5-2`, not inside another word): models too expensive for anything but decisions: only `decide` routes them. A job whose only usable models are these waits as if it had none (`idle: no model for <unit>: only decision-only models are usable (kept for decisions: machine config decisionOnly)`), and with a lower tier available it takes that one, below its tier, instead.
 - `instanceFamilies` (default `{"antigravity":["google"],"antigravity-2":["google"]}`; any instance whose id contains `antigravity`, such as `codex-antigravity-proxy`, runs only `google` models unless the map names it): the model families an instance may run, when T3 lists others on it.
 - `creditInstances` (default none): instance ids, as regular expressions, that keep routing when their usage windows are full, because the account runs on paid credits past its plan limit (`'["^codex(-[0-9]+)?$"]'`). Their usage windows are left out of routing; a real refusal from the provider still cools them.
+- `preferInstances` (default none): instance ids, as regular expressions, routed first among eligible candidates for every job except `decide`, at any adequate tier and before free models (`'["^codex","^minimax$"]'`).
 
 `orq status` and `orq sync` show the policy at the end of the `providers:` line: `<n> free models`, `<n> excluded models (<keys>)` and `families: <instance>=<families>, …`.
 

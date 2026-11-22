@@ -104,3 +104,11 @@ test('a free model earns its tier: tier 1 first, tier 2 after 3 passes at 60%+, 
   assert.equal(earnedTier(free(3, undefined, { tierSource: 'user' })), 3); // the user's tier stands
   assert.equal(earnedTier({ free: false, tier: 3 }), 3); // paid models keep theirs
 });
+
+test('preferInstances: a preferred instance goes first at any tier, before free models, except for decisions', () => {
+  const r = reg([mod('claude', 'sonnet', 2), mod('codex', 'sol', 3), mod('api', 'x:free', 3)]);
+  assert.deepEqual(keys(go(r)), ['api::x:free', 'claude::sonnet', 'codex::sol']);
+  const out = go(r, { preferInstances: ['^codex'] });
+  assert.deepEqual(keys(out), ['codex::sol', 'api::x:free', 'claude::sonnet']);
+  assert.equal(out.candidates[0].preferred, true);
+});
