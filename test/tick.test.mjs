@@ -805,3 +805,38 @@ test('a long gate queue holds new launches: over 2x gateConcurrency waiting, new
   const open = go(done, { plan: p, config: { gateConcurrency: 2, proven: true }, cap: 8 });
   assert.deepEqual(launches(open).map((a) => a.unit), ['e']); // 2 waiting after 2 starts: not over 2x2
 });
+
+// v0.17.0: a machine under pressure, or with a failing protected service, starts nothing new
+const HOLD = { reasons: ['io pressure 72% (limit 40%)'] };
+
+test('hold: no launch while the machine is held; the report says what waits and why', () => {
+  const r = go(doneA, { hold: HOLD });
+  assert.deepEqual(launches(r), []);
+  assert.deepEqual([r.report.held, r.report.hold, r.report.heldBack], [true, 'io pressure 72% (limit 40%)', 2]);
+  assert.deepEqual(r.report.slotWaiting, []);
+  const free = go(doneA, { hold: null });
+  assert.deepEqual([launches(free).length, free.report.held], [2, false]);
+});
+
+test('hold: no new gate, no feedback and no final gate start; a passed unit still integrates', () => {
+  const gating = go([launched('a'), ended('a')], { hold: HOLD });
+  assert.deepEqual(types(gating).filter((x) => x === 'gate-start'), []);
+  assert.equal(gating.report.held, true);
+  assert.ok(!gating.report.notes.some((n) => /wait for checks/.test(n)));
+  const passed = go([launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'pass')], { hold: HOLD });
+  assert.deepEqual(types(passed).filter((x) => x === 'integrate'), ['integrate']);
+  const failedOnce = go([launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail')], { hold: HOLD, threads: { 't-a': thread('t-a', { status: 'completed' }) } });
+  assert.deepEqual(types(failedOnce).filter((x) => x === 'send-feedback'), []);
+  assert.equal(failedOnce.report.held, true);
+  const one = { goal: 'g', units: [unit('a')] };
+  const final = go(doneA, { plan: one, hold: HOLD });
+  assert.deepEqual([types(final).includes('final-gate'), final.report.held, final.report.done], [false, true, false]);
+});
+
+test('hold: a running gate result is still read, and a held machine with nothing to start is not held back', () => {
+  const g = { a: { running: false, result: { verdict: 'pass', failures: [], flags: [], headSha: B } } };
+  const r = go([launched('a'), ended('a'), gateStarted('a')], { hold: HOLD, gates: g, plan: { goal: 'g', units: [unit('a')] } });
+  assert.ok(evTypes(r).includes('gated:a'));
+  const idle = go([launched('a')], { hold: HOLD, plan: { goal: 'g', units: [unit('a')] }, threads: { 't-a': thread('t-a') }, leases: [lease('t-a', { project: '/p' })] });
+  assert.equal(idle.report.held, false);
+});

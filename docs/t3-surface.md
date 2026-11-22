@@ -69,6 +69,14 @@ Observed: both calls exited 0 and printed `{threadId, link, messageId, runId, st
 
 Consequence: sending to a busy thread is safe and ordered, but `runCount` greater than completed runs is the only sign of a queue.
 
+Observed again on `v0.1.11-nightly.20261119.4941`, on 8 running threads of another machine: with nothing queued, `runCount` equals the ordinal at the end of `activeRunId` (`run:thread:<id>:ordinal:<n>`); one of them was at run 45. `orq wait` reads its own thread's queue as `runCount` less that ordinal (the `queued:` line). **Unverified:** whether a queued run that is cancelled leaves `runCount`; `orq wait` therefore tells a queue once per `runCount`, never on a timer.
+
+## 6a. Linked environments
+
+Observed: `t3 environment list` prints each linked environment with its id, whether it answers, its access and its addresses; `link` and `unlink` are the only other subcommands. `t3 thread start`, `send`, `show` and `list` have no flag naming an environment: the CLI acts on the local server only. In the server bundle of the same version, the MCP tool inputs for listing, reading, sending to, waiting on and interrupting a thread, and for scheduled tasks, carry an optional `environmentId` ("Linked environment to act in. Omit for this one."), and `t3_environment_links` lists the ids. **Unverified:** a call with `environmentId` made from a thread, and whether `t3_thread_launch` takes it.
+
+Consequence: `orq` cannot start or read a thread on another machine. It names a peer (`balance:`); handing work over is the orchestrator's call, with those tools.
+
 ## 7. Worktree
 
 Command: `t3 thread start <project> <message> --provider <id> --model <slug> --worktree main --branch orq/probe-1 --wait --json`.

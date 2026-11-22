@@ -129,20 +129,26 @@ test('computeCap: no load reason when the penalty had no effect', () => {
 });
 
 test('readMachine linux uses process.availableMemory', () => {
-  const m = readMachine({ platform: 'linux', os: fakeOs(), availableMemory: () => 9 * GIB });
-  assert.deepEqual(m, { cores: 10, availableMemBytes: 9 * GIB, load1: 2.5, notes: [] });
+  const readFile = (f) => {
+    if (f !== '/proc/pressure/io') throw new Error('ENOENT');
+    return 'some avg10=46.00 avg60=0 avg300=0 total=1\n';
+  };
+  const m = readMachine({ platform: 'linux', os: fakeOs(), availableMemory: () => 9 * GIB, readFile });
+  assert.deepEqual(m, { cores: 10, availableMemBytes: 9 * GIB, load1: 2.5, pressure: { io: 46 }, notes: [] });
 });
 
 test('readMachine darwin parses vm_stat with a timeout', () => {
   const m = readMachine({
     platform: 'darwin', os: fakeOs(),
     exec: (cmd, args, opts) => {
-      assert.equal(cmd, 'vm_stat');
       assert.equal(opts.timeout, 2000);
+      if (cmd === 'sysctl') return '4\n';
+      assert.equal(cmd, 'vm_stat');
       return VM_STAT;
     },
   });
   assert.equal(m.availableMemBytes, 42000 * 16384);
+  assert.deepEqual(m.pressure, { memLevel: 4 });
   assert.deepEqual(m.notes, []);
 });
 

@@ -203,7 +203,7 @@ test('avoidKeys: a model that failed this unit goes last, behind one only on a f
 });
 
 test('decide: routing.json asks for tier 4 and the strongest model', () => {
-  assert.deepEqual(rules.jobs.decide, { minTier: 4, strongest: true });
+  assert.deepEqual(rules.jobs.decide, { minTier: 4, strongest: true, always: true });
 });
 
 test('strongest: highest tier first, then the usual order; best available below tier 4; health rules apply', () => {
@@ -228,8 +228,9 @@ test('strongest: when every top-tier model is cooling or at its limit, the stron
   assert.deepEqual(keys(free3), ['b::m3', 'b::m2']);
   const nothing = go(reg({ a: inst() }, [mod('a', 'm4', 4, { cooldownUntil: 5000 }), mod('a', 'm2', 2, { cooldownUntil: 6000 })]), { rules: strong, job: 'decide' });
   assert.deepEqual([nothing.candidates, nothing.blocked, nothing.retryAt], [[], 'cooling', 5000]);
-  // other jobs keep waiting for their tier
-  assert.equal(go(r, { job: 'plan', running: { b: 1 } }).candidates.length, 0);
+  // other jobs keep waiting for their tier (plan runs one over its instance limit instead: see `always`)
+  assert.equal(go(r, { job: 'architecture', running: { b: 1 } }).candidates.length, 0);
+  assert.deepEqual(keys(go(r, { job: 'plan', running: { b: 1 } })), ['b::n4']);
 });
 
 // the last results for the job, oldest first (`results` is the scored record; old `outcomes` rows are ignored)
@@ -276,4 +277,77 @@ test('R1: only the last 10 results count, old outcome counts are ignored, and a 
   const lapsed = go(r(900), { now: 900 + DAY + 1 });
   assert.deepEqual(keys(lapsed), ['a::m2', 'b::m2']);
   assert.equal(lapsed.candidates[0].demoted, undefined);
+});
+
+// v0.17.0: degrade instead of stopping
+const HOUR = 3600_000;
+
+test('fallback: when every model at the tier cools for long, the best free tier below it is used, with a note', () => {
+  const r = reg({ a: inst({ cooldownUntil: 1000 + 5 * HOUR }), b: inst() }, [mod('a', 'top', 4), mod('b', 'mid', 3), mod('b', 'low', 2)]);
+  const out = go(r, { job: 'plan' });
+  assert.deepEqual(keys(out), ['b::mid']);
+  assert.deepEqual([out.candidates[0].belowTier, out.candidates[0].wantedTier, out.blocked], [true, 4, null]);
+  assert.equal(out.reason, `every model at tier 4 or above is cooling down until ${new Date(1000 + 5 * HOUR).toISOString()}; using tier 3`);
+});
+
+test('fallback: not for a short cooldown, a tier that is only busy, or models that failed the quality ladder', () => {
+  const short = reg({ a: inst({ cooldownUntil: 1000 + 5 * 60_000 }), b: inst() }, [mod('a', 'top', 3), mod('b', 'low', 2)]);
+  assert.equal(go(short, { job: 'implement-complex' }).blocked, 'cooling');
+  const busy = reg({ a: inst({ limit: 1 }), b: inst() }, [mod('a', 'top', 3), mod('b', 'low', 2)]);
+  assert.equal(go(busy, { job: 'implement-complex', running: { a: 1 } }).blocked, 'limit');
+  const halfBusy = reg({ a: inst({ limit: 1 }), c: inst({ cooldownUntil: 1000 + HOUR }), b: inst() }, [mod('a', 'top', 3), mod('c', 'top', 3), mod('b', 'low', 2)]);
+  assert.equal(go(halfBusy, { job: 'implement-complex', running: { a: 1 } }).blocked, 'mixed');
+  const failed = reg({ a: inst(), b: inst() }, [mod('a', 'top', 3), mod('b', 'low', 2)]);
+  assert.equal(go(failed, { job: 'implement-complex', exclude: ['a::top'] }).blocked, 'excluded');
+});
+
+test('fallback: a rule can forbid it, and review does', () => {
+  const r = reg({ a: inst({ cooldownUntil: 1000 + 5 * HOUR }), b: inst() }, [mod('a', 'top', 3, { family: 'fam-b' }), mod('b', 'low', 2, { family: 'fam-b' })]);
+  assert.equal(rules.jobs.review.fallback, false);
+  assert.equal(go(r, { job: 'review', authorTier: 3, authorFamily: 'fam-a' }).blocked, 'cooling');
+  assert.deepEqual(keys(go(r, { job: 'fix', authorTier: 3 })), ['b::low']);
+  const strict = { jobs: { implement: { minTier: 3, fallback: false } } };
+  assert.equal(go(r, { rules: strict }).blocked, 'cooling');
+});
+
+test('always: plan and decide take a model over its instance limit rather than none', () => {
+  assert.deepEqual([rules.jobs.plan.always, rules.jobs.decide.always], [true, true]);
+  const r = reg({ a: inst({ limit: 1 }), b: inst({ limit: 1 }) }, [mod('a', 'top', 4), mod('b', 'mid', 3)]);
+  const running = { a: 1, b: 1 };
+  for (const job of ['plan', 'decide']) {
+    const out = go(r, { job, running });
+    assert.deepEqual(keys(out), ['a::top'], job);
+    assert.equal(out.candidates[0].overLimit, true);
+    assert.match(out.reason, /at its concurrency limit; using one over the limit/);
+  }
+  assert.equal(go(r, { job: 'architecture', running }).blocked, 'limit'); // any other job waits for the slot
+  const below = go(reg({ a: inst({ limit: 1 }) }, [mod('a', 'mid', 3)]), { job: 'plan', running: { a: 1 } });
+  assert.deepEqual([keys(below), below.candidates[0].belowTier, below.candidates[0].overLimit], [['a::mid'], true, true]);
+});
+
+test('degrading never undercuts the unit\'s quality ladder, and waits out a tier that is back within minutes', () => {
+  const r = reg({ a: inst({ cooldownUntil: 1000 + HOUR }), b: inst(), c: inst() }, [mod('a', 'big', 4), mod('b', 'small', 2), mod('c', 'big2', 4)]);
+  // escalated to tier 4 after gate failures: a tier that already failed is no way out
+  assert.equal(go(reg({ a: r.instances.a, b: inst() }, [mod('a', 'big', 4), mod('b', 'small', 2)]), { job: 'implement', atLeast: 4 }).blocked, 'cooling');
+  // one wanted model tried and excluded by this unit, the other cooling
+  assert.equal(go(r, { job: 'implement-complex', exclude: ['c::big2'] }).blocked, 'mixed');
+  // plan: tier 4 back in five minutes and only a busy tier 2 otherwise: wait for the planner
+  const soon = reg({ a: inst({ cooldownUntil: 1000 + 5 * 60_000 }), b: inst({ limit: 1 }) }, [mod('a', 'big', 4), mod('b', 'small', 2)]);
+  const waits = go(soon, { job: 'plan', running: { b: 1 } });
+  assert.deepEqual([waits.blocked, waits.retryAt], ['cooling', 1000 + 5 * 60_000]);
+  // tier 4 out for hours: a busy tier 2 still beats none, and the reason says what it is
+  const long = reg({ a: inst({ cooldownUntil: 1000 + 5 * HOUR }), b: inst({ limit: 1 }) }, [mod('a', 'big', 4), mod('b', 'small', 2)]);
+  const over = go(long, { job: 'plan', running: { b: 1 } });
+  assert.deepEqual([keys(over), over.candidates[0].overLimit, over.candidates[0].belowTier], [['b::small'], true, true]);
+  assert.equal(over.reason, 'no model at tier 4 or above can run now; using a tier 2 model over its concurrency limit');
+  // decide wants an answer now: a weaker busy model decides rather than the user being asked
+  assert.deepEqual(keys(go(soon, { job: 'decide', running: { b: 1 } })), ['b::small']);
+});
+
+test('always: still none when no model has quota, and a model with quota is preferred to an over-limit one', () => {
+  const dead = reg({ a: inst({ cooldownUntil: 1000 + HOUR }) }, [mod('a', 'top', 4)]);
+  assert.equal(go(dead, { job: 'plan' }).blocked, 'cooling');
+  const r = reg({ a: inst({ limit: 1 }), b: inst() }, [mod('a', 'top', 4), mod('b', 'low', 1)]);
+  const out = go(r, { job: 'decide', running: { a: 1 } });
+  assert.deepEqual([keys(out), out.candidates[0].overLimit], [['b::low'], undefined]);
 });

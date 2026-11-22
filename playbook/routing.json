@@ -1,7 +1,7 @@
 {
   "version": 1,
   "jobs": {
-    "plan": { "minTier": 4 },
+    "plan": { "minTier": 4, "always": true },
     "architecture": { "minTier": 4 },
     "debug-hard": { "minTier": 4 },
     "implement-complex": { "minTier": 3 },
@@ -11,8 +11,8 @@
     "docs": { "minTier": 1 },
     "explore": { "minTier": 1 },
     "summarize": { "minTier": 1 },
-    "review": { "minTier": "author", "differentFamily": true },
+    "review": { "minTier": "author", "differentFamily": true, "fallback": false },
     "fix": { "minTier": "author" },
-    "decide": { "minTier": 4, "strongest": true }
+    "decide": { "minTier": 4, "strongest": true, "always": true }
   }
 }

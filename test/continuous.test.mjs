@@ -140,14 +140,13 @@ const say = (s, over = {}, continuous = true, stale = null) => decide({
   plan: two, report: { ...report, ...over }, state: s, launched: 0, continuous, stale,
 });
 
-test('decide in continuous: ship-ready when a passed head is not shipped, after judgment and blocked lines', () => {
+test('decide in continuous: ship-ready when a passed head is not shipped, after judgment lines', () => {
   const ready = st(aIn, { green: C, final: { verdict: 'pass', failures: [], head: C }, integrations: integrations.slice(0, 1) });
   const run = 'run "orq ship --title <conventional title> --body-file <summary file>"';
   assert.deepEqual(say(ready), [`ship-ready: ${C.slice(0, 12)} passed the final checks; 1 units not shipped yet; ${run}`]);
   const withShip = st(bothIn, { green: D, shipped: C, final: { verdict: 'pass', failures: [], head: D } });
   assert.deepEqual(say(withShip, { done: true }), [`ship-ready: ${D.slice(0, 12)} passed the final checks; 1 units not shipped yet; ${run}`]);
   assert.deepEqual(say(st({ a: { state: 'failed', reason: 'x' }, b: { state: 'integrated' } }, { green: C })), ['judgment: a: x']);
-  assert.match(say(ready, { newlyBlocked: [{ unit: 'b', threadId: 't' }] })[0], /^blocked: /);
   assert.equal(say(st(aIn, { green: C, shipped: C })), null); // shipped: b still runs
   assert.equal(say(ready, {}, false), null); // other modes never print it
   const behind = { base: 'main', synced: false, files: [] };

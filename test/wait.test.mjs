@@ -126,7 +126,7 @@ test('wait: end-to-end with completing, blocking and provider-failing threads', 
   const first = await orq(['wait'], p, sim);
   assert.equal(first.code, 0, first.err);
   const bThread = sim.byUnit.b[0].id;
-  assert.equal(first.out, `blocked: b waiting on a request in thread ${bThread}\n`);
+  assert.equal(first.out, `pending: unit b: thread ${bThread} waits on a request: answer it (t3_pending_request, action "respond") or interrupt the thread (t3_thread_interrupt) so orq replaces it\n`);
 
   const second = await orq(['wait'], p, sim);
   assert.equal(second.code, 0, second.err);
@@ -974,4 +974,71 @@ test('wait: when every instance is at its limit the unit waits for the earliest 
   assert.deepEqual([st.state, st.providerFailures, st.attempt], ['queued', 0, 1]);
   // the claude reply named its reset (Nov 13 00:00 in São Paulo); the earliest reset is when to come back
   assert.equal(line.split('retry at ')[1], '2026-11-13T03:00:00.000Z');
+});
+
+// v0.17.0: pressure-aware admission, the own thread's queue
+const calm = { cores: 8, availableMemBytes: 16 * GIB, load1: 0, pressure: { io: 1 } };
+
+test('wait: a machine under pressure starts nothing and says why; work goes on when the pressure drops', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['commit-complete']] });
+  let facts = { ...calm, pressure: { io: 72 } };
+  const held = await orq(['wait', '--max-seconds', '40'], p, sim, { readMachine: () => facts });
+  assert.equal(held.code, 0, held.err);
+  assert.deepEqual(held.out.trimEnd().split('\n'), [
+    'timeout: 0 running, 0 blocked, 0 gating, 1 queued, 0 passed',
+    'waiting: 1 launches or checks wait for this machine: io pressure 72% (limit 40%)',
+  ]);
+  assert.equal(sim.threads.size, 0);
+  const self = JSON.parse(await fs.readFile(path.join(p.home, 'peers', 'self.json'), 'utf8'));
+  assert.deepEqual([self.held, self.free, self.reasons], [true, 0, ['io pressure 72% (limit 40%)']]);
+  facts = { ...calm, pressure: { io: 35 } }; // under the limit, over the release point: still held
+  const band = await orq(['wait', '--max-seconds', '20'], p, sim, { readMachine: () => facts });
+  assert.match(band.out, /waiting: 1 launches or checks wait for this machine: io pressure 35% \(limit 40%, releases under 32%\)/);
+  assert.equal(sim.threads.size, 0);
+  facts = calm;
+  const done = await orq(['wait'], p, sim, { readMachine: () => facts });
+  assert.match(done.out, /^done: 1 units integrated/);
+});
+
+test('wait: a failing protected service holds launches on this machine, whatever the project cap says', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')], { cap: 8 });
+  await fs.writeFile(path.join(p.home, 'config.json'), JSON.stringify({ cap: 8, protect: [{ name: 'gateway', url: 'http://127.0.0.1:1/v1/models', timeoutMs: 200 }] }));
+  await fs.writeFile(path.join(p.repo, '.orq', 'config.json'), JSON.stringify({ ...JSON.parse(await fs.readFile(path.join(p.repo, '.orq', 'config.json'), 'utf8')), cap: 6 }));
+  const sim = simulator(p, { a: [['commit-complete']] });
+  let up = false;
+  const fetch = async () => {
+    if (!up) throw Object.assign(new Error('timeout'), { name: 'TimeoutError' });
+    return { status: 200, body: { cancel: async () => {} } };
+  };
+  const held = await orq(['wait', '--max-seconds', '30'], p, sim, { fetch });
+  assert.match(held.out, /waiting: 1 launches or checks wait for this machine: protected service gateway is failing \(no answer in 200 ms\)/);
+  assert.equal(sim.threads.size, 0);
+  up = true;
+  const done = await orq(['wait'], p, sim, { fetch });
+  assert.match(done.out, /^done: 1 units integrated/);
+});
+
+test('wait: messages queued in the orchestrator\'s own thread end the wait at once', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['idle']] });
+  const own = { threadId: 'own', projectId: 'p', status: 'running', itemCount: 9, updatedAt: new Date(NOW).toISOString(), pendingRequestCount: 0, runCount: 4, activeRunId: 'run:thread:own:ordinal:3' };
+  const exec = (bin, args, o) => (args[1] === 'show' && args[2] === 'own' ? { code: 0, stdout: JSON.stringify({ thread: own, messages: [] }), stderr: '' } : sim.exec(bin, args, o));
+  const env = { ...p.env, T3CODE_THREAD_ID: 'own' };
+  const first = await orq(['wait', '--max-seconds', '30'], { ...p, env }, sim, { exec });
+  assert.match(first.out, /^queued: 1 message waits in your own thread's queue/);
+  assert.equal(sim.threads.size, 0); // before the first poll, like an inbox message
+  const second = await orq(['wait', '--max-seconds', '30'], { ...p, env }, sim, { exec });
+  assert.match(second.out, /^timeout: 1 running/); // told once
+});
+
+test('wait: a pending request that cannot be recorded as told is not told, and the call does not fail', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['block', 'idle']] });
+  await fs.mkdir(path.join(p.repo, '.orq', 'attention.json')); // nothing can be written here
+  const r = await orq(['wait', '--max-seconds', '60'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  const lines = r.out.trimEnd().split('\n');
+  assert.equal(lines[0], 'timeout: 0 running, 1 blocked, 0 gating, 0 queued, 0 passed');
+  assert.equal(lines.filter((l) => l.startsWith('note: pending requests and peers could not be checked')).length, 1);
 });

@@ -90,11 +90,13 @@ Call `orq wait`. It returns one line (a `message:` returns the message too). Act
 | `judgment: <unit>: merge conflict: <files>` or `integrate failed: …` | Another unit changed the same files first, and its worker already failed twice to merge the integration head. Say so in the work order and run `orq unit retry <unit>`; the new worker starts from the merged code. Then fix the `paths` overlap in the plan; if the files were outside both units' `paths`, add them to one unit's `forbidden` or make one unit a dep of the other. |
 | `judgment: <unit>: depends on dropped unit <id>` | Drop it too, or remove that entry from its `deps` in `plan.json` when it can stand alone. Then call `orq wait`. |
 | `judgment: <unit>: gate could not start: …`, `gate could not complete[: …]` or `final gate could not complete[: …]` | The gate process died; any text after the colon is why, and the `.log` file beside the gate result has the rest. Correct what it names, then `orq unit retry <unit>` (`orq unit retry integration` for the final gate). After `gate could not complete` the same commit is gated again and no new worker starts; add `--tier N` only when you want a new worker. |
-| `blocked: <unit> waiting on a request in thread <id>` | Read the request with `t3_pending_request`, settle it as "Questions" says, and answer it yourself. The user never answers in the worker's thread. |
+| `queued: <n> messages wait in your own thread's queue …` | A message sent to your thread is not delivered while your turn lasts. Read each one now with `t3_queue` (`list`, then `read`) and act on it as on any message in this thread: one from the user outranks your current step, an automatic one is only what it says. Then cancel each (`t3_queue`, `cancel`) so it does not run again when your turn ends, and call `orq wait`. If `t3_queue` is missing or fails, say so in one line and call `orq wait`. |
+| `pending: <unit, review or decision>: thread <id> waits on a request …` | Read the request with `t3_pending_request` (`read`), settle it as "Questions" says, and answer it yourself (`respond`). The user never answers in the worker's thread. If you cannot answer it, interrupt that thread (`t3_thread_interrupt`): `orq` moves the work to another model. The line comes back every 10 minutes while the request stands. |
 | `idle: … retry at <time>` | Models are cooling down. Tell the user why and the time, and call `orq wait` again at that time. |
 | any other `idle:` | Calling `orq wait` again changes nothing. Run `orq status`, then change the plan (`orq unit retry`, `orq unit drop`, or edit `plan.json`) or tell the user. |
-| `timeout: <counts>` | Normal for long work. Run `orq status`. Interrupt a thread only if it shows as stalled (`t3_thread_interrupt`). Units that are `gating` are running their checks, and a `waiting:` line means every slot is taken for now: leave both. Call `orq wait` again. In `review-fix` modes, a `timeout:` whose five counts are all 0 means only the final checks are left: start the review now (Finish, `review-fix` row) unless `orq review show` has one running or done for this integration head, then call `orq wait`. |
+| `timeout: <counts>` | Normal for long work. Run `orq status`. Interrupt a thread only if it shows as stalled (`t3_thread_interrupt`). Units that are `gating` are running their checks, and a `waiting:` line means every slot is taken for now, or, when it says `for this machine: <why>`, that the machine is under pressure or a service it protects is failing and `orq` starts nothing new until that passes: leave them, and never raise `cap` over it. Call `orq wait` again. In `review-fix` modes, a `timeout:` whose five counts are all 0 means only the final checks are left: start the review now (Finish, `review-fix` row) unless `orq review show` has one running or done for this integration head, then call `orq wait`. |
 | `ship: …` (after `timeout:`) | Finished units are waiting on slow ones. Run `orq unit drop <id>` for each open unit it names, dependents first; leave their threads running, then call `orq wait`: the final checks run on what is integrated and you ship it. Carry each dropped unit into the next plan: one that ran starts its order with "merge branch `<its branch>` (from `orq status --json`) and finish the work" and launches once `t3 thread show <its thread>` no longer says running; one that never ran is carried as it was. |
+| `balance: … Peer <host> has <n> free slots …` | This machine has started nothing new for a while and another one has room. If your tools include `t3_environment_links` and it lists `<host>`, find this project's orchestrator thread there (`t3_thread_list` with that `environmentId`) and hand it units that have not started: `t3_thread_send` their work orders and the plan's `decisions` to that thread with the same `environmentId`, and only once that is sent `orq unit drop` each here; it plans, gates and ships them on its own machine, so do not plan them again here. Without that tool, that link or such a thread, change nothing: give the user the line once and call `orq wait`. |
 
 When a `note:` says `orq` gave up on a thread, interrupt that thread with `t3_thread_interrupt`: it stopped responding, the unit has moved to another model, and the thread holds a slot until it ends. After any return, when the output has a `settle:` line, settle each thread id on it: call `t3_thread_organize` with `action: "settle"` and that `threadId`. Those threads are finished for good; settling keeps the thread list clean. Never settle a thread that is not on a `settle:` line, never use `archive`, and if the tool is missing or fails, skip it.
 
@@ -125,7 +127,7 @@ While `orq` prints a `goal:` line, Finish does not end your turn: do what its `n
 
 ## Questions
 
-Workers do not ask the user. Their questions reach you as a `blocked:` or a `worker reported …` line. For each one that `decisions` does not settle, and for a product decision of your own that the request does not settle, run `orq ask [--unit <unit>]` with the question on stdin. Several open points go into one call. Act on its first line:
+Workers do not ask the user. Their questions reach you as a `pending:` or a `worker reported …` line. For each one that `decisions` does not settle, and for a product decision of your own that the request does not settle, run `orq ask [--unit <unit>]` with the question on stdin. Several open points go into one call. Act on its first line:
 
 | First line | Action |
 |---|---|
@@ -134,11 +136,7 @@ Workers do not ask the user. Their questions reach you as a `blocked:` or a `wor
 | `escalate: …` or `user: …` | Ask the user that one question here, in your thread. Then do as for `answer`. |
 | `pending: …` | Run the `orq ask --show` command it names until it prints one of the lines above. |
 
-Outside the intake questions, go to the user without `orq ask` only for:
-
-- destructive or irreversible actions;
-- anything that costs money beyond the user's existing plans;
-- anything outward-facing beyond the chosen autonomy mode.
+Outside the intake questions, go to the user without `orq ask` only for: destructive or irreversible actions; anything that costs money beyond the user's existing plans; anything outward-facing beyond the chosen autonomy mode.
 
 Otherwise decide, act, and report the decision and its reason in one line. `orq summary` lists the decisions taken without the user.
 
