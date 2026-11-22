@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.18.1] - 2026-11-22
+
+### Fixed
+
+- IO pressure on Linux is read from `user.slice` (`/sys/fs/cgroup/user.slice/io.pressure`) when systemd has it, and from `/proc/pressure/io` otherwise. A slow disk that only system services and containers use stalled those services and held every launch, while the agents in `user.slice` were not stalled at all.
+
 ## [0.18.0] - 2026-11-22
 
 ### Fixed

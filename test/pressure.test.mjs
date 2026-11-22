@@ -20,6 +20,18 @@ test('readPressure on linux reads cpu, io and memory pressure, and leaves out wh
   assert.deepEqual(readPressure({ platform: 'linux', readFile: read }), { cpu: 1.5, io: 72.56 });
 });
 
+test('readPressure on linux judges io by user.slice, where agents run, when systemd has it', () => {
+  const files = {
+    '/proc/pressure/io': PSI,
+    '/sys/fs/cgroup/user.slice/io.pressure': 'some avg10=6.02 avg60=4 avg300=3 total=1\n',
+  };
+  const read = (f) => {
+    if (!(f in files)) throw new Error('ENOENT');
+    return files[f];
+  };
+  assert.deepEqual(readPressure({ platform: 'linux', readFile: read }), { io: 6.02 });
+});
+
 test('readPressure on macOS reads the memory pressure level with one cheap call', () => {
   const calls = [];
   const exec = (cmd, args, opts) => {

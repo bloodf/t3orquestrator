@@ -56,7 +56,7 @@ The cap is a ceiling, not a target. On every poll `orq wait` also asks the machi
 | Metric | Read from | Limit |
 |---|---|---|
 | `load` | 1-minute load average per core | 2 |
-| `cpu`, `io`, `mem` | Linux pressure stall information, the 10-second `some` share in percent (`/proc/pressure/cpu`, `io`, `memory`) | 60, 40, 10 |
+| `cpu`, `io`, `mem` | Linux pressure stall information, the 10-second `some` share in percent (`/proc/pressure/cpu`, `io`, `memory`; `io` comes from `/sys/fs/cgroup/user.slice/io.pressure` when present, so a disk only system services use does not hold agents) | 60, 40, 10 |
 | `memLevel` | macOS memory pressure level, one `sysctl` (1 normal, 2 warning, 4 critical) | 4 |
 
 A metric at or over its limit holds the machine, and that metric keeps holding until it is back under `release` times its limit (default 0.8, so `io` holds at 40% and releases under 32%), so a machine near a limit does not flap. The other metrics are still judged against their own limits. A metric that cannot be read is not judged. Set limits with `orq config set --machine pressure '{"io":30,"load":1.5}'` (any of `load`, `cpu`, `io`, `mem`, `memLevel`, `release`); `pressure false` turns the check off and `pressure null` restores the defaults.
