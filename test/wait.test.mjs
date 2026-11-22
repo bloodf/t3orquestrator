@@ -962,6 +962,27 @@ test('wait: a usage limit mid-work relaunches at once on another instance and fa
   assert.match(status.out, new RegExp(`rerouted=${first.instance}::${first.model}->${second.instance}::${second.model}\\(limit\\)`));
 });
 
+test('wait: a thread refused without a reply (Codex at its usage limit) is a limit read from T3\'s log, not a failure strike', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')], { registry: FAMILIES, checks: { full: 'test -f a.txt' } });
+  const sim = simulator(p, { a: [['fail'], ['commit-complete']] });
+  const said = 'You’ve hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 13th, 2026 7:59 PM.';
+  const logs = path.join(p.env.T3CODE_HOME, 'userdata', 'logs', 'provider');
+  await fs.mkdir(logs, { recursive: true });
+  await fs.writeFile(path.join(logs, 'events.th1.log'), `[2026-11-12T12:00:15.000Z] NTIVE: ${JSON.stringify({ event: { payload: { method: 'error', params: { error: { message: said, codexErrorInfo: 'usageLimitExceeded' } } } } })}\n`);
+  const r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^done: 1 units integrated/);
+  const [first, second] = sim.byUnit.a;
+  assert.notEqual(first.instance, second.instance);
+  const ended = (await readLines(path.join(p.repo, '.orq', 'ledger.jsonl'))).find((e) => e.type === 'thread-ended' && e.status === 'failed');
+  assert.deepEqual([ended.limit.kind, ended.limit.until], ['limit', new Date(2026, 10, 13, 19, 59).getTime()]);
+  assert.equal(unitOf(await readState(p.repo), 'a').providerFailures, 0);
+  // the account is held until the reset it named, with no failure strike
+  const reg = JSON.parse(await fs.readFile(path.join(p.home, 'registry.json'), 'utf8'));
+  const held = reg.models[`${first.instance}::${first.model}`];
+  assert.deepEqual([held.cooldownUntil, held.failures, reg.instances[first.instance].failures], [ended.limit.until, 0, 0]);
+});
+
 test('wait: when every instance is at its limit the unit waits for the earliest reset, never judged', async (t) => {
   const p = await makeProject(t, [unitSpec('a')], { registry: FAMILIES });
   const sim = simulator(p, { a: [['limit'], ['limit-complete'], ['limit'], ['limit'], ['limit']] });

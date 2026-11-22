@@ -3,6 +3,13 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- A worker thread its provider refused without a reply is no longer an unexplained failure when T3 logged why. Codex reports its usage limit as a turn error, which `t3 thread show` does not print; `orq wait` now reads the error from T3's log of the thread (`<T3 home>/userdata/logs/provider/events.<thread id>.log`) and treats it like a limit reply: the account is held until the reset it named, with no failure strike on the model, the instance or the unit.
+- After a failure on a preferred instance (`preferInstances`), the unit moves to another preferred instance before another model family: `codex` at its limit now hands the work to `codex-2`, not to another vendor.
+
 ## [0.20.0] - 2026-11-22
 
 ### Added
