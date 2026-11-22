@@ -3,6 +3,21 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.0] - 2026-11-21
+
+### Added
+
+- Pressure-aware admission. On every poll `orq wait` reads the machine's own pressure: the 1-minute load per core, on Linux the 10-second `some` share of `/proc/pressure/cpu`, `io` and `memory`, on macOS the memory pressure level (one `sysctl`). At or over a limit (load 2 per core, cpu 60%, io 40%, memory 10%, macOS level 4, critical) the machine is held: no launch, no feedback, no unit gate and no final gate starts, in any project and whatever the machine cap or a project's own `cap` allows. Running threads and gates go on, and passed units still merge. A metric that held releases under 0.8 of its limit. The cap is now a ceiling, not a target: a project `cap` override used to fill a machine whose disk was already saturated. Limits are machine config (`orq config set --machine pressure '{"io":30}'`, `false` turns it off).
+- Protected services. Machine config `protect` (`[{name, url, timeoutMs}]`) names services on the machine that must keep answering. Each is asked with one `GET` at most once a minute, cached in `~/.t3orq/protect.json` for every project. No answer in `timeoutMs` (default 3000), a connection error or a status of 500 or more holds the machine like pressure does, until two good probes in a row.
+- `orq wait` on a held machine keeps polling, a `timeout:` carries `waiting: <n> launches or checks wait for this machine: <reasons>`, other returns a note, and `orq status` shows `pressure: … ok|HELD, nothing new starts: <reasons>` and `protect: <name> ok|recovering|FAILING (<why>)`.
+- Peers. Machine config `peers` (`[{host, ssh}]`) names the other machines that run the kit. Each machine publishes its status (pressure, hold, cap, active leases, free slots, protected services) in `~/.t3orq/peers/self.json`; a peer is read over ssh with short timeouts (`orq peers --self` there, so a machine with no `orq wait` running still answers), cached a minute, a failure five. `orq status` and the new `orq peers` show them. When a machine has been held for 10 minutes with work waiting, `orq wait` returns `balance: … Peer <host> has <n> free slots at load <x> per core: hand it work that has not started here`, at most every 30 minutes. `orq` starts nothing on a peer itself (T3's CLI cannot start a thread in a linked environment); the playbook tells the orchestrator how to hand units over with T3's tools that take an `environmentId`, or to report the line.
+- `orq wait` sees its own thread. With `T3CODE_THREAD_ID` set it looks at that thread once a minute and, when messages are queued behind the running turn, returns `queued: <n> messages wait in your own thread's queue …` before the poll, once per new message. A message sent to an orchestrator's thread used to wait until its turn ended, which could be never.
+- Graceful degradation in routing. When every model at a job's tier is cooling down for more than 10 minutes (a used-up quota, a limit hold), the best free tier below it does the work, marked `below-tier`, instead of the unit waiting for the reset. A tier that is only busy is still waited for, a rule with `"fallback": false` (`review`) never falls, and a unit whose tier came from its own failed gates keeps that tier. `plan` and `decide` (`"always": true`) never return `none` while a model has quota: with every one of them at its instance's concurrency limit, one is returned `over-limit`.
+
+### Changed
+
+- A pending request is told until it is answered. `orq wait` returns `pending: <unit <id>|review <n>|decision <n>>: thread <id> waits on a request: answer it (t3_pending_request, action "respond") or interrupt the thread (t3_thread_interrupt) so orq replaces it` for every thread of the project that `orq` started and that waits on a question or approval, when first seen and every 10 minutes after. It replaces `blocked: <unit> waiting on a request in thread <id>`, which was printed once, for units only: a request missed once stalled its thread for hours.
+
 ## [0.16.0] - 2026-11-21
 
 ### Changed
