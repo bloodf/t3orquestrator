@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { instanceUsage, withUsage } from '../lib/usage.mjs';
-import { readUsage } from '../lib/usage-source.mjs';
+import { applyUsage, readUsage } from '../lib/usage-source.mjs';
+import { exhausted } from '../lib/usage.mjs';
 import { usageLine } from '../lib/providers.mjs';
 import { route } from '../lib/route.mjs';
 
@@ -254,4 +255,13 @@ test('usageLine: an account with several quota groups shows each, so one full gr
   assert.deepEqual(usageLine({ dir: '/t3/caches', instances: { ag: instanceUsage(live, now), cx: usage([w('p', 40, null)]) } }), [
     'usage: ag Gemini 14% gemini-weekly resets 2026-11-28T09:19:12.000Z, Claude & GPT (shared) 100% 3p-weekly resets 2026-11-25T18:30:40.000Z, Gemini 4 Argon 0% gemini-argon-wtu-weekly; cx 40% p',
   ]);
+});
+
+test('applyUsage: an instance in creditInstances keeps routing past full windows (paid credits); others still cool', () => {
+  const full = { instances: { codex: usage([w('weekly', 100, NOW + 50 * H)]), cx: usage([w('p', 100, NOW + H)]) } };
+  const v = applyUsage(REG, full, { creditInstances: ['^codex$'] }, NOW);
+  assert.equal(v.models['codex::gpt-x'].cooldownUntil, null);
+  assert.equal(exhausted(v, 'codex::gpt-x', NOW), null);
+  assert.equal(v.models['cx::gpt-x'].cooldownUntil, NOW + H);
+  assert.equal(applyUsage(REG, full, {}, NOW).models['codex::gpt-x'].cooldownUntil, NOW + 50 * H);
 });

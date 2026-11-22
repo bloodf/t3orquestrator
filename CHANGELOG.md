@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.0] - 2026-11-22
+
+### Added
+
+- Machine setting `creditInstances`: instance ids (regular expressions) that keep routing past full usage windows, for accounts that run on paid credits once their plan limit is used up. A real provider refusal still cools them.
+
 ## [0.18.1] - 2026-11-22
 
 ### Fixed
