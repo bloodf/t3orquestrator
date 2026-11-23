@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Continuous mode: `orq wait` fetches origin's base and merges it into the integration branch right before a final run starts, instead of relying on a fetch up to 5 minutes old. A final run takes as long as `checks.full` (over an hour in real projects) and its pass ships only if the head holds origin's base, so a run started on a head that missed a commit pushed in that window was spent: it passed stale, and the merged head had to wait for the next full run. Seen on a project whose base another plan shipped to about every hour: no head ever shipped.
+
 ## [0.21.0] - 2026-11-22
 
 ### Fixed
