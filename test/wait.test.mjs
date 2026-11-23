@@ -831,6 +831,31 @@ test('wait in continuous mode: origin\'s base moved past a passed head: wait mer
   assert.match(r.out, new RegExp(`\nnote: merged origin/main \\(${moved.slice(0, 12)}\\) into the integration branch at ${st.plan.green.slice(0, 12)}; the final checks run on it\n`));
 });
 
+test('wait in continuous mode: a final run starts only after origin\'s base is merged, so a pass is not stale on arrival', async (t) => {
+  const p = await continuousProject(t, 'test -f a.txt');
+  const remote = path.join(p.root, 'remote.git');
+  sh(p.root, 'init', '-q', '--bare', remote);
+  sh(p.repo, 'remote', 'add', 'origin', remote);
+  sh(p.repo, 'push', '-q', 'origin', 'main');
+  sh(p.repo, 'fetch', '-q', 'origin');
+  // origin was just fetched (the 5-minute fetch interval has not run out), then another machine shipped
+  await fs.writeFile(path.join(p.repo, '.orq', 'sync.json'), JSON.stringify({ fetchedAt: NOW }));
+  sh(p.repo, 'branch', 'other', p.baseSha);
+  const moved = await commitOn(p.repo, 'other', { 'other.txt': 'o\n' }, 'other machine');
+  sh(p.repo, 'push', '-q', 'origin', `${moved}:refs/heads/main`);
+  sh(p.repo, 'update-ref', 'refs/remotes/origin/main', p.baseSha); // pushed from another clone: not fetched here
+  const sim = simulator(p, { a: [['commit-complete']], b: [['idle']] });
+  const r = await orq(['wait'], p, sim);
+  assert.equal(r.code, 0, r.err);
+  const st = await readState(p.repo);
+  const events = await readLines(path.join(p.repo, '.orq', 'ledger.jsonl'));
+  const finals = events.filter((e) => e.type === 'gate-started' && e.unit === 'integration').map((e) => e.headSha);
+  assert.deepEqual(finals, [st.plan.synced.to]); // never a run on the head that lacked origin's base
+  assert.equal(st.plan.green, st.plan.synced.to);
+  assert.equal(sh(p.repo, 'merge-base', '--is-ancestor', moved, st.plan.green), '');
+  assert.match(r.out, /^ship-ready: /);
+});
+
 test('wait in continuous mode: a base that conflicts with the integration branch is tried once per origin sha and reported', async (t) => {
   const p = await continuousProject(t, 'test -f a.txt');
   const sim = simulator(p, { a: [['commit-complete']], b: [['idle']] });
