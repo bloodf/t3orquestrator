@@ -7,11 +7,11 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
-// Texts seen in real runs (cofre3d, Open3dFarmManager; Mac and cortex, 2026-11-13..17), as the thread's last reply.
+// Texts seen in real runs (cofre3d, Open3dFarmManager; Mac and host-1, 2026-11-13..17), as the thread's last reply.
 const REAL = {
   antigravity: 'Usage Limit Reached\n\nYou have reached your current quota for this period. Your limit will reset in 5 days, 4 hours.',
   antigravityMinutes: 'Usage Limit Reached\n\nYou have reached your current quota for this period. Your limit will reset in 4 days, 33 minutes.',
-  antigravity15: '\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 113h11m4s.\n', // CLI 1.5.13, stormtrooper 2026-11-20
+  antigravity15: '\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 113h11m4s.\n', // CLI 1.5.13, host-2 2026-11-20
   claude: "You've hit your Fable limit · resets Nov 17 at 12am (America/Sao_Paulo). Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message, to continue.",
   codex: 'You’ve hit your usage limit. Visit <url> to purchase more credits or try again at Nov 9th, 2026 11:58 AM.',
   capacity: 'No capacity available for model gemini-3.8-flash-high on the server',
