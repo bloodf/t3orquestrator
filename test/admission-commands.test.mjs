@@ -8,7 +8,7 @@ import { run } from '../lib/cli.mjs';
 const NOW = 1_800_000_000_000;
 const GIB = 1024 ** 3;
 const PROTECT = '[{"name":"gateway","url":"http://127.0.0.1:11434/v1/models","timeoutMs":3000}]';
-const PEERS = '[{"host":"stormtrooper","ssh":"stormtrooper@stormtrooper"},{"host":"mac","ssh":"macbook"}]';
+const PEERS = '[{"host":"host-2","ssh":"host-2@host-2"},{"host":"mac","ssh":"macbook"}]';
 
 async function machine(t, deps = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orq-admission-'));
@@ -20,7 +20,7 @@ async function machine(t, deps = {}) {
     const code = await run(args, {
       stdout: { write: (x) => out.push(x) }, stderr: { write: (x) => err.push(x) }, env: { T3ORQ_HOME: path.join(dir, 'home'), T3CODE_HOME: path.join(dir, 't3') }, cwd: dir, now: () => NOW,
       deps: {
-        hostname: () => 'cortex', readMachine: () => ({ cores: 20, availableMemBytes: 40 * GIB, load1: 36, pressure: { cpu: 2, io: 72, mem: 0 } }),
+        hostname: () => 'host-1', readMachine: () => ({ cores: 20, availableMemBytes: 40 * GIB, load1: 36, pressure: { cpu: 2, io: 72, mem: 0 } }),
         fetch: async () => ({ status: 200, body: { cancel: async () => {} } }),
         ssh: async (target) => {
           asked.push(target);
@@ -59,7 +59,7 @@ test('status and peers show the machine pressure, its protected services and its
   const expected = [
     'pressure: load=1.8/core cpu=2% io=72% mem=0% HELD, nothing new starts: io pressure 72% (limit 40%)',
     'protect: gateway ok',
-    'peers: stormtrooper ok free=9/16 load=0.2/core cpu=1%; mac unreachable (connection refused); least loaded with room: stormtrooper',
+    'peers: host-2 ok free=9/16 load=0.2/core cpu=1%; mac unreachable (connection refused); least loaded with room: host-2',
   ];
   assert.deepEqual(lines.filter((l) => /^(pressure|protect|peers):/.test(l)), expected);
   assert.equal((await orq('peers')).out, `${expected.join('\n')}\n`);
@@ -74,7 +74,7 @@ test('peers --self prints and publishes this machine\'s status without asking it
   await orq('config', 'set', '--machine', 'peers', PEERS);
   await orq('config', 'set', '--machine', 'cap', '16');
   const self = JSON.parse((await orq('peers', '--self')).out);
-  assert.deepEqual([self.host, self.held, self.cap, self.active, self.free, self.pressure.io], ['cortex', true, 16, 0, 0, 72]);
+  assert.deepEqual([self.host, self.held, self.cap, self.active, self.free, self.pressure.io], ['host-1', true, 16, 0, 0, 72]);
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(dir, 'home', 'peers', 'self.json'), 'utf8')), self);
   assert.deepEqual(asked, []);
 });

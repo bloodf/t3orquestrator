@@ -104,7 +104,7 @@ const peerStatus = (over = {}) => JSON.stringify({ at: NOW + BALANCE_AFTER_MS, c
 test('balance: a machine held for ten minutes with work waiting names the least-loaded peer with room, every 30 minutes', async (t) => {
   const { ctx, run } = await setup(t);
   ctx.deps.ssh = async (target) => ({ code: 0, stdout: target === 'storm' ? peerStatus() : peerStatus({ load: 1.4, free: 2 }), stderr: '' });
-  run.machine = { peers: [{ host: 'busy', ssh: 'busy' }, { host: 'stormtrooper', ssh: 'storm' }] };
+  run.machine = { peers: [{ host: 'busy', ssh: 'busy' }, { host: 'host-2', ssh: 'storm' }] };
   run.admission = { held: true, since: NOW, reasons: ['io pressure 72% (limit 40%)'] };
   const held = { held: true, heldBack: 3 };
   ctx.clock = NOW + BALANCE_AFTER_MS - 1;
@@ -112,7 +112,7 @@ test('balance: a machine held for ten minutes with work waiting names the least-
   ctx.clock += 1;
   assert.deepEqual(await attention(ctx, run, running, held), [
     'balance: this machine has started nothing new for 10 min (io pressure 72% (limit 40%)); 3 launches or checks wait. '
-    + 'Peer stormtrooper has 9 free slots at load 0.2 per core: hand it work that has not started here',
+    + 'Peer host-2 has 9 free slots at load 0.2 per core: hand it work that has not started here',
   ]);
   ctx.clock += BALANCE_REPEAT_MS - 1;
   assert.equal(await attention(ctx, run, running, held), null);
@@ -124,7 +124,7 @@ test('balance: nothing is said without peers, without waiting work, or when no p
   ctx.deps.ssh = async () => ({ code: 0, stdout: peerStatus({ held: true, free: 0 }), stderr: '' });
   run.admission = { held: true, since: NOW, reasons: ['load 3.0 per core (limit 2)'] };
   assert.equal(await attention(ctx, run, running, { held: true, heldBack: 1 }), null); // no peers configured
-  run.machine = { peers: [{ host: 'cortex', ssh: 'cortex' }] };
+  run.machine = { peers: [{ host: 'host-1', ssh: 'host-1' }] };
   assert.equal(await attention(ctx, run, running, { held: true, heldBack: 1 }), null); // the peer is held too
   assert.equal(await attention(ctx, run, running, QUIET), null); // nothing waits on the hold
 });

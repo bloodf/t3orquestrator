@@ -3,17 +3,17 @@ import assert from 'node:assert/strict';
 import { outsidePaths } from '../lib/evidence-check.mjs';
 
 const ROOT = '/work/repo';
-const HOME = '/Users/x';
+const HOME = '/example/user';
 const check = (cmd) => outsidePaths(cmd, { root: ROOT, home: HOME });
 
 test('outsidePaths: scripts outside the repository or under .orq/ are named', () => {
-  assert.deepEqual(check('python3 /Users/x/plans/p1/verify.py unit-a'), ['/Users/x/plans/p1/verify.py']);
+  assert.deepEqual(check('python3 /example/user/plans/p1/verify.py unit-a'), ['/example/user/plans/p1/verify.py']);
   assert.deepEqual(check('node /work/repo/.orq/verify.mjs a'), ['/work/repo/.orq/verify.mjs']);
   assert.deepEqual(check('node .orq/verify.mjs a && test -f x'), ['.orq/verify.mjs']);
   assert.deepEqual(check('bash ~/bin/check.sh'), ['~/bin/check.sh']);
-  assert.deepEqual(check('/opt/x/../../Users/x/run-checks a'), ['/opt/x/../../Users/x/run-checks']); // normalised, a command word
+  assert.deepEqual(check('/opt/x/../../example/user/run-checks a'), ['/opt/x/../../example/user/run-checks']); // normalised, a command word
   assert.deepEqual(check("sh -c 'node \"/tmp/v.js\"'"), ['/tmp/v.js']);
-  assert.deepEqual(check('npm test; /home/ci/check'), ['/home/ci/check']);
+  assert.deepEqual(check('npm test; /example/user/check'), ['/example/user/check']);
   assert.deepEqual(check('node --config=/srv/conf/x.json t.js'), ['/srv/conf/x.json']);
 });
 
