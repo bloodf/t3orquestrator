@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { validatePlan } from '../lib/plan.mjs';
 import { commands } from '../lib/cli.mjs';
+import { ORQ_VARS } from '../lib/gate-env.mjs';
 
 const root = new URL('../', import.meta.url);
 const read = (f) => fs.readFileSync(new URL(f, root), 'utf8');
@@ -40,6 +41,11 @@ test('ORCHESTRATOR.md names only real orq commands', () => {
   const used = [...read(ORCH).matchAll(/`orq ([a-z-]+)/g)].map((m) => m[1]);
   assert.ok(used.length > 0);
   for (const c of used) assert.ok(allowed.has(c), `unknown orq command: ${c}`);
+});
+
+test('ORCHESTRATOR.md tells checks.unit how to scope to the change', () => {
+  const text = read(ORCH);
+  for (const v of ['ORQ_BASE_SHA', 'ORQ_CHANGED_FILES', 'ORQ_DELETED_FILES']) assert.ok(ORQ_VARS.includes(v) && text.includes(v), v);
 });
 
 test('playbook docs name no real model, provider or tool', () => {
