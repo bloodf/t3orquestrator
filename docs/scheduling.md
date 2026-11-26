@@ -129,6 +129,7 @@ T3 Code probes each provider instance's usage limits itself (codex, Claude, Anti
 - The usage cooldowns are computed on every read and never stored in the registry. `orq wait` reports `idle: … retry at <reset>` when every model a unit may use is at its limit.
 - One instance is one account in T3. An instance behind a proxy that rotates several accounts gets no usage from T3 (its probe fails), so it is routed as before.
 - Codex reset credits (`resetCredits`) are not counted: redeeming one is a step the user takes in T3.
+- On a machine that runs EasyCLIProxyAPI, or whose peer does, each mapped account's real quota replaces T3's reading for that instance, refreshed by `orq wait` at most every 5 minutes, and a real reading ends a limit hold on every provider, not only Antigravity. An instance in `creditInstances` whose credit balance EasyCLI reads as 0 counts its windows again. See [Real account quota](easycli-quota.md).
 
 ## Failure ladders
 

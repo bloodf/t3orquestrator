@@ -1,0 +1,25 @@
+{
+  "groups": [
+    {
+      "displayName": "Gemini Models",
+      "description": "Models within this group share quota. The limit fully resets at the time shown above.",
+      "buckets": [
+        { "window": "Five Hour Limit Remaining", "remainingFraction": 0.75, "resetTime": "2026-11-16T23:00:00Z" },
+        { "window": "Weekly Limit Remaining", "remainingFraction": 0, "resetTime": "2026-11-20T00:00:00Z" }
+      ]
+    },
+    {
+      "displayName": "Claude and GPT Models",
+      "description": "Models within this group: claude-sonnet-4-6, gpt-oss-120b",
+      "buckets": [
+        { "window": "Weekly Limit Remaining", "remainingFraction": 0.84, "resetTime": "2026-11-20T00:00:00Z" }
+      ]
+    },
+    {
+      "displayName": "Gemini 4 Argon",
+      "buckets": [
+        { "displayName": "Weekly Limit", "remaining_fraction": "0.5", "reset_time": "2026-11-20T00:00:00Z" }
+      ]
+    }
+  ]
+}

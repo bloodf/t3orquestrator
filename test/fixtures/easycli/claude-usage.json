@@ -1,0 +1,10 @@
+{
+  "five_hour": { "utilization": 24, "resets_at": "2026-11-16T23:00:00.000Z" },
+  "seven_day": { "utilization": 41, "resets_at": "2026-11-19T07:00:00.000Z" },
+  "seven_day_opus": null,
+  "iguana_necktie": { "limit_dollars": "100.00", "used_dollars": "23.50", "remaining_dollars": "76.50", "utilization": 23.5, "resets_at": "2030-12-01T00:00:00Z" },
+  "limits": [
+    { "kind": "weekly_scoped", "percent": 96, "is_active": true, "scope": { "model": { "display_name": "Fable 5" } }, "resets_at": "2026-11-19T07:00:00.000Z" }
+  ],
+  "extra_usage": { "is_enabled": false }
+}

@@ -130,7 +130,7 @@ Lists the eligible models in the order `orq` would use them:
 | Scope | Keys |
 |---|---|
 | project (`.orq/config.json`) | `autonomy`, `base`, `cap`, `checks.setup`, `checks.unit`, `checks.full`, `pollSeconds`, `stallMinutes`, `gateConcurrency`, `leaseTtlMinutes`, `finalTimeoutMinutes`, `unitTimeoutMinutes`, `finalDebounceMinutes`, `questions`, `share`, `goal`, `cleanup` |
-| machine (`~/.t3orq/config.json`) | `cap`, `perInstanceLimit`, `usageThreshold` (1-100, default 90: see [Account usage](scheduling.md#account-usage)), `freeModels`, `excludeModels`, `decisionOnly`, `instanceFamilies` (see [Machine routing policy](scheduling.md#machine-routing-policy)); `t3Home` is recorded by `sync`, `pressure`, `protect`, `peers` (each one JSON value: see [Machine pressure, protected services and peers](scheduling.md#machine-pressure-protected-services-and-peers)) |
+| machine (`~/.t3orq/config.json`) | `cap`, `perInstanceLimit`, `usageThreshold` (1-100, default 90: see [Account usage](scheduling.md#account-usage)), `freeModels`, `excludeModels`, `decisionOnly`, `instanceFamilies` (see [Machine routing policy](scheduling.md#machine-routing-policy)); `t3Home` is recorded by `sync`, `pressure`, `protect`, `peers` (each one JSON value: see [Machine pressure, protected services and peers](scheduling.md#machine-pressure-protected-services-and-peers)), `quotaSource` (one JSON value: see [Real account quota](easycli-quota.md)) |
 
 `checks.unit` runs in every unit's gate after the evidence. `checks.full` runs once on the integration head.
 
@@ -225,6 +225,12 @@ When the machine `cap` is an override above what the machine computes, a line `n
 `orq peers [--json] | orq peers --self`
 
 Prints this machine's `pressure:`, `protect:` and `peers:` lines as `orq status` does (`--json`: `{held, since, reasons, pressure, protect, peers}`), asking each peer whose cached answer is due. `--self` prints this machine's own status as one JSON object and publishes it in `~/.t3orq/peers/self.json`; it is what a peer runs here over ssh. Its `claims` lists the plan claims of every project on this machine that ran `orq plan check` (`<owner/repo>#<n>`, read live, not kept in the file); a peer keeps only strings of that shape. `orq status --json` carries the same under `machine`.
+
+## usage
+
+`orq usage [--refresh] [--json]`
+
+Prints the real quota of each account, read from EasyCLIProxyAPI on this machine or from the snapshot a peer published, and the instance each maps to: `quota: from easycli|peer <host>, <n> min old`, then one line per account, `<provider> <account> -> <instances>|no instance[ plan=<plan>]: <window> <n>% left (resets in <time>), …[ credits=<n>]` (`no windows read` when the provider's usage could not be read). EasyCLI is asked when its last try is 5 minutes old (`--refresh`: now). With nothing read it prints `quota: none read (<why>); routing uses T3's usage readings and refusals`. `--json` prints the snapshot (`null` when none). Always exits 0. See [Real account quota](easycli-quota.md).
 
 ## unit
 

@@ -3,10 +3,10 @@
 ## Run the tests
 
 ```
-node --test
+npm test
 ```
 
-Requires Node >= 22. There is nothing to install.
+(`node --test --import ./test/support/offline.mjs`: the preload makes `globalThis.fetch` throw, so no test reaches the network through it. Pass a `fetch` in `ctx.deps` where a test needs an answer.) Requires Node >= 22. There is nothing to install.
 
 ## Rules
 
