@@ -75,7 +75,8 @@ test('peers --self prints and publishes this machine\'s status without asking it
   await orq('config', 'set', '--machine', 'cap', '16');
   const self = JSON.parse((await orq('peers', '--self')).out);
   assert.deepEqual([self.host, self.held, self.cap, self.active, self.free, self.pressure.io], ['host-1', true, 16, 0, 0, 72]);
-  assert.deepEqual(JSON.parse(await fs.readFile(path.join(dir, 'home', 'peers', 'self.json'), 'utf8')), self);
+  const { claims, ...published } = self; // claims are read live for each answer, never published to the file
+  assert.deepEqual([JSON.parse(await fs.readFile(path.join(dir, 'home', 'peers', 'self.json'), 'utf8')), claims], [published, []]);
   assert.deepEqual(asked, []);
 });
 
