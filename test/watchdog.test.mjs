@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runTick, NUDGE, NUDGE_INBOX } from '../lib/watchdog.mjs';
 import { cronLine, plist, withCronLine } from '../lib/commands/watchdog.mjs';
+import { run } from '../lib/cli.mjs';
 
 const NOW = Date.parse('2026-11-26T12:00:00Z');
 const MIN = 60_000;
@@ -129,4 +130,104 @@ test('watchdog install: the launchd agent and the tagged crontab line, replaced 
   assert.deepEqual(first, { text: `0 3 * * * other\n${line}\n`, changed: true });
   assert.deepEqual(withCronLine(first.text, line), { text: first.text, changed: false });
   assert.equal(withCronLine(`0 3 * * * other\n*/10 * * * * old # orq-watchdog\n`, line).text, `0 3 * * * other\n${line}\n`);
+});
+
+test('watchdog: a hold, another thread or a thread back at work appearing while the tick picks a route stops the action', async (t) => {
+  const w = await setup(t, { status: 'failed' });
+  const held = await tick(w, NOW, {
+    deps: {
+      createT3: w.t3, exec: () => ({}), watchdogRoute: async (job) => { await fs.writeFile(path.join(w.dir, 'hold'), ''); return candidates[job] ?? []; },
+    },
+  });
+  assert.match(held[0], /put on hold while the tick chose a route; left alone/);
+  await fs.rm(path.join(w.dir, 'hold'));
+  const swapped = await tick(w, NOW, {
+    deps: {
+      createT3: w.t3, exec: () => ({}), watchdogRoute: async (job) => { await fs.writeFile(path.join(w.dir, 'thread'), 'other\n'); return candidates[job] ?? []; },
+    },
+  });
+  assert.match(swapped[0], /given another thread/);
+  await fs.writeFile(path.join(w.dir, 'thread'), 'old-thread\n');
+  const back = await tick(w, NOW, {
+    deps: { createT3: w.t3, exec: () => ({}), watchdogRoute: async (job) => { w.status = 'running'; return candidates[job] ?? []; } },
+  });
+  assert.match(back[0], /now running/);
+  assert.equal(w.started.length, 0);
+  // the nudge re-reads too
+  const n = await setup(t);
+  const t3 = n.t3;
+  let reads = 0;
+  n.t3 = () => ({ ...t3(), showThread: (id) => ({ thread: { id, status: reads++ === 0 ? 'completed' : 'running', instance: 'pa' }, messages: [] }) });
+  assert.deepEqual(await tick(n, NOW), ['alpha: now running; not nudged']);
+  assert.deepEqual(n.sent, []);
+});
+
+test('watchdog: a start that keeps failing rotates routes and escalates at the limit', async (t) => {
+  const w = await setup(t, { status: 'failed' });
+  const t3 = w.t3;
+  w.t3 = () => ({ ...t3(), startThread: (a) => { w.started.push(a); throw new Error('T3 is down'); } });
+  const lines = [];
+  for (let i = 0; i < 4; i += 1) lines.push((await tick(w, NOW + i * 10 * MIN))[0]);
+  assert.deepEqual(w.started.map((a) => `${a.provider} ${a.model}`), ['pb big', 'pc mid', 'pa big']);
+  assert.match(lines[0], /failed to start: T3 is down/);
+  assert.match(lines[3], /3 fresh threads in 2 h did not hold; escalated/);
+  assert.match(await read(path.join(w.dir, 'replaced')), /pb big failed/);
+});
+
+test('watchdog: --dry-run writes nothing, not even an escalation', async (t) => {
+  const w = await setup(t, { status: 'failed' });
+  const [line] = await tick(w, NOW, { dryRun: true, deps: { createT3: w.t3, exec: () => ({}), watchdogRoute: async () => [] } });
+  assert.match(line, /would escalate/);
+  assert.deepEqual([await read(path.join(w.dir, 'escalated')), await read(path.join(w.home, 'supervisor', 'escalations.log'))], [null, null]);
+});
+
+// install, against a fake launchctl/crontab
+async function installRun(t, { platform, cron, loaded = () => true, bootstrap = 0 }) {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orq-install-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const calls = [];
+  const spawn = (cmd, args, input) => {
+    calls.push([cmd, ...args].join(' '));
+    if (cmd === 'crontab' && args[0] === '-l') return cron;
+    if (cmd === 'crontab') return { code: 0, stdout: '', stderr: '', input };
+    if (args[0] === 'print') return { code: loaded() ? 0 : 113, stdout: '', stderr: '' };
+    if (args[0] === 'bootstrap') return { code: bootstrap, stdout: '', stderr: bootstrap ? 'Bootstrap failed: 5' : '' };
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const out = [];
+  const go = () => run(['watchdog', 'install'], {
+    stdout: { write: (x) => out.push(x) }, stderr: { write: () => {} }, env: { T3ORQ_HOME: path.join(root, 'home'), PATH: '/bin' }, cwd: root, now: () => NOW,
+    deps: {
+      spawn, platform, homedir: () => root, uid: () => 501,
+    },
+  });
+  return { root, calls, out, go };
+}
+
+test('watchdog install: creates the log directory, never writes a crontab it could not read', async (t) => {
+  const fresh = await installRun(t, { platform: 'linux', cron: { code: 1, stdout: '', stderr: 'no crontab for me' } });
+  assert.equal(await fresh.go(), 0);
+  assert.ok((await fs.stat(path.join(fresh.root, 'home', 'watchdog'))).isDirectory());
+  assert.ok(fresh.calls.includes('crontab -'));
+  const broken = await installRun(t, { platform: 'linux', cron: { code: 1, stdout: '', stderr: 'crontab: cannot open: Permission denied' } });
+  assert.equal(await broken.go(), 1);
+  assert.ok(!broken.calls.includes('crontab -'));
+  assert.match(broken.out.join(''), /crontab -l failed; the crontab was not read/);
+});
+
+test('watchdog install (macOS): a failed bootstrap is reported, and the next install loads the current plist again', async (t) => {
+  let up = false;
+  const i = await installRun(t, {
+    platform: 'darwin', cron: { code: 0, stdout: '', stderr: '' }, loaded: () => up, bootstrap: 5,
+  });
+  assert.equal(await i.go(), 1);
+  assert.match(i.out.join(''), /is not loaded: launchctl bootstrap failed: Bootstrap failed: 5/);
+  i.calls.length = 0;
+  assert.equal(await i.go(), 1);
+  assert.ok(i.calls.includes(`launchctl bootstrap gui/501 ${path.join(i.root, 'Library', 'LaunchAgents', 'com.t3orq.watchdog.plist')}`));
+  up = true;
+  i.calls.length = 0;
+  assert.equal(await i.go(), 0);
+  assert.match(i.out.at(-1), /is current and loaded/);
+  assert.ok(!i.calls.some((c) => c.startsWith('launchctl bootstrap')));
 });

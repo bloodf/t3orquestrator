@@ -85,3 +85,16 @@ test('env-report: a peer report keeps only cleaned version strings', () => {
   assert.equal(r.schedules, undefined);
   assert.deepEqual(driftLines({ host: 'a', versions: r.versions }, []).at(0), `kit: a=${'x'.repeat(120)}`);
 });
+
+test('env-report --versions (what a peer runs): version strings only, no crontab, paths or disk, never even read', async (t) => {
+  const s = await setup(t);
+  const r = await orq(['env-report', '--versions'], s);
+  const json = JSON.parse(r.out);
+  assert.deepEqual(Object.keys(json).sort(), ['v', 'versions']);
+  assert.equal(json.versions.node, 'v24.1.0');
+  assert.doesNotMatch(r.out, /noclaude|crontab|com\.t3orq|\/user|disk/);
+  assert.ok(!r.ran.includes('crontab -l'));
+  const asked = [];
+  await orq(['env-report', '--peers'], s, { ssh: async (target) => { asked.push(target); return { code: 1, stdout: '' }; } });
+  assert.deepEqual(asked, []); // no peers configured
+});
