@@ -17,6 +17,7 @@ import { loadProjectConfig } from '../lib/config.mjs';
 import { readLines } from '../lib/store.mjs';
 import { gateFile } from '../lib/paths.mjs';
 import { run as cli } from '../lib/cli.mjs';
+import { observeThreads } from '../lib/wait-threads.mjs';
 import {
   makeProject, unitSpec, commitOn, sh,
 } from './support/project.mjs';
@@ -444,6 +445,54 @@ test('send-feedback: sends first, then records feedback-sent and leases the thre
   assert.deepEqual((await leasesOf(s.p)).map((l) => [l.threadId, !!l.reservation]), [['th1', false]]);
   assert.deepEqual(await s.act(feedback()), { skipped: 'no longer awaiting feedback' });
   assert.equal(s.t3.calls.length, 2);
+});
+
+// A provider that refuses at once logs its error while t3 is still starting the thread or sending to it, before
+// orq records the event: the run starts when orq calls t3, so that error is this run's.
+const REFUSAL = 'Token Plan usage limit reached (2056)';
+async function refusedAtOnce(t, call) {
+  let clock = NOW;
+  const s = await setup(t, [unitSpec('a')], { fx: { now: () => clock } });
+  let loggedAt = null;
+  for (const name of ['startThread', 'sendThread']) {
+    const real = s.t3[name].bind(s.t3);
+    s.t3[name] = (...args) => {
+      const r = real(...args);
+      if (name === call) {
+        clock += 1000;
+        loggedAt = clock; // the provider's refusal, logged during the call
+        clock += 2000; // lock and lease work before the event is written
+      }
+      return r;
+    };
+  }
+  return { s, at: () => loggedAt };
+}
+function readStopped(s, at) {
+  const fx = {
+    now: () => NOW + 60_000,
+    threadError: (id, after) => (at() !== null && at() >= after ? REFUSAL : null),
+    t3: { showThread: () => ({ thread: {}, messages: [{ role: 'assistant', text: 'Reading the upload service first.' }] }) },
+  };
+  return async () => observeThreads(fx, s.run.plan, await readState(s.p.repo), [{ id: 'th1', status: 'failed', updatedAt: NOW + 30_000 }]).th1.limit;
+}
+
+test('launch: a refusal logged while the thread was starting belongs to that run and is read as a limit', async (t) => {
+  const { s, at } = await refusedAtOnce(t, 'startThread');
+  await s.act(launchA());
+  assert.equal(unitOf(await readState(s.p.repo), 'a').runStartedAt, NOW); // taken before the start, not when recorded
+  assert.equal((await readStopped(s, at)())?.kind, 'limit');
+});
+
+test('send-feedback: a refusal logged while the feedback was being sent belongs to that run and is read as a limit', async (t) => {
+  const { s, at } = await refusedAtOnce(t, 'sendThread');
+  await awaitingFeedback(s);
+  const sentAt = NOW;
+  await s.act(feedback());
+  const u = unitOf(await readState(s.p.repo), 'a');
+  assert.deepEqual([u.state, u.runStartedAt], ['running', sentAt]);
+  assert.ok(u.since > at()); // the event itself is recorded after the refusal
+  assert.equal((await readStopped(s, at)())?.kind, 'limit');
 });
 
 test('send-feedback: a full machine defers the send', async (t) => {
