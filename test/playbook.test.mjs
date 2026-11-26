@@ -48,6 +48,16 @@ test('ORCHESTRATOR.md tells checks.unit how to scope to the change', () => {
   for (const v of ['ORQ_BASE_SHA', 'ORQ_CHANGED_FILES', 'ORQ_DELETED_FILES']) assert.ok(ORQ_VARS.includes(v) && text.includes(v), v);
 });
 
+test('ORCHESTRATOR.md: unit gates are scoped, the final run is the full suite; latest order wins; orq units only; no idling', () => {
+  const text = read(ORCH);
+  assert.doesNotMatch(text, /checks\.unit` must be the typecheck plus every test suite/); // contradicted the scoped checks.unit
+  assert.match(text, /`checks\.unit` runs the checks scoped to the changed files and their dependents/);
+  assert.match(text, /The full suite is `checks\.full`, run once per integration head/);
+  assert.match(text, /most recent order from the user or their supervisor .* overrides older holds, guards and rules/);
+  assert.match(text, /Work starts only as `orq` units in a plan: never start a worker yourself/);
+  assert.match(text, /Never idle between plans/);
+});
+
 test('playbook docs name no real model, provider or tool', () => {
   const families = JSON.parse(read('playbook/suggestions.json')).families.map((f) => f.family);
   const tools = JSON.parse(read('playbook/tools.json')).tools.map((t) => t.name);
