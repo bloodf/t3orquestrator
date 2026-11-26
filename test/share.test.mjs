@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createGit, defaultExec } from '../lib/git.mjs';
 import {
-  validSharePath, detectShares, eligibleShares, linkShares, shareLine, syncShareExclude,
+  validSharePath, detectShares, eligibleShares, linkShares, repairShares, shareLine, syncShareExclude,
 } from '../lib/share.mjs';
 import { sh } from './support/project.mjs';
 
@@ -149,6 +149,59 @@ test('removing a worktree or a gate directory with links never touches the share
   await fs.rm(left, { recursive: true, force: true }); // the R1 leftover cleanup
   await fs.stat(keep);
   assert.equal(fsSync.existsSync(left), false);
+});
+
+// What pnpm does when run in a checkout whose node_modules links to the main one: it writes each link into the real
+// (main) directory, relative from there to the entry as seen through the checkout's own path.
+function pnpmLinkThrough(mainShare, checkout, share, link, entry) {
+  const at = path.join(mainShare, link);
+  fsSync.mkdirSync(path.dirname(at), { recursive: true });
+  fsSync.symlinkSync(path.relative(path.dirname(at), path.join(checkout, share, entry)), at);
+  return at;
+}
+
+test('repairShares: links pnpm wrote through a removed checkout point back inside the main checkout; others stay', async (t) => {
+  const r = await repo(t);
+  await fs.mkdir(path.join(r.dir, 'apps', 'shop', 'node_modules', '.pnpm', 'z@1', 'node_modules', 'z'), { recursive: true });
+  const nm = path.join(r.dir, 'node_modules');
+  const pkg = '.pnpm/eslint@9/node_modules/eslint';
+  await fs.mkdir(path.join(nm, pkg), { recursive: true });
+  await fs.writeFile(path.join(nm, pkg, 'bin.js'), 'ok\n');
+  await fs.mkdir(path.join(nm, '.pnpm/@scope+a@1/node_modules/@scope/a'), { recursive: true });
+  const paths = ['node_modules', 'apps/shop/node_modules'];
+  const wt = path.join(r.root, 'wt');
+  sh(r.dir, 'worktree', 'add', '-q', '--detach', wt, r.sha);
+  assert.deepEqual(linkShares({ dir: wt, cwd: r.dir, paths, git }), paths);
+  const gateDir = path.join(r.dir, '.orq', 'gate', 'u'); // a gate checkout inside the project
+  await fs.mkdir(gateDir, { recursive: true });
+  await fs.symlink(nm, path.join(gateDir, 'node_modules'));
+  const bad = [
+    pnpmLinkThrough(nm, wt, 'node_modules', 'eslint', pkg),
+    pnpmLinkThrough(nm, wt, 'node_modules', '.pnpm/node_modules/@scope/a', '.pnpm/@scope+a@1/node_modules/@scope/a'),
+    pnpmLinkThrough(nm, gateDir, 'node_modules', '.pnpm/node_modules/eslint', pkg),
+    pnpmLinkThrough(path.join(r.dir, 'apps/shop/node_modules'), wt, 'apps/shop/node_modules', 'zz', '.pnpm/z@1/node_modules/z'),
+    pnpmLinkThrough(path.join(r.dir, 'apps/shop/node_modules'), wt, 'node_modules', 'eslint', pkg), // into another share
+  ];
+  const good = {
+    [path.join(nm, 'rel')]: `${pkg}`,
+    [path.join(nm, 'abs')]: path.join(nm, pkg),
+    [path.join(nm, 'shop')]: '../apps/shop', // a workspace package in the main checkout
+    [path.join(nm, 'elsewhere')]: '/nonexistent/node_modules/q', // nothing to map it to
+  };
+  for (const [at, to] of Object.entries(good)) await fs.symlink(to, at);
+  git.removeWorktree(r.dir, wt);
+  await fs.rm(gateDir, { recursive: true });
+  assert.equal(fsSync.existsSync(path.join(nm, 'eslint', 'bin.js')), false); // the reported failure: dangling
+  assert.equal(repairShares(r.dir, paths), bad.length);
+  for (const at of bad) {
+    assert.ok(fsSync.existsSync(at), at);
+    const to = fsSync.readlinkSync(at);
+    assert.ok(!path.isAbsolute(to) && path.resolve(path.dirname(at), to).startsWith(`${r.dir}/`), to);
+  }
+  assert.equal(await fs.readFile(path.join(nm, 'eslint', 'bin.js'), 'utf8'), 'ok\n');
+  for (const [at, to] of Object.entries(good)) assert.equal(fsSync.readlinkSync(at), to);
+  assert.equal(repairShares(r.dir, paths), 0); // nothing left to repair
+  assert.equal(repairShares(r.dir, ['missing']), 0);
 });
 
 const { run } = await import('../lib/cli.mjs');

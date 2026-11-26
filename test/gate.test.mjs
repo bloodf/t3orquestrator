@@ -7,6 +7,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createGit, defaultExec } from '../lib/git.mjs';
 import { runGate, defaultRun } from '../lib/gate.mjs';
+import { linkShares } from '../lib/share.mjs';
 
 const BASE = 'a'.repeat(40);
 const HEAD = 'b'.repeat(40);
@@ -567,6 +568,31 @@ test('S: the gate checkout links shared dependencies before its steps; removing 
   assert.equal(withSetup.verdict, 'pass', JSON.stringify(withSetup.failures));
   await fs.stat(path.join(w.repo, 'node_modules', 'x', 'y.js'));
   assert.equal(fsSync.existsSync(w.workDir), false);
+});
+
+test('S3: links pnpm wrote through a removed worker or gate checkout are repaired: the next gate finds eslint', async (t) => {
+  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'pnpm-lock.yaml': 'lockfileVersion: 1\n', '.gitignore': 'node_modules/\n' });
+  const nm = path.join(w.repo, 'node_modules');
+  const pkg = '.pnpm/eslint@9/node_modules/eslint';
+  await fs.mkdir(path.join(nm, pkg), { recursive: true });
+  await fs.writeFile(path.join(nm, pkg, 'bin.js'), 'ok\n');
+  assert.deepEqual(linkShares({
+    dir: w.wt, cwd: w.repo, paths: ['node_modules'], git: w.git,
+  }), ['node_modules']);
+  // pnpm in the worker's worktree writes into the main node_modules, relative to the worktree's own path
+  await fs.symlink(path.relative(nm, path.join(w.wt, 'node_modules', pkg)), path.join(nm, 'eslint'));
+  w.git.removeWorktree(w.repo, w.wt);
+  assert.equal(fsSync.existsSync(path.join(nm, 'eslint')), false); // dangling: "missing eslint"
+  const share = { share: { paths: ['node_modules'], unit: null } };
+  const r = await real(w, 'test -f node_modules/eslint/bin.js', share);
+  assert.equal(r.verdict, 'pass', JSON.stringify(r.failures));
+  // a gate step that writes through the gate checkout's own link leaves no link into it once the checkout is gone
+  const through = `node -e "const fs=require('fs'),p=require('path');const m=fs.realpathSync('node_modules');fs.symlinkSync(p.relative(m,p.resolve('node_modules/${pkg}')),p.join(m,'via-gate'))"`;
+  const g = await real(w, through, share);
+  assert.equal(g.verdict, 'pass', JSON.stringify(g.failures));
+  assert.equal(fsSync.existsSync(w.workDir), false);
+  assert.equal(await fs.readFile(path.join(nm, 'via-gate', 'bin.js'), 'utf8'), 'ok\n');
+  assert.ok(!fsSync.readlinkSync(path.join(nm, 'via-gate')).includes('gate-wd'));
 });
 
 test('S2: a linking error never kills the gate or leaves its checkout behind', async (t) => {

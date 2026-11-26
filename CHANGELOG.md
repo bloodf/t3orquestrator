@@ -30,6 +30,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Shared `node_modules` no longer dangle after a worktree goes: pnpm run in a worker or gate checkout (an install, or `pnpm run` reconciling first) wrote its links into the main checkout's directory through that checkout's own path, so removing the checkout left gates and workers without eslint. Before each link, after each gate checkout is removed and after each cleanup run, such links are pointed back inside the main checkout's shared directories.
 - macOS pressure is judged by CPU busy share from `os.cpus()` time deltas between readings (new metric `busy`, limit 90), not by the load average, which held a Mac at load 6.9 per core with the CPU 56% idle. Linux is unchanged.
 - Limit replies: every line of the last 4 KB of a failed thread is read (the first and last lines of a completed turn), not only the first line of a reply under 600 characters. `Token Plan usage limit reached (2056)` and a whole-line `Quota reached` are limits. A limit phrase must end the refusal (end of line, punctuation, a code, the provider's follow-up), so prose such as `Usage limit reached handling now has tests` is not one. A stopped thread's error in T3's log is read before the worker's last words when it was logged during the run that stopped.
 - Each limit refusal that comes while the hold before it still stands doubles the wait before a usage reading may lift the hold (10 minutes, at most 4 hours), instead of retrying every 10 minutes.
