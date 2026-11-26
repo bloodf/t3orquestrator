@@ -3,6 +3,26 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `orq inbox` says `not delivered: no orq wait is running` when no live `orq wait` holds the runner lock, and wakes the orchestrator thread `orq sync` recorded with a short message to run `orq wait`, unless T3 shows it at work or a supervisor watchdog directory for the project (`<T3ORQ_HOME>/watchdog/<name>/{path,hold}`) holds it, and at most once every 5 minutes. The message stays queued either way.
+- `orq wait` (once per call) and `orq status` note T3 threads at work in the project that hold no orq lease, and files under `.orq/` the kit did not write. Notes only: nothing stops.
+
+### Changed
+
+- A pressure hold now stops only new launches and feedback. Unit gates, final runs and integration keep draining, so finished work still ships. A failing protected service still starts no new gate.
+- `gateConcurrency` defaults to 2.
+- Playbook: unit gates run checks scoped to the changed files and their dependents and the final run is the full suite (the rule that every unit gate runs all non-browser suites is gone); the most recent order from the user or their supervisor overrides older holds and guards in repository documents; work starts only as orq units; no idling between plans.
+
+### Fixed
+
+- macOS pressure is judged by CPU busy share from `os.cpus()` time deltas between readings (new metric `busy`, limit 90), not by the load average, which held a Mac at load 6.9 per core with the CPU 56% idle. Linux is unchanged.
+- Limit replies: every line of the last 4 KB of a failed thread is read (the first and last lines of a completed turn), not only the first line of a reply under 600 characters. `Token Plan usage limit reached (2056)` and a whole-line `Quota reached` are limits. A limit phrase must end the refusal (end of line, punctuation, a code, the provider's follow-up), so prose such as `Usage limit reached handling now has tests` is not one. A stopped thread's error in T3's log is read before the worker's last words when it was logged during the run that stopped.
+- Each limit refusal that comes while the hold before it still stands doubles the wait before a usage reading may lift the hold (10 minutes, at most 4 hours), instead of retrying every 10 minutes.
+- A preferred instance that failed a unit loses its preference for that unit.
+
 ## [0.22.0] - 2026-11-23
 
 ### Fixed

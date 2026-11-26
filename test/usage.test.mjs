@@ -166,6 +166,14 @@ test('withUsage: a limit hold ends once a later reading shows room in the model\
   assert.equal(withUsage(held('ag::claude-sonnet', NOW + 90 * H), room, { now: NOW }).models['ag::claude-sonnet'].cooldownUntil, NOW + 90 * H);
 });
 
+test('withUsage: each refusal in a row doubles the wait before a reading with room ends the hold, up to 4 hours', () => {
+  const room = { ag: usage([w('gemini-weekly', 14), w('gemini-5h', 0)]) };
+  const lifted = (strikes, ago) => withUsage(held('ag::gemini-3-flash', NOW + 90 * H, { limitAt: NOW - ago, limitStrikes: strikes }), room, { now: NOW })
+    .models['ag::gemini-3-flash'].cooldownUntil === null;
+  assert.deepEqual([lifted(1, 10 * MIN), lifted(2, 19 * MIN), lifted(2, 20 * MIN), lifted(3, 39 * MIN), lifted(3, 40 * MIN)], [true, false, true, false, true]);
+  assert.deepEqual([lifted(20, 4 * H - MIN), lifted(20, 4 * H)], [false, true]); // capped
+});
+
 test('withUsage: an instance held because every model of it was refused is free once all of them are', () => {
   const only = (over = {}, instOver = {}) => deepFreeze({
     version: 1,

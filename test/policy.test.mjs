@@ -111,4 +111,9 @@ test('preferInstances: a preferred instance goes first at any tier, before free 
   const out = go(r, { preferInstances: ['^codex'] });
   assert.deepEqual(keys(out), ['codex::sol', 'api::x:free', 'claude::sonnet']);
   assert.equal(out.candidates[0].preferred, true);
+  // a preferred instance that failed this unit (a limit) loses its preference for it: among the instances it tried,
+  // the free model goes first again, and the failed one is not marked preferred
+  const tried = go(r, { preferInstances: ['^codex'] }, { avoidInstances: ['codex', 'api'] });
+  assert.deepEqual(keys(tried), ['claude::sonnet', 'api::x:free', 'codex::sol']);
+  assert.equal(tried.candidates.find((c) => c.key === 'codex::sol').preferred, undefined);
 });

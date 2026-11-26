@@ -124,6 +124,7 @@ test('admission holds on pressure, keeps the hold through the release band, and 
   const held = await go(72);
   assert.deepEqual([held.held, held.since, held.status.free], [true, ctx.clock, 0]);
   assert.deepEqual(held.reasons, ['io pressure 72% (limit 40%)']);
+  assert.equal(held.protectHeld, false); // pressure: gates keep draining
   const published = JSON.parse(await fs.readFile(selfPath(ctx.env), 'utf8'));
   assert.deepEqual([published.host, published.held, published.cap, published.active, published.pressure.io], ['host-1', true, 16, 5, 72]);
   const since = ctx.clock;
@@ -142,6 +143,7 @@ test('admission holds on a failing protected service and never holds on facts th
   const a = await admission(ctx, { machine, facts: { cores: 8, load1: 900 }, cap: 4, active: 0 });
   assert.deepEqual(a.reasons, ['protected service gateway is failing (no answer in 400 ms)']);
   assert.deepEqual(a.status.protect, { gateway: false });
+  assert.equal(a.protectHeld, true); // tick stops new gates too, not only launches
   const b = await admission(ctx, { machine: {}, facts: { cores: 8, load1: 900 }, cap: 4, active: 0 });
   assert.equal(b.held, false);
 });

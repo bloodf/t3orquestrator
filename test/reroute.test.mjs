@@ -55,6 +55,16 @@ test('recordLimit: sign-out cools the instance; capacity cools the model; a long
   assert.throws(() => recordLimit(REG, 'ag::gemini-4-argon', { kind: 'nope', until: NOW }), /unknown limit kind/);
 });
 
+test('recordLimit: a refusal while the hold before it still stands is one more strike; a refusal after it ended starts over', () => {
+  const once = recordLimit(REG, 'ag::gemini-4-argon', { kind: 'limit', until: NOW + 9 * H }, NOW);
+  const twice = recordLimit(once, 'ag::gemini-4-argon', { kind: 'limit', until: NOW + 9 * H }, NOW + H);
+  const thrice = recordLimit(twice, 'ag::gemini-4-argon', { kind: 'limit', until: NOW + 9 * H }, NOW + 2 * H);
+  assert.deepEqual([once, twice, thrice].map((r) => r.models['ag::gemini-4-argon'].limitStrikes), [1, 2, 3]);
+  assert.equal(thrice.models['ag::gemini-3.8-flash'].limitStrikes, 3); // the whole pool
+  const later = recordLimit(thrice, 'ag::gemini-4-argon', { kind: 'limit', until: NOW + 20 * H }, NOW + 10 * H);
+  assert.equal(later.models['ag::gemini-4-argon'].limitStrikes, 1);
+});
+
 test('recordLimit: the time of the refusal is kept with the hold, so a later usage reading can end it (usage.mjs)', () => {
   const r = recordLimit(REG, 'ag::gemini-4-argon', { kind: 'limit', until: NOW + 9 * H }, NOW);
   assert.deepEqual([r.models['ag::gemini-4-argon'].limitAt, r.models['ag::gemini-3.8-flash'].limitAt, r.models['ag::claude-sonnet-5-5'].limitAt], [NOW, NOW, undefined]);
