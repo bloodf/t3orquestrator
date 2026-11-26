@@ -38,6 +38,9 @@ test('threadError: the last error the provider gave in T3\'s log of the thread; 
   assert.equal(threadError(ctx, {}, 'mcp:quiet'), null);
   assert.equal(threadError(ctx, {}, 'mcp:none'), null); // no log
   assert.equal(threadError(ctx, {}, '../../../../etc/passwd'), null); // an id never leaves the log directory
+  // only an error of the run that stopped: the refusal was logged at 17:59:12, so a run started after it has none
+  assert.equal(threadError(ctx, {}, 'mcp:44157441-bde5', { after: Date.parse('2026-11-22T17:59:00Z') }), REFUSAL);
+  assert.equal(threadError(ctx, {}, 'mcp:44157441-bde5', { after: Date.parse('2026-11-22T18:30:00Z') }), null);
 });
 
 const A = 'a'.repeat(40);
@@ -48,6 +51,26 @@ const state = reduce([
 const plan = { units: [{ id: 'u' }] };
 const fx = (messages, said) => ({ now: () => NOW, threadError: () => said, t3: { showThread: () => ({ thread: {}, messages }) } });
 const failed = { id: 'mcp:t1', status: 'failed', updatedAt: NOW - 1000 };
+
+test('a logged error from before the stopped run started is not read: the reply counts', () => {
+  // launched at 2 and fed back at NOW - 5 min: the run that stopped started then
+  const later = reduce([
+    { type: 'plan-started', unit: null, at: 1, planId: 'p1', baseSha: A, integrationBranch: 'orq/p1/integration' },
+    { type: 'launched', unit: 'u', at: 2, attempt: 1, threadId: 'mcp:t1', key: 'codex::sol', instance: 'codex', model: 'sol', branch: 'orq/p1/u-a1', baseSha: A, tier: 3 },
+    { type: 'thread-ended', unit: 'u', at: 3, status: 'completed' },
+    { type: 'gated', unit: 'u', at: 4, attempt: 1, verdict: 'fail', failures: ['x'], flags: [], headSha: A },
+    { type: 'feedback-sent', unit: 'u', at: NOW - 5 * 60_000, attempt: 2, threadId: 'mcp:t1' },
+  ]);
+  const asked = [];
+  const f = {
+    now: () => NOW,
+    threadError: (id, after) => { asked.push(after); return after <= NOW - 60 * 60_000 ? REFUSAL : null; }, // logged an hour ago
+    t3: { showThread: () => ({ thread: {}, messages: [{ role: 'assistant', text: 'Now let me check the docs.' }] }) },
+  };
+  assert.equal(observeThreads(f, plan, later, [failed])['mcp:t1'].limit, undefined);
+  assert.deepEqual(asked, [NOW - 5 * 60_000]);
+  assert.equal(observeThreads({ ...f, threadError: (id, after) => (after === 2 ? REFUSAL : null) }, plan, state, [failed])['mcp:t1'].limit.kind, 'limit'); // the launch run
+});
 
 test('a failed thread carries the limit its provider logged, before its last reply; a completed turn is read from its reply', () => {
   const user = [{ role: 'user', text: '# Work order' }];
