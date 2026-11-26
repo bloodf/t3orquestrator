@@ -1,6 +1,7 @@
 {
   "goal": "Add tagging to notes: a shared tag store, a tag editor, and tag search.",
   "base": "main",
+  "claims": [42],
   "decisions": [
     "Tags are lowercase strings of 1 to 32 characters; the store normalises them.",
     "The store's public API is addTag, removeTag and listTags in src/tags/store.js."

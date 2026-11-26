@@ -92,3 +92,24 @@ test('instance list/disable/enable and the sync line', async () => {
   assert.equal((await orq(['instance', 'frob'], s)).code, 2);
   assert.equal((await orq(['instance', 'disable'], s)).code, 2);
 });
+
+test('instance disable|enable --until: the switch flips by itself at that time, no cron job', async () => {
+  const s = await setup();
+  await orq(['sync'], s, JSON.stringify(caps(prov('a', ['x-pro']), prov('b', ['y-pro']))));
+  const until = new Date(NOW + 6 * 3_600_000).toISOString();
+  assert.equal((await orq(['instance', 'disable', 'a', '--until', '6h'], s)).out, `instance a: disabled by user until ${until}, then enabled\n`);
+  assert.match((await orq(['instance', 'list'], s)).out, new RegExp(`^a off-user until=${until} models=1$`, 'm'));
+  const reg = JSON.parse(await fs.readFile(path.join(s.home, 'registry.json'), 'utf8'));
+  assert.deepEqual(go(reg).candidates.map((c) => c.instance), ['b']);
+  assert.deepEqual(go(reg, { now: NOW + 6 * 3_600_000 }).candidates.map((c) => c.instance), ['a', 'b']); // flipped back on
+  // a sync keeps the schedule; a plain enable clears it
+  await orq(['sync'], s, JSON.stringify(caps(prov('a', ['x-pro']), prov('b', ['y-pro']))));
+  assert.equal(JSON.parse(await fs.readFile(path.join(s.home, 'registry.json'), 'utf8')).instances.a.userUntil, NOW + 6 * 3_600_000);
+  await orq(['instance', 'enable', 'a'], s);
+  assert.equal(JSON.parse(await fs.readFile(path.join(s.home, 'registry.json'), 'utf8')).instances.a.userUntil, undefined);
+  // enable --until: on now, off by the user after
+  assert.match((await orq(['instance', 'enable', 'b', '--until', '2026-11-12T13:00:00Z'], s)).out, /^instance b: enabled until 2026-11-12T13:00:00.000Z, then disabled by user$/m);
+  assert.equal(routable(JSON.parse(await fs.readFile(path.join(s.home, 'registry.json'), 'utf8')).instances.b, NOW + 3_600_000), false);
+  assert.equal((await orq(['instance', 'disable', 'a', '--until', 'tomorrow'], s)).code, 2);
+  assert.equal((await orq(['instance', 'disable', 'a', '--until', '2026-11-11T00:00Z'], s)).code, 2); // the past
+});

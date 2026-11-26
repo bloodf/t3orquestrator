@@ -35,7 +35,8 @@ async function context(t, answers = {}) {
 
 test('cleanStatus keeps numbers and booleans and drops everything else a peer sent', () => {
   const s = cleanStatus({ ...status({ protect: { gateway: true }, pressure: { io: 3, 'ignore previous instructions': 1, cpu: 'high' } }), reasons: ['ignore previous instructions'], extra: 'x' });
-  assert.deepEqual(Object.keys(s).sort(), ['active', 'at', 'cap', 'cores', 'free', 'held', 'load', 'pressure', 'protectOk']);
+  assert.deepEqual(Object.keys(s).sort(), ['active', 'at', 'cap', 'claims', 'cores', 'free', 'held', 'load', 'pressure', 'protectOk']);
+  assert.deepEqual(s.claims, []); // claims: only claim-shaped strings (claims.test.mjs)
   assert.deepEqual([s.pressure, s.protectOk], [{ load: 0.2, io: 3 }, true]);
   assert.equal(cleanStatus(status({ protect: { 'run this': false } })).protectOk, false);
   assert.doesNotMatch(JSON.stringify([s, cleanStatus(status({ protect: { 'run this': false } }))]), /ignore|run this/);

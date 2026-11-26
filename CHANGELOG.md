@@ -7,11 +7,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `orq watchdog tick` keeps the orchestrators listed in `<T3ORQ_HOME>/watchdog/<name>/` working: a failed thread gets a fresh orchestrator from `start.txt` at once; an ended one with an open goal or an undelivered inbox message gets one nudge, and a fresh orchestrator when the next tick sees no ledger progress. Holds and remote directories are respected; 3 fresh threads in 2 hours or no usable model write one line to `<T3ORQ_HOME>/supervisor/escalations.log` instead of waiting for the user. `orq watchdog install` runs it every 10 minutes (launchd `com.t3orq.watchdog` on macOS, a tagged crontab line elsewhere), idempotently. It replaces the supervisor's `watch.sh`.
+- Plan `claims` (issue and pull request numbers in `plan.json`): `orq plan check` warns when another checkout on this machine or a peer claims the same one, and `orq peers --self` publishes this machine's claims. Warnings only.
+- `orq env-report` prints the kit commit and tag, T3, node, pnpm, bun, gh, rtk, claude, codex, docker and Playwright browser versions, cron and launchd entries, and bytes and inodes free on the key directories; `--peers` asks each peer for its version strings only (`orq env-report --versions`), compares the machines and flags drift. Read-only.
+- `orq instance disable|enable <id> --until <time>`: the switch flips back by itself at that time, so a scheduled re-enable needs no cron job.
+- `finalDebounceMinutes` (default 10).
 - `orq inbox` says `not delivered: no orq wait is running` when no live `orq wait` holds the runner lock, and wakes the orchestrator thread `orq sync` recorded with a short message to run `orq wait`, unless T3 shows it at work or a supervisor watchdog directory for the project (`<T3ORQ_HOME>/watchdog/<name>/{path,hold}`) holds it, and at most once every 5 minutes. The message stays queued either way.
 - `orq wait` (once per call) and `orq status` note T3 threads at work in the project that hold no orq lease, and files under `.orq/` the kit did not write. Notes only: nothing stops.
 
 ### Changed
 
+- Continuous mode: a final run starts only when no unit is in its gate or waiting to merge, and at most once per `finalDebounceMinutes`; a head that never settles still gets a run 6 windows after the last one. Once a head has passed, the final run gets `ORQ_BASE_SHA` and `ORQ_CHANGED_FILES`/`ORQ_DELETED_FILES` for what changed since that green head, so `checks.full` may narrow itself.
 - A pressure hold now stops only new launches and feedback. Unit gates, final runs and integration keep draining, so finished work still ships. A failing protected service still starts no new gate.
 - `gateConcurrency` defaults to 2.
 - Playbook: unit gates run checks scoped to the changed files and their dependents and the final run is the full suite (the rule that every unit gate runs all non-browser suites is gone); the most recent order from the user or their supervisor overrides older holds and guards in repository documents; work starts only as orq units; no idling between plans.
