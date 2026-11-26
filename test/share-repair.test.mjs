@@ -153,11 +153,11 @@ test('finding 4: the temporary link never replaces an existing file', async (t) 
   assert.deepEqual((await fs.readdir(w.nm)).filter((n) => n.includes('.orq-repair-')), [path.basename(old)]);
 });
 
-async function orq(w, home, args) {
+async function orq(w, home, args, deps = {}) {
   const out = []; const err = [];
   const code = await run(args, {
     stdout: { write: (x) => out.push(x) }, stderr: { write: (x) => err.push(x) }, env: { T3ORQ_HOME: home }, cwd: w.repo, now: () => 1000,
-    stdin: async () => '', deps: { exec: () => ({ code: 0, stdout: '', stderr: '' }), isAlive: () => false },
+    stdin: async () => '', deps: { exec: () => ({ code: 0, stdout: '', stderr: '' }), isAlive: () => false, ...deps },
   });
   return { code, out: out.join(''), err: err.join('') };
 }
@@ -180,7 +180,10 @@ test('finding 5: orq share repair runs only on demand and refuses while a thread
   assert.equal(dry.code, 0, dry.err);
   assert.ok(dry.out.startsWith('would repair 1 links\n  node_modules/eslint -> '), dry.out);
   await fs.rm(path.join(home, 'leases'), { recursive: true });
-  const done = await orq(w, home, ['share', 'repair']);
+  // the check and the repair run under the machine lock every thread and gate reservation takes: none starts meanwhile
+  const held = [];
+  const done = await orq(w, home, ['share', 'repair'], { beforeSwap: () => held.push(fsSync.existsSync(path.join(home, 'lock'))) });
+  assert.deepEqual(held, [true]);
   assert.equal(done.code, 0, done.err);
   assert.ok(done.out.startsWith('repaired 1 links'), done.out);
   assert.equal(await fs.readFile(path.join(link, 'index.js'), 'utf8'), 'ok\n');

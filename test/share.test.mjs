@@ -6,8 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { createGit, defaultExec } from '../lib/git.mjs';
 import {
-  validSharePath, detectShares, eligibleShares, linkShares, pnpmInstall, shareLine, syncShareExclude,
+  validSharePath, detectShares, eligibleShares, linkShares, pnpmInstall, replaceOldShares, shareLine, syncShareExclude, unlinkOldShares,
 } from '../lib/share.mjs';
+import { spawnSync } from 'node:child_process';
 import { sh } from './support/project.mjs';
 
 const git = createGit({ exec: defaultExec });
@@ -302,4 +303,33 @@ test('pnpmInstall: one install per directory with a pnpm lockfile and an install
   await fs.rm(path.join(r.dir, 'site', 'node_modules'), { recursive: true }); // never installed in the main checkout
   assert.equal(pnpmInstall(r.dir), 'pnpm install --frozen-lockfile --prefer-offline && pnpm -C tests install --frozen-lockfile --prefer-offline');
   assert.equal(pnpmInstall((await repo(t)).dir), null); // a bun project
+  // a directory that needs quoting is quoted, never dropped with the rest
+  for (const d of ["my app", "it's"]) {
+    await fs.mkdir(path.join(r.dir, d, 'node_modules'), { recursive: true });
+    await fs.writeFile(path.join(r.dir, d, 'pnpm-lock.yaml'), 'lockfileVersion: 1\n');
+  }
+  const cmd = pnpmInstall(r.dir);
+  assert.equal(cmd, "pnpm install --frozen-lockfile --prefer-offline && pnpm -C 'it'\\''s' install --frozen-lockfile --prefer-offline && pnpm -C 'my app' install --frozen-lockfile --prefer-offline && pnpm -C tests install --frozen-lockfile --prefer-offline");
+  const args = spawnSync('sh', ['-c', cmd.replaceAll('pnpm -C', 'printf "%s\\n"').replaceAll(' install --frozen-lockfile --prefer-offline', '').replace('pnpm && ', '')], { encoding: 'utf8' }).stdout;
+  assert.equal(args, "it's\nmy app\ntests\n"); // each is one shell word
+});
+
+test('old pnpm links: a checkout\'s link to the main node_modules is removed (never its target), then a real install', async (t) => {
+  const r = await repo(t, { lock: 'pnpm-lock.yaml' });
+  const wt = path.join(r.root, 'wt');
+  sh(r.dir, 'worktree', 'add', '-q', '--detach', wt, r.sha);
+  await fs.symlink(path.join(r.dir, 'node_modules'), path.join(wt, 'node_modules')); // what orq's old sharing made
+  await fs.symlink(path.join(r.root, 'elsewhere'), path.join(wt, 'apps', 'shop', 'node_modules')); // not orq's: kept
+  assert.deepEqual(unlinkOldShares(r.dir, r.dir), []); // the main checkout itself: never
+  const installs = [];
+  const fx = {
+    cwd: r.dir, t3: { showThread: () => ({ thread: { worktreePath: wt } }) }, install: (dir, cmd) => { installs.push([dir, cmd]); return true; },
+  };
+  assert.deepEqual(replaceOldShares(fx, 'th1'), { removed: ['node_modules'], installed: true });
+  assert.deepEqual(installs, [[wt, 'pnpm install --frozen-lockfile --prefer-offline']]);
+  assert.equal(fsSync.existsSync(path.join(wt, 'node_modules')), false);
+  assert.equal(await fs.readFile(path.join(r.dir, 'node_modules', 'x', 'y.js'), 'utf8'), 'module.exports = 1;\n');
+  assert.ok(fsSync.lstatSync(path.join(wt, 'apps', 'shop', 'node_modules')).isSymbolicLink());
+  assert.deepEqual(replaceOldShares(fx, 'th1'), { removed: [], installed: null }); // nothing left: no install
+  assert.deepEqual(replaceOldShares({ ...fx, t3: { showThread: () => { throw new Error('gone'); } } }, 'th1'), { removed: [], installed: null });
 });

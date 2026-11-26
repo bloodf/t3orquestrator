@@ -449,6 +449,27 @@ test('send-feedback: sends first, then records feedback-sent and leases the thre
   assert.equal(s.t3.calls.length, 2);
 });
 
+test('send-feedback: a worktree still linked to the main pnpm node_modules gets a real install before the worker goes on', async (t) => {
+  for (const ok of [true, false]) {
+    const installs = [];
+    const s = await setup(t, [unitSpec('a')], { fx: { install: (dir, cmd) => { installs.push([dir, cmd]); return ok; } } });
+    await awaitingFeedback(s);
+    await fs.writeFile(path.join(s.p.repo, 'pnpm-lock.yaml'), 'lockfileVersion: 1\n');
+    await fs.mkdir(path.join(s.p.repo, 'node_modules', 'dep'), { recursive: true });
+    const wt = `${s.p.repo}-old-wt`;
+    t.after(() => fs.rm(wt, { recursive: true, force: true }));
+    await fs.mkdir(wt);
+    await fs.symlink(path.join(s.p.repo, 'node_modules'), path.join(wt, 'node_modules'));
+    s.t3.showThread = () => ({ thread: { worktreePath: wt } });
+    await s.act(feedback());
+    assert.deepEqual(installs, [[wt, 'pnpm install --frozen-lockfile --prefer-offline']]);
+    assert.equal(fsSync.existsSync(path.join(wt, 'node_modules')), false);
+    assert.ok(fsSync.existsSync(path.join(s.p.repo, 'node_modules', 'dep'))); // the main checkout's install stays
+    const sent = s.t3.calls.find((c) => c[0] === 'send')[2];
+    assert.equal(sent.startsWith('Dependencies: pnpm dependencies are not linked'), !ok, sent); // a failed install: the worker is told
+  }
+});
+
 // A provider that refuses at once logs its error while t3 is still starting the thread or sending to it, before
 // orq records the event: the run starts when orq calls t3, so that error is this run's.
 const REFUSAL = 'Token Plan usage limit reached (2056)';
@@ -1336,8 +1357,19 @@ test('S: a pnpm worker gets no link (pnpm writes links through it that dangle on
   const { s, world } = await withDeps(t, { lock: 'pnpm-lock.yaml' });
   await s.act(launchA());
   const o = s.t3.calls.find((c) => c[0] === 'start')[1];
-  assert.ok(o.message.startsWith('Dependencies: this worktree has no node_modules and none is linked. Install them before running anything: `pnpm install --frozen-lockfile --prefer-offline`'), o.message);
+  assert.ok(o.message.startsWith('Dependencies: pnpm dependencies are not linked into this worktree. Install them before running anything: `pnpm install --frozen-lockfile --prefer-offline`'), o.message);
   assert.equal(fsSync.existsSync(path.join(world.worktrees.th1, 'node_modules')), false);
+});
+
+test('S: a bun root linked and a pnpm subproject installed: the order carries both lines', async (t) => {
+  const { s, world } = await withDeps(t);
+  await fs.mkdir(path.join(s.p.repo, 'site', 'node_modules'), { recursive: true });
+  await fs.writeFile(path.join(s.p.repo, 'site', 'pnpm-lock.yaml'), 'lockfileVersion: 1\n');
+  await s.act(launchA());
+  const o = s.t3.calls.find((c) => c[0] === 'start')[1];
+  assert.ok(o.message.startsWith('Dependencies: node_modules are linked from the main checkout.'), o.message);
+  assert.ok(o.message.includes('\n\nDependencies: pnpm dependencies are not linked into this worktree. Install them before running anything: `pnpm -C site install --frozen-lockfile --prefer-offline`'), o.message);
+  assert.equal(await fs.readlink(path.join(world.worktrees.th1, 'node_modules')), path.join(s.p.repo, 'node_modules'));
 });
 
 test('gate-run: a pnpm project with no setup step installs its own node_modules in the gate; share null keeps the old way', async (t) => {
