@@ -424,3 +424,62 @@ test('a $TMPDIR that is a link to an outside folder is no temp alias: none of it
     }
   }
 });
+
+test('a $TMPDIR with a wildcard in its name is matched literally: a sibling it would glob to is never an alias', (t) => {
+  const sysTemp = process.platform === 'darwin'
+    ? spawnSync('getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8' }).stdout.trim()
+    : os.tmpdir();
+  for (const script of ['disk-clean.sh', 'tmp-churn.sh']) {
+    const w = world(t);
+    const docs = path.join(w.dir, 'documents');
+    mkOld(path.join(docs, 'node-compile-cache', 'precious'), 'KEEP');
+    mkOld(path.join(docs, 'important', 'f'), 'KEEP');
+    const at = OLD();
+    for (const d of ['important', 'node-compile-cache']) fs.utimesSync(path.join(docs, d), at, at);
+    fs.symlinkSync(docs, path.join(w.dir, 'alias'));
+    const wildcard = path.join(w.dir, 'alias*'); // a valid temp alias by itself (a link to the real user temp dir)
+    fs.symlinkSync(sysTemp, wildcard);
+    const alias = path.join(w.dir, 'alias');
+    for (const root of [alias, `${alias}/`, path.join(alias, 'node-compile-cache')]) {
+      const r = w.run(script, { TMPDIR: wildcard, MAINT_TEMP_ROOTS: root, MAINT_CHURN_ROOTS: root });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(fs.readFileSync(path.join(docs, 'node-compile-cache', 'precious'), 'utf8'), 'KEEP', `${script} ${root}`);
+      assert.equal(fs.readFileSync(path.join(docs, 'important', 'f'), 'utf8'), 'KEEP', `${script} ${root}`);
+    }
+  }
+});
+
+test('adversarial names and links: nothing outside the root, nothing young and no link target is ever deleted', (t) => {
+  const tree = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true }).sort() : []);
+  for (const script of ['disk-clean.sh', 'tmp-churn.sh']) {
+    const w = world(t);
+    const outside = path.join(w.dir, 'outside');
+    for (const name of ['-rf', '*', '?', '[a]', 'a b', '--', 'victim', 'globX']) mkOld(path.join(outside, name), 'KEEP');
+    mkOld(path.join(outside, 'sub dir', '-n'), 'KEEP');
+    const before = tree(outside);
+    const old = ['-rf', '--', '*', '?', '[a]/f', 'sp ace/f', '-dash dir/f', 'glob*/f', 'q?/f', 'nest/[x]/*', 'a b c'];
+    for (const rel of old) mkOld(path.join(w.temp, rel), 'scratch');
+    for (const d of ['[a]', 'sp ace', '-dash dir', 'glob*', 'q?', 'nest', path.join('nest', '[x]')]) age(path.join(w.temp, d));
+    fs.writeFileSync(path.join(w.temp, 'globX'), 'young'); // what glob* or q? would match if ever expanded
+    fs.writeFileSync(path.join(w.temp, 'qX'), 'young');
+    fs.symlinkSync(outside, path.join(w.temp, 'link-out')); // a link at the top level of the root
+    fs.mkdirSync(path.join(w.temp, 'deep', 'er'), { recursive: true });
+    fs.symlinkSync(outside, path.join(w.temp, 'deep', 'er', 'inner-link')); // and deeper down
+    fs.symlinkSync(path.join(outside, 'victim'), path.join(w.temp, 'file-link'));
+    for (const p of ['link-out', 'file-link', path.join('deep', 'er', 'inner-link')]) {
+      const at = OLD();
+      fs.lutimesSync(path.join(w.temp, p), at, at);
+    }
+    for (const d of [path.join('deep', 'er'), 'deep']) age(path.join(w.temp, d));
+    const r = w.run(script, { MAINT_CHURN_ROOTS: w.temp }, outside); // run from inside the outside folder
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(tree(outside), before, `${script}: outside changed`);
+    for (const name of before) {
+      const p = path.join(outside, name);
+      if (fs.statSync(p).isFile()) assert.equal(fs.readFileSync(p, 'utf8'), 'KEEP', `${script}: ${name}`);
+    }
+    assert.equal(fs.readFileSync(path.join(w.temp, 'globX'), 'utf8'), 'young', script);
+    assert.equal(fs.readFileSync(path.join(w.temp, 'qX'), 'utf8'), 'young', script);
+    for (const rel of ['-rf', '*', 'a b c']) assert.equal(fs.existsSync(path.join(w.temp, rel)), false, `${script} cleans ${rel}`);
+  }
+});

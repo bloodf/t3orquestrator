@@ -10,6 +10,10 @@
 #
 # $T3ORQ_HOME/maint-skip: one shell glob per line, matched against real paths (for example */t3-home.backup-*).
 
+# No pathname expansion anywhere: a value is never a pattern unless a `case` or `find` says so. The one place built-in
+# root patterns are expanded (emit_roots in the scripts) turns it on for that loop only and validates every match.
+set -f
+
 # Paths are read one per line, so a name with a newline (or any control character) could split into another path:
 # every candidate is found with `! -path "$CTRL_GLOB"` and checked with safe_under before anything is deleted.
 LC_ALL=C; export LC_ALL # byte-wise globs and ranges in find, case and awk
@@ -17,6 +21,7 @@ CTRL_GLOB=$(printf '*[\001-\037\177]*')
 
 # PATH is absolute, strictly under ROOT, and has no control character.
 safe_under() {
+  # shellcheck disable=SC2254 # CTRL_GLOB is a pattern on purpose: any control character
   case "$1" in $CTRL_GLOB) return 1 ;; esac
   case "$1" in "$2"/?*) return 0 ;; esac
   return 1
@@ -39,18 +44,26 @@ temp_aliases() {
   [ "$_rt" = "$_rs" ] && printf '%s\n' "$_t" # exactly this user's system temp dir, nothing below or beside it
 }
 
+# What ROOT must resolve to: through the first temp alias it is under (matched literally, read line by line), or
+# itself. "!" when that alias cannot be resolved.
+alias_want() {
+  temp_aliases | while IFS= read -r _a; do
+    case "$1" in "$_a"|"$_a"/*) ;; *) continue ;; esac
+    _ca=$(cd "$_a" 2>/dev/null && pwd -P) || { printf '!\n'; exit 0; }
+    printf '%s%s\n' "$_ca" "${1#"$_a"}"
+    exit 0
+  done
+}
+
 resolve_root() {
   _r=${1%/}
   case "$_r" in /?*) ;; *) return 1 ;; esac
+  # shellcheck disable=SC2254 # CTRL_GLOB is a pattern on purpose
   case "$_r" in $CTRL_GLOB) return 1 ;; esac
   [ -d "$_r" ] || return 1
-  _want=$_r
-  for _a in $(temp_aliases); do
-    case "$_r" in "$_a"|"$_a"/*) ;; *) continue ;; esac
-    _ca=$(cd "$_a" 2>/dev/null && pwd -P) || return 1
-    _want="$_ca${_r#"$_a"}"
-    break
-  done
+  _want=$(alias_want "$_r")
+  [ -n "$_want" ] || _want=$_r
+  [ "$_want" = '!' ] && return 1
   _real=$(cd "$_r" 2>/dev/null && pwd -P) || return 1
   [ "$_real" = "$_want" ] || return 1
   printf '%s\n' "$_real"
@@ -94,8 +107,8 @@ protect_init() {
   _me=$(id -u)
   # paths any process holds (open files, cwd, memory maps), made real
   if [ -d /proc/self ]; then
-    for p in /proc/[0-9]*; do
-      ls -l "$p/fd" 2>/dev/null | sed -n 's/.* -> //p'
+    find /proc -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' 2>/dev/null | while IFS= read -r p; do
+      find "$p/fd" -mindepth 1 -maxdepth 1 -type l -exec readlink {} + 2>/dev/null
       readlink "$p/cwd" 2>/dev/null
       awk '{print $6}' "$p/maps" 2>/dev/null
     done | grep '^/' | sort -u > "$PROTECT_WORK/busy"
@@ -104,7 +117,7 @@ protect_init() {
   fi
   # what orq must keep: leased projects, worktrees of leased and working threads (given raw and real)
   if [ -n "${ORQ:-}" ]; then
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086 # ORQ is a command with its arguments (tests, another kit); split, never globbed (set -f)
     $ORQ maint keep > "$PROTECT_WORK/keep.raw" 2> "$PROTECT_WORK/keep.err" || return 1
   else
     node "$KIT/bin/orq.mjs" maint keep > "$PROTECT_WORK/keep.raw" 2> "$PROTECT_WORK/keep.err" || return 1
@@ -112,16 +125,20 @@ protect_init() {
   : > "$PROTECT_WORK/keep"
   while IFS= read -r k; do
     [ -n "$k" ] || continue
-    printf '%s\n' "$k" >> "$PROTECT_WORK/keep"
-    if [ -d "$k" ]; then (cd "$k" 2>/dev/null && pwd -P) >> "$PROTECT_WORK/keep"; else canon_path "$k" >> "$PROTECT_WORK/keep"; fi
+    {
+      printf '%s\n' "$k"
+      if [ -d "$k" ]; then (cd "$k" 2>/dev/null && pwd -P); else canon_path "$k"; fi
+    } >> "$PROTECT_WORK/keep"
   done < "$PROTECT_WORK/keep.raw"
   : > "$PROTECT_WORK/skip"
   if [ -f "$_home/maint-skip" ]; then
     while IFS= read -r g; do
       [ -n "$g" ] || continue
-      printf '%s\n' "$g" >> "$PROTECT_WORK/skip"
-      canon_glob "$g" >> "$PROTECT_WORK/skip"
-      canon_target "$g" >> "$PROTECT_WORK/skip"
+      {
+        printf '%s\n' "$g"
+        canon_glob "$g"
+        canon_target "$g"
+      } >> "$PROTECT_WORK/skip"
     done < "$_home/maint-skip"
   fi
   return 0
@@ -147,7 +164,7 @@ under_kept() {
   done < "$PROTECT_WORK/keep"
   while IFS= read -r g; do
     [ -n "$g" ] || continue
-    # shellcheck disable=SC2254
+    # shellcheck disable=SC2254 # a maint-skip entry is a glob on purpose
     case "$_p" in $g|$g/*) return 0 ;; esac
   done < "$PROTECT_WORK/skip"
   # a repository, or a directory anywhere inside one, is never a temp root
@@ -168,7 +185,7 @@ protected() {
   grep -qF "$_p/" "$PROTECT_WORK/busy" && return 0 # something in it is held
   while IFS= read -r g; do
     [ -n "$g" ] || continue
-    # shellcheck disable=SC2254
+    # shellcheck disable=SC2254 # a maint-skip entry is a glob on purpose
     case "$_p" in $g|$g/*) return 0 ;; esac
     [ -d "$_p" ] && [ ! -L "$_p" ] && [ -n "$(find "$_p" -path "$g" -print -quit 2>/dev/null)" ] && return 0
   done < "$PROTECT_WORK/skip"
@@ -178,4 +195,13 @@ protected() {
     [ -n "$(find "$_p" -name .git -print -quit 2>/dev/null)" ] && return 0
   fi
   return 1
+}
+
+# Print each argument that has no control character, one per line: a list of roots that read -r cannot misread.
+emit_paths() {
+  for _e in "$@"; do
+    # shellcheck disable=SC2254 # CTRL_GLOB is a pattern on purpose
+    case "$_e" in ''|$CTRL_GLOB) continue ;; esac
+    printf '%s\n' "$_e"
+  done
 }

@@ -15,6 +15,7 @@
 #   MAINT_CHURN_ROOTS  space-separated roots instead of the built-in list
 # Runs at the lowest I/O priority it can get: ionice -c3 + nice on Linux, taskpolicy -b on macOS.
 set -u
+set -f # no pathname expansion: see emit_roots
 if [ -z "${ORQ_MAINT_LOWPRIO:-}" ]; then
   ORQ_MAINT_LOWPRIO=1; export ORQ_MAINT_LOWPRIO
   if command -v ionice >/dev/null 2>&1; then exec ionice -c3 nice -n19 /bin/sh "$0" "$@"; fi
@@ -66,13 +67,6 @@ filter() {
     }' "$1"
 }
 
-# find arguments that leave out every maint-skip match and everything under it
-skip_args() {
-  while IFS= read -r g; do
-    [ -n "$g" ] && printf '%s\n' "$g"
-  done < "$work/skip"
-}
-
 total=0
 churn() {
   [ -L "$1" ] && return 0 # a linked root is never searched, not even a temp alias's child
@@ -84,10 +78,12 @@ churn() {
   [ "${used:-0}" -ge "$EMERGENCY" ] && age=$EMERGENCY_AGE
   # repositories and worktrees inside the root: nothing in them is scratch
   find "$r" -xdev -name .git 2>/dev/null | sed 's#/\.git$##' > "$work/repos"
+  # find arguments that leave out every maint-skip match and everything under it
   set --
-  while IFS= read -r g; do [ -n "$g" ] || continue; set -- "$@" ! -path "$g" ! -path "$g/*"; done <<EOF
-$(skip_args)
-EOF
+  while IFS= read -r g; do
+    [ -n "$g" ] || continue
+    set -- "$@" ! -path "$g" ! -path "$g/*"
+  done < "$work/skip"
   find "$r" -xdev -mindepth 1 -type f -user "$me" -mmin +"$age" ! -path "$CTRL_GLOB" "$@" 2>/dev/null > "$work/files.all"
   filter "$work/files.all" "$r" > "$work/files"
   n=$(wc -l < "$work/files" | tr -d ' ')
@@ -101,12 +97,25 @@ EOF
   total=$((total + n))
 }
 
-for r in ${MAINT_CHURN_ROOTS:-/tmp/claude-"$me" /private/tmp/claude-"$me" "$T"/claude-"$me" \
-         /tmp/node-compile-cache "$T"/node-compile-cache "$HOME"/.cache/node-compile-cache \
-         /tmp/tsx-"$me" "$T"/tsx-"$me" \
-         /tmp/playwright-* "$T"/playwright-* "$HOME"/.cache/agent-tmp}; do
-  churn "$r"
-done
+# The roots, one per line. MAINT_CHURN_ROOTS (tests): space-separated literal paths, never expanded. Otherwise the
+# fixed list: the only pathname expansion in this script is the playwright-* pattern, and every root is validated
+# again by churn (resolve_root: a real directory reached through no link, owned by this user).
+emit_roots() {
+  if [ -n "${MAINT_CHURN_ROOTS:-}" ]; then
+    printf '%s\n' "$MAINT_CHURN_ROOTS" | tr ' ' '\n' | grep -v "$(printf '[\001-\037\177]')"
+    return 0
+  fi
+  emit_paths /tmp/claude-"$me" /private/tmp/claude-"$me" "$T"/claude-"$me" \
+    /tmp/node-compile-cache "$T"/node-compile-cache "$HOME"/.cache/node-compile-cache \
+    /tmp/tsx-"$me" "$T"/tsx-"$me" "$HOME"/.cache/agent-tmp
+  set +f
+  emit_paths /tmp/playwright-* "$T"/playwright-*
+  set -f
+}
+emit_roots > "$work/roots"
+while IFS= read -r r; do
+  [ -n "$r" ] && churn "$r"
+done < "$work/roots"
 
 [ -z "$DRY" ] && log "$(date -u +%FT%TZ) tmp-churn removed=$total files"
 exit 0

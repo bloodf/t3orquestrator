@@ -18,6 +18,7 @@
 #   $T3ORQ_HOME/maint-skip  globs of paths never touched, one per line
 # Runs at the lowest I/O priority it can get: ionice -c3 + nice on Linux, taskpolicy -b on macOS.
 set -u
+set -f # no pathname expansion: see emit_roots
 if [ -z "${ORQ_MAINT_LOWPRIO:-}" ]; then
   ORQ_MAINT_LOWPRIO=1; export ORQ_MAINT_LOWPRIO
   if command -v ionice >/dev/null 2>&1; then exec ionice -c3 nice -n19 /bin/sh "$0" "$@"; fi
@@ -66,19 +67,25 @@ clean_root() {
 
 before=$(df -Pk "$HOME" | awk 'NR==2{print $4}')
 
-if [ -n "${MAINT_TEMP_ROOTS:-}" ]; then # instead of every root below (tests)
-  for r in $MAINT_TEMP_ROOTS; do clean_root "$r"; done
-else
-  # Top-level temp roots.
-  for r in /tmp /var/tmp /dev/shm "${TMPDIR:-}" /private/tmp; do
-    [ -n "$r" ] && clean_root "$r"
-  done
-  # Long-lived container dirs whose children are per-unit scratch (agent TMPDIR roots, orq scratch).
-  for r in /var/tmp/*orq-* /tmp/*orq-* /tmp/claude-* /private/tmp/claude-* \
-           "$HOME"/.cache/*-tmp "$HOME"/.cache/*scratch* "$HOME"/.cache/*orq*; do
-    [ -d "$r" ] && clean_root "$r"
-  done
-fi
+# The roots, one per line. MAINT_TEMP_ROOTS (tests): space-separated literal paths, never expanded. Otherwise the
+# top-level temp roots, then long-lived container dirs whose children are per-unit scratch (agent TMPDIR roots, orq
+# scratch): the only pathname expansion in this script, on fixed patterns, and every match is validated again by
+# clean_root (resolve_root: a real directory reached through no link).
+emit_roots() {
+  if [ -n "${MAINT_TEMP_ROOTS:-}" ]; then
+    printf '%s\n' "$MAINT_TEMP_ROOTS" | tr ' ' '\n' | grep -v "$(printf '[\001-\037\177]')"
+    return 0
+  fi
+  emit_paths /tmp /var/tmp /dev/shm "${TMPDIR:-}" /private/tmp
+  set +f
+  emit_paths /var/tmp/*orq-* /tmp/*orq-* /tmp/claude-* /private/tmp/claude-* \
+    "$HOME"/.cache/*-tmp "$HOME"/.cache/*scratch* "$HOME"/.cache/*orq*
+  set -f
+}
+emit_roots > "$work/roots"
+while IFS= read -r r; do
+  [ -n "$r" ] && clean_root "$r"
+done < "$work/roots"
 
 # Docker: build cache older than a day and dangling images. Tagged images (rollback copies), containers and volumes
 # are never touched.
