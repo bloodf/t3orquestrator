@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  cacheKey, createDepCache, defaultClone, findModules, onlyPnpmInstalls, realKeyOf,
+  cacheKey, createDepCache, defaultClone, findModules, onlyPnpmInstalls, realKeyOf, scriptsBlocker,
 } from '../lib/dep-cache.mjs';
 
 const tmp = (t) => {
@@ -143,8 +143,25 @@ test('defaultClone: cp -c on macOS, cp --reflink=always on Linux, none elsewhere
   return undefined;
 });
 
-test('realKeyOf: keys from git ls-tree and the node and pnpm the step would run; no pnpm means no key', () => {
-  const git = { raw: (repo, args) => { assert.deepEqual(args, ['ls-tree', '-r', '--full-tree', 'c'.repeat(40)]); return TREE; } };
+test('scriptsBlocker: any lifecycle script, dependency build setting, pnpmfile or pnpm before 10 means no reuse', () => {
+  const clean = { 'package.json': '{"scripts":{"test":"vitest","build":"tsc"}}', 'packages/a/package.json': '{}', 'pnpm-workspace.yaml': 'packages:\n  - packages/*\n' };
+  assert.equal(scriptsBlocker(clean, '10.4.1'), null);
+  assert.match(scriptsBlocker(clean, '9.15.0'), /pnpm 9\.15\.0 runs dependency build scripts/);
+  assert.match(scriptsBlocker({ ...clean, 'packages/a/package.json': '{"scripts":{"postinstall":"node scripts/install.js"}}' }, '10.4.1'), /packages\/a\/package\.json has a postinstall script/);
+  assert.match(scriptsBlocker({ ...clean, 'package.json': '{"scripts":{"prepare":"husky"}}' }, '10.4.1'), /prepare script/);
+  assert.match(scriptsBlocker({ ...clean, 'pnpm-workspace.yaml': 'onlyBuiltDependencies:\n  - esbuild\n' }, '10.4.1'), /lets dependencies run build scripts/);
+  assert.match(scriptsBlocker({ ...clean, 'package.json': '{"pnpm":{"onlyBuiltDependencies":["esbuild"]}}' }, '10.4.1'), /build scripts/);
+  assert.match(scriptsBlocker({ ...clean, '.npmrc': 'dangerously-allow-all-builds=true\n' }, '10.4.1'), /build scripts/);
+  assert.match(scriptsBlocker({ ...clean, '.pnpmfile.cjs': 'module.exports = {}' }, '10.4.1'), /can run code/);
+  assert.match(scriptsBlocker({ ...clean, 'package.json': '{oops' }, '10.4.1'), /cannot be read/);
+});
+
+test('realKeyOf: keys from git ls-tree and the node and pnpm the step would run; no pnpm, or a lifecycle script, means no key', () => {
+  const blobs = { 'package.json': '{"scripts":{"test":"x"}}', 'pnpm-lock.yaml': 'lockfileVersion: 9', 'packages/a/package.json': '{}' };
+  const git = {
+    raw: (repo, args) => { assert.deepEqual(args, ['ls-tree', '-r', '--full-tree', 'c'.repeat(40)]); return TREE; },
+    showFile: (repo, sha, f) => blobs[f] ?? null,
+  };
   const exec = (cmd) => ({ node: 'v24.1.0\n', pnpm: '12.1.0\n' })[cmd];
   const keyOf = realKeyOf({
     git, repo: '/r', sha: 'c'.repeat(40), setup: 'pnpm install', env: {}, exec,
@@ -152,6 +169,12 @@ test('realKeyOf: keys from git ls-tree and the node and pnpm the step would run;
   assert.equal(keyOf('/gate'), cacheKey({
     lsTree: TREE, setup: 'pnpm install', node: 'v24.1.0', pnpm: '12.1.0',
   }));
+  const logs = [];
+  blobs['packages/a/package.json'] = '{"scripts":{"postinstall":"node scripts/install.js"}}'; // scripts/install.js is not a key input
+  assert.equal(realKeyOf({
+    git, repo: '/r', sha: 'c'.repeat(40), setup: 'pnpm install', env: {}, exec, log: (l) => logs.push(l),
+  })('/gate'), null);
+  assert.deepEqual(logs, ['install cache not used: packages/a/package.json has a postinstall script']);
   const none = realKeyOf({
     git, repo: '/r', sha: 'c'.repeat(40), setup: 'pnpm install', env: {}, exec: () => { throw new Error('ENOENT'); },
   });

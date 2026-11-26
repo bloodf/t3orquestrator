@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   cronLines, install, keepPaths, mergeCrontab, plist, schedule, startCleanup,
@@ -50,15 +50,15 @@ test('schedule and cron lines: staggered per machine, stable, tmp-churn hourly a
   assert.match(disk, new RegExp(`^${s.disk} ${s.diskHour},${s.diskHour + 6},${s.diskHour + 12},${s.diskHour + 18} \\* \\* \\* .*disk-clean\\.sh' .*# orq-maint disk-clean$`));
 });
 
-test('mergeCrontab is idempotent and replaces earlier orq-maint and hand-made disk-clean/tmp-churn lines only', () => {
+test('mergeCrontab is idempotent, replaces only orq-maint lines, and lists other cleanup lines without touching them', () => {
   const lines = cronLines({ host: 'h', kit: '/k/maint/' });
-  const current = ['MAILTO=""', '*/10 * * * * /home/u/reenable.sh', '23 * * * * /home/u/.t3orq/maint/tmp-churn.sh', '0 */6 * * * sh ~/.t3orq/maint/disk-clean.sh', '# 5 * * * * disk-clean.sh (commented)', ''].join('\n');
+  const current = ['MAILTO=""', '*/10 * * * * /h/reenable.sh', '23 * * * * /h/.t3orq/maint/tmp-churn.sh', '0 3 * * * /opt/other/disk-clean.sh', '# 5 * * * * disk-clean.sh (commented)', '7 * * * * /bin/sh /old/kit/maint/tmp-churn.sh # orq-maint tmp-churn', ''].join('\n');
   const once = mergeCrontab(current, lines);
-  assert.equal(once.replaced, 2);
-  assert.deepEqual(once.text.trimEnd().split('\n'), ['MAILTO=""', '*/10 * * * * /home/u/reenable.sh', '# 5 * * * * disk-clean.sh (commented)', ...lines]);
+  assert.equal(once.replaced, 1);
+  assert.deepEqual(once.legacy, ['23 * * * * /h/.t3orq/maint/tmp-churn.sh', '0 3 * * * /opt/other/disk-clean.sh']);
+  assert.deepEqual(once.text.trimEnd().split('\n'), ['MAILTO=""', '*/10 * * * * /h/reenable.sh', '23 * * * * /h/.t3orq/maint/tmp-churn.sh', '0 3 * * * /opt/other/disk-clean.sh', '# 5 * * * * disk-clean.sh (commented)', ...lines]);
   const twice = mergeCrontab(once.text, lines);
   assert.equal(twice.text, once.text);
-  assert.equal(twice.replaced, 2);
   assert.equal(mergeCrontab('', lines).text, `${lines.join('\n')}\n`);
 });
 
@@ -92,7 +92,7 @@ test('install: launchd on macOS (bootout then bootstrap, same labels as before),
   const linux = install({
     platform: 'linux', host: 'storm', env: { PATH: '/bin', T3ORQ_HOME: '/h/o' }, exec,
   });
-  assert.match(linux[0], /installed cron entries \(0 earlier lines replaced\)/);
+  assert.match(linux[0], /installed cron entries \(0 earlier orq-maint lines replaced\)/);
   assert.equal(calls[1][0], 'crontab');
   assert.match(calls[1][2], /^5 \* \* \* \* other\n.*tmp-churn.*\n.*disk-clean/s);
   calls.length = 0;
@@ -102,6 +102,24 @@ test('install: launchd on macOS (bootout then bootstrap, same labels as before),
   assert.equal(dry[0], 'would install crontab:');
   assert.deepEqual(calls.map((c) => c.slice(0, 2)), [['crontab', '-l']]); // read only
   assert.throws(() => install({ platform: 'win32', env: {}, exec }), /not supported/);
+  const broken = (cmd, args) => (args[0] === '-l' ? { code: 1, stdout: '', stderr: 'crontab: permission denied' } : assert.fail('must not write'));
+  assert.throws(() => install({ platform: 'linux', host: 'h', env: {}, exec: broken }), /crontab -l failed/); // never a crontab without the user's lines
+  const none = [];
+  install({
+    platform: 'linux', host: 'h', env: {}, exec: (cmd, args, o) => { none.push(o?.input); return args[0] === '-l' ? { code: 1, stdout: '', stderr: 'no crontab for u' } : { code: 0 }; },
+  });
+  assert.match(none[1], /orq-maint tmp-churn/);
+  // a plist with the same label that orq did not write is backed up first
+  const plistFile = path.join(home, 'Library', 'LaunchAgents', 'com.t3orq.tmp-churn.plist');
+  fs.writeFileSync(plistFile, '<plist>hand made</plist>');
+  const again = install({
+    platform: 'darwin', host: 'mac', env: { PATH: '/bin' }, exec, home, uid: 501, now: () => 42,
+  });
+  assert.equal(fs.readFileSync(`${plistFile}.bak-42`, 'utf8'), '<plist>hand made</plist>');
+  assert.ok(again.some((l) => l.includes('kept as')));
+  assert.equal(install({
+    platform: 'darwin', host: 'mac', env: { PATH: '/bin' }, exec, home, uid: 501, now: () => 43,
+  }).some((l) => l.includes('kept as')), false); // our own plist is simply replaced
 });
 
 async function keepCtx(t, threads) {
@@ -121,14 +139,34 @@ test('keepPaths: leased projects, worktrees of leased threads and of T3 threads 
   await writeLease(path.join(k.home, 'leases'), {
     threadId: 'th1', project: '/p/one', unit: 'a', instance: 'i', model: 'm', startedAt: NOW,
   });
-  await writeGateLease(path.join(k.home, 'gate-leases'), { pid: 4242, project: '/p/gated', unit: 'b', startedAt: NOW });
-  assert.deepEqual(await keepPaths(k.ctx, ['/p/plain', '/p/not-t3']), ['/p/gated', '/p/one', '/wt/one-1', '/wt/one-2', '/wt/plain-9']);
+  await writeGateLease(path.join(k.home, 'gate-leases'), {
+    id: '1'.repeat(16), pid: 4242, project: '/p/gated', unit: 'b', startedAt: NOW,
+  });
+  // the fake t3 lists no threads for /p/gated: an empty list is an answer
+  assert.deepEqual(await keepPaths(k.ctx, ['/p/plain']), ['/p/gated', '/p/one', '/wt/one-1', '/wt/one-2', '/wt/plain-9']);
+  const real = fs.realpathSync(k.dir);
+  const alias = path.join(k.dir, 'alias');
+  fs.symlinkSync(real, alias);
+  await writeLease(path.join(k.home, 'leases'), {
+    threadId: 'th3', project: alias, unit: 'c', instance: 'i', model: 'm', startedAt: NOW,
+  });
+  const withAlias = await keepPaths(k.ctx);
+  assert.ok(withAlias.includes(alias) && withAlias.includes(real), 'a symlinked path is kept by its real path too');
+  fs.rmSync(path.join(k.home, 'leases', 'th3.json'));
+  fs.writeFileSync(path.join(k.home, 'gate-leases', `${'2'.repeat(16)}.json`), '{torn');
+  await assert.rejects(keepPaths(k.ctx), /invalid JSON/); // an unreadable gate lease: uncertain, nothing is deleted
+  fs.rmSync(path.join(k.home, 'gate-leases', `${'2'.repeat(16)}.json`));
   await writeLease(path.join(k.home, 'leases'), {
     threadId: 'gone', project: '/p/one', unit: 'b', instance: 'i', model: 'm', startedAt: NOW,
   });
   await assert.rejects(keepPaths(k.ctx), /worktree of leased thread gone is not known/);
   fs.writeFileSync(path.join(k.dir, 'FAIL'), '');
   await assert.rejects(keepPaths(k.ctx), /threads of \/p\/one could not be read/);
+  fs.rmSync(path.join(k.home, 'leases'), { recursive: true });
+  fs.rmSync(path.join(k.home, 'gate-leases'), { recursive: true });
+  await assert.rejects(keepPaths(k.ctx, ['/p/not-t3']), /threads of \/p\/not-t3 could not be read/); // never "not a T3 project"
+  fs.rmSync(path.join(k.dir, 'FAIL'));
+  assert.deepEqual(await keepPaths(k.ctx), []);
 });
 
 test('startCleanup starts one run at most once an hour', async (t) => {
@@ -146,148 +184,134 @@ test('startCleanup starts one run at most once an hour', async (t) => {
   assert.equal(started.length, 2);
 });
 
-// A repository with three linked worktrees, all clean, pushed and idle for two days: one free, one a leased thread's,
-// and one whose directory is gone (a stale registration only `git worktree prune` removes).
+const OLD = () => Date.now() / 1000 - 2 * 86400;
+const age = (p) => { const at = OLD(); fs.utimesSync(p, at, at); };
+function mkOld(file, text = 'x') {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, text);
+  age(file);
+  for (let d = path.dirname(file); d.length > 1 && d.includes(`${path.sep}temp`); d = path.dirname(d)) age(d);
+}
+
+// A temp root with old scratch and old things that must stay, a leased project reached through a symlink, a
+// maint-skip glob, and a pushed, clean, idle git worktree outside the temp root (worktrees are never cleaned here).
 function world(t) {
   const dir = tmp(t);
   const home = path.join(dir, 'home');
   const orqHome = path.join(dir, 'orq');
+  const temp = path.join(dir, 'temp');
   const repo = path.join(dir, 'repo');
-  const origin = path.join(dir, 'origin.git');
   fs.mkdirSync(repo, { recursive: true });
-  git(dir, 'init', '-q', '--bare', origin);
   git(repo, 'init', '-q', '-b', 'main');
   git(repo, '-c', 'user.name=T', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'init');
-  git(repo, 'remote', 'add', 'origin', origin);
-  git(repo, 'push', '-q', 'origin', 'main');
-  git(repo, 'fetch', '-q', 'origin');
-  const wt = (name) => {
-    const p = path.join(dir, name);
-    git(repo, 'worktree', 'add', '-q', '--detach', p, 'origin/main');
-    return p;
-  };
-  const free = wt('wt-free');
-  const leased = wt('wt-leased');
-  const gone = wt('wt-gone');
-  fs.rmSync(gone, { recursive: true, force: true });
-  const old = Date.now() / 1000 - 2 * 86400;
-  for (const p of [free, leased]) {
-    const gd = git(p, 'rev-parse', '--absolute-git-dir').trim();
-    for (const f of [path.join(gd, 'index'), path.join(gd, 'HEAD'), path.join(gd, 'logs', 'HEAD'), p]) if (fs.existsSync(f)) fs.utimesSync(f, old, old);
-  }
-  const orphan = path.join(home, '.t3', 'worktrees', 'proj', 'orphan');
-  fs.mkdirSync(orphan, { recursive: true });
-  fs.writeFileSync(path.join(orphan, 'f'), 'x');
-  fs.utimesSync(path.join(orphan, 'f'), old, old);
-  fs.utimesSync(orphan, old, old);
-  const temp = path.join(dir, 'temp');
-  fs.mkdirSync(path.join(temp, 'old-scratch'), { recursive: true });
-  fs.writeFileSync(path.join(temp, 'old-scratch', 'f'), 'x');
-  fs.utimesSync(path.join(temp, 'old-scratch', 'f'), old, old);
-  fs.utimesSync(path.join(temp, 'old-scratch'), old, old);
-  const bin = fakeT3(dir, { '/p/leased-project': [thread('th1', leased)] });
+  const worktree = path.join(dir, 'wt-idle');
+  git(repo, 'worktree', 'add', '-q', '--detach', worktree, 'main');
+  mkOld(path.join(temp, 'old-scratch', 'f'));
+  // a disposable checkout with uncommitted work: is a repository, never scratch
+  const checkout = path.join(temp, 'old-checkout');
+  fs.mkdirSync(checkout, { recursive: true });
+  git(checkout, 'init', '-q');
+  mkOld(path.join(checkout, 'uncommitted.txt'), 'work');
+  age(path.join(checkout, '.git'));
+  for (const f of fs.readdirSync(path.join(checkout, '.git'), { recursive: true })) age(path.join(checkout, '.git', f));
+  age(checkout);
+  // a directory holding a repository deeper down
+  const nest = path.join(temp, 'old-nest');
+  fs.mkdirSync(path.join(nest, 'a'), { recursive: true });
+  git(path.join(nest, 'a'), 'init', '-q');
+  for (const f of fs.readdirSync(nest, { recursive: true })) age(path.join(nest, f));
+  age(nest);
+  // a leased project, named in its lease through a symlink alias
+  const leasedDir = path.join(temp, 'old-leased');
+  mkOld(path.join(leasedDir, 'f'));
+  const alias = path.join(dir, 'alias-to-leased');
+  fs.symlinkSync(leasedDir, alias);
+  // a maint-skip glob that matches a child: its parent must stay too
+  mkOld(path.join(temp, 'old-parent', 'precious-1', 'f'));
+  fs.mkdirSync(orqHome, { recursive: true });
+  fs.writeFileSync(path.join(orqHome, 'maint-skip'), '*/precious-*\n');
+  const bin = fakeT3(dir, { [alias]: [] });
   fs.mkdirSync(path.join(orqHome, 'leases'), { recursive: true });
   fs.writeFileSync(path.join(orqHome, 'leases', 'th1.json'), JSON.stringify({
-    threadId: 'th1', project: '/p/leased-project', unit: 'a', instance: 'i', model: 'm', startedAt: NOW,
+    threadId: 'th1', project: alias, unit: 'a', instance: 'i', model: 'm', startedAt: NOW, reservation: true,
   }));
-  const run = (env = {}) => spawnSync('/bin/sh', [path.join(KIT, 'maint', 'disk-clean.sh')], {
+  const run = (script, env = {}) => spawnSync('/bin/sh', [path.join(KIT, 'maint', script)], {
     encoding: 'utf8',
     env: {
-      PATH: process.env.PATH, HOME: home, T3ORQ_HOME: orqHome, T3CODE_CLI_PATH: bin, TMPDIR: dir, MAINT_REPOS: repo, MAINT_TEMP_ROOTS: temp, MAINT_DOCKER: '0', ORQ_MAINT_LOWPRIO: '1', ...env,
+      PATH: process.env.PATH, HOME: home, T3ORQ_HOME: orqHome, T3CODE_CLI_PATH: bin, TMPDIR: dir, MAINT_TEMP_ROOTS: temp, MAINT_DOCKER: '0', ORQ_MAINT_LOWPRIO: '1', ...env,
     },
   });
-  const registered = () => git(repo, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree ')).map((l) => l.slice(9));
   return {
-    dir, repo, free, leased, gone, orphan, temp, run, registered, orqHome,
+    dir, temp, checkout, nest, leasedDir, worktree, orqHome, run, repo,
   };
 }
 
-test('disk-clean DRY=1 lists what would go and changes nothing, not even git worktree prune', (t) => {
+test('disk-clean DRY=1 lists what would go and changes nothing', (t) => {
   const w = world(t);
-  const before = w.registered();
-  const r = w.run({ DRY: '1' });
+  const r = w.run('disk-clean.sh', { DRY: '1' });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, new RegExp(`\\t${w.free}\\n`));
-  assert.match(r.stdout, new RegExp(`\\t${w.orphan}\\n`));
-  assert.match(r.stdout, /old-scratch/);
-  assert.doesNotMatch(r.stdout, new RegExp(w.leased));
+  assert.match(r.stdout, /old-scratch\n/);
+  assert.doesNotMatch(r.stdout, /old-checkout|old-nest|old-leased|old-parent/);
   assert.match(r.stdout, /disk-clean \(dry run\)/);
-  assert.deepEqual(w.registered(), before); // the gone worktree is still registered
-  for (const p of [w.free, w.orphan, path.join(w.temp, 'old-scratch')]) assert.ok(fs.existsSync(p), p);
+  assert.ok(fs.existsSync(path.join(w.temp, 'old-scratch')));
   assert.equal(fs.existsSync(path.join(w.orqHome, 'maint.log')), false);
 });
 
-test('disk-clean removes idle unleased worktrees, orphans and old temp entries; keeps a leased thread\'s worktree', (t) => {
+test('disk-clean deletes old scratch only: never a repository, a kept path reached through a symlink, a maint-skip ancestor, or a worktree', (t) => {
   const w = world(t);
-  const r = w.run();
+  const r = w.run('disk-clean.sh');
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(fs.existsSync(w.free), false);
-  assert.equal(fs.existsSync(w.leased), true);
-  assert.equal(fs.existsSync(w.orphan), false);
   assert.equal(fs.existsSync(path.join(w.temp, 'old-scratch')), false);
-  assert.deepEqual(w.registered(), [w.repo, w.leased]); // the gone one was pruned
+  assert.equal(fs.readFileSync(path.join(w.checkout, 'uncommitted.txt'), 'utf8'), 'work');
+  assert.ok(fs.existsSync(path.join(w.nest, 'a', '.git')));
+  assert.ok(fs.existsSync(path.join(w.leasedDir, 'f')));
+  assert.ok(fs.existsSync(path.join(w.temp, 'old-parent', 'precious-1', 'f')));
+  assert.ok(fs.existsSync(w.worktree));
+  assert.match(git(w.repo, 'worktree', 'list'), /wt-idle/);
   assert.match(fs.readFileSync(path.join(w.orqHome, 'maint.log'), 'utf8'), /disk-clean freed=/);
 });
 
-test('disk-clean never touches a path matching a maint-skip glob', (t) => {
-  const w = world(t);
-  fs.writeFileSync(path.join(w.orqHome, 'maint-skip'), `${path.dirname(w.free)}/wt-fr*\n*/.t3/worktrees/proj\n`);
-  const r = w.run();
-  assert.equal(r.status, 0, r.stderr);
-  assert.ok(fs.existsSync(w.free));
-  assert.ok(fs.existsSync(w.orphan));
-});
-
-test('disk-clean fails closed: when the keep list cannot be learned, no worktree or orphan goes (temp roots still do)', (t) => {
+test('disk-clean and tmp-churn fail closed: when the keep list cannot be learned nothing is deleted', (t) => {
   const w = world(t);
   fs.writeFileSync(path.join(w.dir, 'FAIL'), '');
-  const r = w.run();
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /worktrees kept: orq: maint keep: threads of \/p\/leased-project could not be read/);
-  assert.match(r.stdout, /worktrees-kept/);
-  for (const p of [w.free, w.leased, w.orphan]) assert.ok(fs.existsSync(p), p);
-  assert.equal(w.registered().length, 4); // no prune either
-  assert.equal(fs.existsSync(path.join(w.temp, 'old-scratch')), false);
+  const r = w.run('disk-clean.sh');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /nothing deleted: the paths to keep could not be learned \(orq: maint keep: threads of .* could not be read/);
+  assert.ok(fs.existsSync(path.join(w.temp, 'old-scratch')));
+  const c = w.run('tmp-churn.sh', { MAINT_CHURN_ROOTS: w.temp });
+  assert.equal(c.status, 1);
+  assert.ok(fs.existsSync(path.join(w.temp, 'old-scratch', 'f')));
 });
 
-test('disk-clean keeps a worktree whose git status fails', (t) => {
+test('tmp-churn deletes old files only: never in a repository, a maint-skip match, a kept path or a file held open; emergency mode; DRY', async (t) => {
   const w = world(t);
-  const gd = git(w.free, 'rev-parse', '--absolute-git-dir').trim();
-  fs.writeFileSync(path.join(gd, 'index'), 'not an index'); // git status now fails
-  const old = Date.now() / 1000 - 2 * 86400;
-  fs.utimesSync(path.join(gd, 'index'), old, old);
-  const r = w.run();
-  assert.equal(r.status, 0, r.stderr);
-  assert.ok(fs.existsSync(w.free));
-});
-
-test('tmp-churn deletes old files inside busy roots and keeps new ones; emergency mode takes younger files; DRY changes nothing', (t) => {
-  const dir = tmp(t);
-  const root = path.join(dir, 'claude-x');
-  const mk = (rel, minutesOld) => {
-    const f = path.join(root, rel);
-    fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(f, 'x');
-    const at = Date.now() / 1000 - minutesOld * 60;
-    fs.utimesSync(f, at, at);
-    return f;
-  };
-  const old = mk('task-1/out.log', 300);
-  const recent = mk('task-2/out.log', 5);
-  const mid = mk('task-3/out.log', 30);
-  for (const d of ['task-1', 'task-3']) { const at = Date.now() / 1000 - 300 * 60; fs.utimesSync(path.join(root, d), at, at); }
-  const run = (env = {}) => spawnSync('/bin/sh', [path.join(KIT, 'maint', 'tmp-churn.sh')], {
-    encoding: 'utf8', env: { PATH: process.env.PATH, HOME: dir, T3ORQ_HOME: path.join(dir, 'orq'), MAINT_CHURN_ROOTS: root, ORQ_MAINT_LOWPRIO: '1', ...env },
-  });
-  const dry = run({ DRY: '1' });
-  assert.match(dry.stdout, /claude-x: 1 files idle over 120 min/);
-  assert.ok(fs.existsSync(old));
-  const r = run();
+  const recent = path.join(w.temp, 'live', 'recent.log');
+  fs.mkdirSync(path.dirname(recent), { recursive: true });
+  fs.writeFileSync(recent, 'x');
+  const mid = path.join(w.temp, 'live', 'mid.log');
+  fs.writeFileSync(mid, 'x');
+  fs.utimesSync(mid, Date.now() / 1000 - 30 * 60, Date.now() / 1000 - 30 * 60);
+  const held = path.join(w.temp, 'live', 'held.log');
+  mkOld(held);
+  const holder = spawn('/bin/sh', ['-c', 'exec 3<"$0"; sleep 60', held], { stdio: 'ignore' });
+  t.after(() => holder.kill('SIGKILL'));
+  await new Promise((r) => { setTimeout(r, 300); });
+  const churn = (env = {}) => w.run('tmp-churn.sh', { MAINT_CHURN_ROOTS: w.temp, ...env });
+  const dry = churn({ DRY: '1' });
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.match(dry.stdout, /temp: 1 files idle over 120 min/); // old-scratch/f only
+  assert.ok(fs.existsSync(path.join(w.temp, 'old-scratch', 'f')));
+  const r = churn();
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /tmp-churn removed=1 files/);
-  assert.deepEqual([fs.existsSync(old), fs.existsSync(recent), fs.existsSync(mid)], [false, true, true]);
-  assert.equal(fs.existsSync(root), true); // the root stays
-  const emergency = run({ EMERGENCY: '0', EMERGENCY_AGE: '10' }); // every filesystem counts as out of inodes
+  assert.equal(fs.existsSync(path.join(w.temp, 'old-scratch', 'f')), false); // its directory, now fresh, goes on a later run
+  for (const p of [path.join(w.checkout, 'uncommitted.txt'), path.join(w.temp, 'old-parent', 'precious-1', 'f'), path.join(w.leasedDir, 'f'), held, recent, mid]) {
+    assert.ok(fs.existsSync(p), p);
+  }
+  const emergency = churn({ EMERGENCY: '0', EMERGENCY_AGE: '10' }); // every filesystem counts as out of inodes
   assert.match(emergency.stdout, /removed=1 files/);
-  assert.deepEqual([fs.existsSync(recent), fs.existsSync(mid)], [true, false]);
+  assert.deepEqual([fs.existsSync(recent), fs.existsSync(mid), fs.existsSync(held)], [true, false, true]);
+  const link = path.join(w.dir, 'link-root');
+  fs.symlinkSync(w.temp, link);
+  assert.match(churn({ MAINT_CHURN_ROOTS: link }).stdout, /removed=0 files/); // a linked root is not searched
 });

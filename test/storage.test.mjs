@@ -25,12 +25,12 @@ function fakeFs(table) {
 
 test('readStorage: free bytes and inodes once per filesystem; a missing root or one with no inode table is handled', () => {
   const table = {
-    '/home/u/.t3orq': disk(1, 40, 50), '/home/u/.t3/worktrees': disk(1, 40, 50), '/tmp': disk(2, 50, 3), '/btrfs': disk(3, 20, 0, 0),
+    '/h/.t3orq': disk(1, 40, 50), '/h/.t3/worktrees': disk(1, 40, 50), '/tmp': disk(2, 50, 3), '/btrfs': disk(3, 20, 0, 0),
   };
-  const list = readStorage(['/home/u/.t3orq', '/home/u/.t3/worktrees', '/tmp', '/gone', '/btrfs'], fakeFs(table));
+  const list = readStorage(['/h/.t3orq', '/h/.t3/worktrees', '/tmp', '/gone', '/btrfs'], fakeFs(table));
   assert.deepEqual(list, [
     {
-      path: '/home/u/.t3orq', freeBytes: 400 * 4096, bytesPct: 40, freeInodes: 500, inodesPct: 50,
+      path: '/h/.t3orq', freeBytes: 400 * 4096, bytesPct: 40, freeInodes: 500, inodesPct: 50,
     },
     {
       path: '/tmp', freeBytes: 500 * 4096, bytesPct: 50, freeInodes: 30, inodesPct: 3,
