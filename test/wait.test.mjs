@@ -821,6 +821,7 @@ test('wait in continuous mode: origin\'s base moved past a passed head: wait mer
   const git = (...a) => spawnSync('git', a, { cwd: p.repo, encoding: 'utf8' });
   const moved = git('commit-tree', `${green}^{tree}`, '-p', green, '-m', 'other machine').stdout.trim();
   assert.equal(git('update-ref', 'refs/remotes/origin/main', moved).status, 0);
+  sim.now += 10 * 60_000; // past finalDebounceMinutes: the merged head gets its own final run
   const r = await orq(['wait'], p, sim);
   assert.equal(r.code, 0, r.err);
   const st = await readState(p.repo);

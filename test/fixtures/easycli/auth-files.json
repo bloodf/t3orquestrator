@@ -1,0 +1,11 @@
+{
+  "files": [
+    { "id": "codex-1", "auth_index": "a1", "name": "codex-aaaa1111-alice.dev@example.test-pro.json", "type": "codex", "provider": "codex", "label": "", "status": "active", "disabled": false, "unavailable": false, "email": "alice.dev@example.test", "account_type": "chatgpt" },
+    { "id": "codex-2", "auth_index": "a2", "name": "codex-bbbb2222-bob.ops@example.test-plus.json", "type": "codex", "provider": "codex", "status": "active", "disabled": false, "email": "bob.ops@example.test" },
+    { "id": "claude-1", "auth_index": "a3", "name": "claude-cccc3333-alice.dev01@example.test.json", "type": "claude", "provider": "claude", "status": "active", "disabled": false, "email": "alice.dev01@example.test" },
+    { "id": "ag-1", "auth_index": "a4", "name": "antigravity-shopsite.json", "type": "antigravity", "provider": "antigravity", "status": "active", "disabled": false, "email": "shopsite@example.test", "project_id": "demo-project-123" },
+    { "id": "ag-2", "auth_index": "a5", "name": "antigravity-old.json", "type": "antigravity", "provider": "antigravity", "status": "disabled", "disabled": true, "email": "old@example.test" },
+    { "id": "xai-1", "auth_index": "a6", "name": "xai-alice.dev.json", "type": "xai", "provider": "xai", "status": "active", "disabled": false, "email": "alice.dev@example.test" },
+    { "id": "gem-1", "auth_index": "a7", "name": "gemini-cli.json", "type": "gemini", "provider": "gemini", "status": "active", "disabled": false, "email": "alice.dev@example.test" }
+  ]
+}

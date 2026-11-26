@@ -280,5 +280,23 @@ test('machine gate budget: unit gates and the rolling final stop at gateCap coun
   // other modes: the final gate takes a project slot, and the machine budget too
   const allIn = [...aInC, ...through('b', D)];
   assert.deepEqual(types(go(allIn, { config: {}, machineGates: { cap: 2, running: 1 } })), ['final-gate']);
-  assert.deepEqual(types(go(allIn, { config: {}, machineGates: { cap: 2, running: 2 } })), []);
+  assert.deepEqual(types(go(allIn, { config: {}, machineGates: { cap: 2, running: 2 } })), []);});
+
+test('final debounce: a run waits for a settled head and at most one per finalDebounceMinutes; a head that never settles still runs', () => {
+  const MIN = 60_000;
+  const at = (e, t) => ({ ...e, at: NOW - t * MIN });
+  const aIn = aInC.map((e) => at(e, 5)); // integrated 5 min ago, no final run yet
+  const bGating = through('b', D).slice(0, 3).map((e) => at(e, 1));
+  assert.equal(finals(go([...aIn, ...bRunning])), 1, 'settled head: runs');
+  assert.equal(finals(go([...aIn, ...bGating])), 0, 'b is in its gate: the head may move again');
+  const bPassed = through('b', D).slice(0, 4).map((e) => at(e, 1));
+  assert.equal(finals(go([...aIn, ...bPassed], { gates: { b: { running: false, result: null } } })), 0, 'b waits to merge');
+  // the last run started 3 min ago: the next waits for the window, then runs
+  const recent = [...aIn, at(finalStart(C), 3), at(finalGated(C), 1), ...through('b', D).map((e) => at(e, 1))];
+  assert.equal(finals(go(recent)), 0);
+  assert.equal(finals(go(recent, { now: NOW + 8 * MIN })), 1);
+  assert.equal(finals(go(recent, { config: { continuous: true, finalDebounceMinutes: 2 } })), 1);
+  // a stream of gates for an hour after the first merge: the run goes anyway
+  const old = aInC.map((e) => at(e, 61));
+  assert.equal(finals(go([...old, ...bGating])), 1);
 });

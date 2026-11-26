@@ -131,6 +131,7 @@ T3 Code probes each provider instance's usage limits itself (codex, Claude, Anti
 - The usage cooldowns are computed on every read and never stored in the registry. `orq wait` reports `idle: … retry at <reset>` when every model a unit may use is at its limit.
 - One instance is one account in T3. An instance behind a proxy that rotates several accounts gets no usage from T3 (its probe fails), so it is routed as before.
 - Codex reset credits (`resetCredits`) are not counted: redeeming one is a step the user takes in T3.
+- On a machine that runs EasyCLIProxyAPI, or whose peer does, each mapped account's real quota replaces T3's reading for that instance, refreshed by `orq wait` at most every 5 minutes, and a real reading ends a limit hold on every provider, not only Antigravity. An instance in `creditInstances` whose credit balance EasyCLI reads as 0 counts its windows again. See [Real account quota](easycli-quota.md).
 
 ## Failure ladders
 
@@ -209,7 +210,7 @@ Exit code 4 with `no valid plan; run "orq plan check"` means the plan failed val
 
 With `autonomy` set to `continuous`, the final gate does not wait for the whole plan. It starts when at least one unit is integrated, no final run is in flight, the integration head has no final verdict yet, It runs on a slot of its own: unit gates keep all `gateConcurrency` slots (in the other modes the final gate takes one of them). A final run is never discarded or restarted when the head moves: its result is recorded for the head it started on (the FINAL `gate-started` event's `headSha`), and the next run starts on the newer head. Lost runs are counted per head: two lost runs on the current head are `final gate could not complete`; a lost run on an older head is not counted against a newer one.
 
-The latest head whose final run did not fail is `green`, recorded with that run's verdict and `checks.full` command; only a `pass` is ready to ship. `orq unit retry integration` clears the record that a failing head was reported, so a retried head that fails again is reported again. `orq wait` returns `ship-ready:` while `green` is not shipped, and `orq ship` ships it (see [ship](commands.md#ship)). A failing head is reported once with an early `final-fail:` while units are still open. `done:` waits until every unit is integrated or dropped and the integration head is shipped. Measured before this mode: 2 merged pull requests in 13 hours across two projects, because every pull request waited for its whole plan and then for serial final-check and review rounds.
+The latest head whose final run did not fail is `green`, recorded with that run's verdict and `checks.full` command; only a `pass` is ready to ship. `orq unit retry integration` clears the record that a failing head was reported, so a retried head that fails again is reported again. `orq wait` returns `ship-ready:` while `green` is not shipped, and `orq ship` ships it (see [ship](commands.md#ship)). A failing head is reported once with an early `final-fail:` while units are still open. `done:` waits until every unit is integrated or dropped and the integration head is shipped. A final run is debounced: it starts only once the head has settled (no unit gating or passed and waiting to merge) and at most every `finalDebounceMinutes` (default 10); a stream of units that never lets the head settle still gets a run 6 windows after the last one. It gets `ORQ_BASE_SHA` (the `green` head) and `ORQ_CHANGED_FILES`/`ORQ_DELETED_FILES` for what changed since then, so `checks.full` may narrow itself; with no `green` head yet it gets neither and runs everything. Measured before this mode: 2 merged pull requests in 13 hours across two projects, because every pull request waited for its whole plan and then for serial final-check and review rounds.
 
 ## Gates on a machine
 
@@ -231,6 +232,7 @@ Project settings, set with `orq config set <key> <n>`:
 | `leaseTtlMinutes` | 30 |
 | `finalTimeoutMinutes` | 60 (the limit of each step of the final gate, `checks.setup` and `checks.full`; at most 1440; a unit gate's steps have `unitTimeoutMinutes`) |
 | `unitTimeoutMinutes` | 20 (the limit of each step of a unit gate; at most 1440) |
+| `finalDebounceMinutes` | 10 (continuous mode: a final run starts only when no unit is in its gate or waiting to merge, and at most once per this many minutes; a head that never settles still gets its run after 6 times this since the last run) |
 
 ## Known limits
 
