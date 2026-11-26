@@ -22,6 +22,28 @@ safe_under() {
   return 1
 }
 
+# The real path of a cleanup root, or failure. A root is never reached through a symlink, with one fixed exception: the
+# system temp aliases (/tmp, /var/tmp, /private/tmp, /dev/shm, $TMPDIR), which may be links themselves (/tmp to
+# /private/tmp on macOS); below such an alias nothing may be a link either. A glob that matched a link to elsewhere
+# (a root named like scratch that points at a home folder) is skipped.
+resolve_root() {
+  _r=${1%/}
+  case "$_r" in /?*) ;; *) return 1 ;; esac
+  case "$_r" in $CTRL_GLOB) return 1 ;; esac
+  [ -d "$_r" ] || return 1
+  _want=$_r
+  for _a in /tmp /var/tmp /private/tmp /dev/shm "${TMPDIR%/}"; do
+    case "$_a" in /?*) ;; *) continue ;; esac
+    case "$_r" in "$_a"|"$_a"/*) ;; *) continue ;; esac
+    _ca=$(cd "$_a" 2>/dev/null && pwd -P) || return 1
+    _want="$_ca${_r#"$_a"}"
+    break
+  done
+  _real=$(cd "$_r" 2>/dev/null && pwd -P) || return 1
+  [ "$_real" = "$_want" ] || return 1
+  printf '%s\n' "$_real"
+}
+
 # The real path of PATH without following PATH itself when it is a symlink (deleting a link never touches its target).
 canon_path() {
   _d=$(dirname "$1")

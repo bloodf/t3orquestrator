@@ -75,12 +75,9 @@ skip_args() {
 
 total=0
 churn() {
-  r=$1
-  [ -d "$r" ] && [ ! -L "$r" ] || return 0
+  [ -L "$1" ] && return 0 # a linked root is never searched, not even a temp alias's child
+  r=$(resolve_root "$1") || return 0
   [ "$(stat -c %u "$r" 2>/dev/null || stat -f %u "$r" 2>/dev/null)" = "$me" ] || return 0 # another user's root
-  r=$(cd "$r" && pwd -P) || return 0
-  case "$r" in /*) ;; *) return 0 ;; esac
-  case "$r" in $CTRL_GLOB) return 0 ;; esac
   under_kept "$r" && return 0
   age=$AGE
   used=$(inodes_used "$r")

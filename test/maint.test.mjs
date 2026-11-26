@@ -383,3 +383,25 @@ test('a name with a newline never splits into another path: bait\\nvictim leaves
     assert.equal(fs.existsSync(path.join(w.temp, 'old-scratch', 'f')), false, `${script} still cleans`);
   }
 });
+
+test('a cleanup root that is a symlink to elsewhere is never followed; a root below a linked parent neither', (t) => {
+  for (const script of ['disk-clean.sh', 'tmp-churn.sh']) {
+    const w = world(t);
+    const outside = path.join(w.dir, 'documents');
+    mkOld(path.join(outside, 'important', 'f'), 'data');
+    const at = OLD();
+    fs.utimesSync(path.join(outside, 'important'), at, at);
+    const linked = path.join(w.dir, 'orq-linked-root');
+    fs.symlinkSync(outside, linked);
+    const viaParent = path.join(w.dir, 'docs-link');
+    fs.symlinkSync(w.dir, viaParent); // documents reached through a linked parent directory
+    for (const root of [linked, `${linked}/`, path.join(viaParent, 'documents')]) {
+      const r = w.run(script, { MAINT_TEMP_ROOTS: root, MAINT_CHURN_ROOTS: root });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(fs.readFileSync(path.join(outside, 'important', 'f'), 'utf8'), 'data', `${script} ${root}`);
+    }
+    const plain = w.run(script, { MAINT_TEMP_ROOTS: w.temp, MAINT_CHURN_ROOTS: w.temp });
+    assert.equal(plain.status, 0, plain.stderr);
+    assert.equal(fs.existsSync(path.join(w.temp, 'old-scratch', 'f')), false, `${script} still cleans a real root`);
+  }
+});

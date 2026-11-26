@@ -47,11 +47,7 @@ act_rm() { # remove a path, or say what would go
 }
 
 clean_root() {
-  r=$1
-  [ -d "$r" ] || return 0
-  [ -L "$r" ] && r=$(cd "$r" 2>/dev/null && pwd -P) # a linked root is cleaned at its real place
-  case "$r" in /*) ;; *) return 0 ;; esac
-  case "$r" in $CTRL_GLOB) return 0 ;; esac
+  r=$(resolve_root "$1") || return 0 # never a root reached through a link (but the system temp aliases)
   under_kept "$r" && return 0 # the root itself is kept, or is a repository: nothing under it is scratch
   find "$r" -mindepth 1 -maxdepth 1 -user "$me" -mmin +"$AGE" ! -path "$CTRL_GLOB" 2>/dev/null | while IFS= read -r e; do
     safe_under "$e" "$r" || continue # never a split line, never outside the root
