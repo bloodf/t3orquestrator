@@ -116,6 +116,13 @@ test('watchdog: --dry-run says what it would do and changes nothing', async (t) 
   const [line] = await tick(w, NOW, { dryRun: true });
   assert.match(line, /would start a fresh orchestrator on pb big/);
   assert.deepEqual([w.started, await read(path.join(w.dir, 'thread')), await read(path.join(w.home, 'watchdog', 'log'))], [[], 'old-thread', null]);
+  // no lock taken (a stale one is left alone) and no files written in the watchdog folder
+  const lock = path.join(w.home, 'watchdog', 'lock');
+  await fs.mkdir(lock, { recursive: true });
+  const before = await fs.readdir(path.join(w.home, 'watchdog'));
+  await tick(w, NOW + MIN, { dryRun: true });
+  assert.deepEqual(await fs.readdir(path.join(w.home, 'watchdog')), before);
+  assert.ok((await fs.stat(lock)).isDirectory());
 });
 
 test('watchdog install: the launchd agent and the tagged crontab line, replaced in place', () => {
