@@ -235,8 +235,9 @@ function world(t) {
   fs.writeFileSync(path.join(orqHome, 'leases', 'th1.json'), JSON.stringify({
     threadId: 'th1', project: alias, unit: 'a', instance: 'i', model: 'm', startedAt: NOW, reservation: true,
   }));
-  const run = (script, env = {}) => spawnSync('/bin/sh', [path.join(KIT, 'maint', script)], {
+  const run = (script, env = {}, cwd = dir) => spawnSync('/bin/sh', [path.join(KIT, 'maint', script)], {
     encoding: 'utf8',
+    cwd,
     env: {
       PATH: process.env.PATH, HOME: home, T3ORQ_HOME: orqHome, T3CODE_CLI_PATH: bin, TMPDIR: dir, MAINT_TEMP_ROOTS: temp, MAINT_DOCKER: '0', ORQ_MAINT_LOWPRIO: '1', ...env,
     },
@@ -359,5 +360,26 @@ test('with no maint-skip file, or an empty one, tmp-churn still deletes old scra
     assert.match(r.stdout, /removed=\d+ files/);
     assert.equal(fs.existsSync(path.join(w.temp, 'old-scratch', 'f')), false, JSON.stringify(skip));
     assert.ok(fs.existsSync(path.join(w.checkout, 'uncommitted.txt')));
+  }
+});
+
+test('a name with a newline never splits into another path: bait\\nvictim leaves victim alone, in the working directory and in the root', (t) => {
+  for (const script of ['disk-clean.sh', 'tmp-churn.sh']) {
+    const w = world(t);
+    const cwd = path.join(w.dir, 'cwd');
+    fs.mkdirSync(cwd);
+    fs.writeFileSync(path.join(cwd, 'victim'), 'keep me');
+    mkOld(path.join(w.temp, 'victim'), 'keep me too'); // the second half of the split, as a sibling in the root
+    mkOld(path.join(w.temp, 'bait\nvictim'), 'bait');
+    mkOld(path.join(w.temp, 'odd\ndir', 'f'), 'x');
+    mkOld(path.join(w.temp, 'tab\tname'), 'x');
+    const before = fs.readFileSync(path.join(w.temp, 'victim'), 'utf8');
+    const r = w.run(script, { MAINT_CHURN_ROOTS: w.temp }, cwd);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(fs.readFileSync(path.join(cwd, 'victim'), 'utf8'), 'keep me', script);
+    for (const name of ['bait\nvictim', path.join('odd\ndir', 'f'), 'tab\tname']) assert.ok(fs.existsSync(path.join(w.temp, name)), `${script}: ${JSON.stringify(name)}`);
+    // the real old file named victim is ordinary scratch: it may go, but only as itself
+    if (fs.existsSync(path.join(w.temp, 'victim'))) assert.equal(fs.readFileSync(path.join(w.temp, 'victim'), 'utf8'), before);
+    assert.equal(fs.existsSync(path.join(w.temp, 'old-scratch', 'f')), false, `${script} still cleans`);
   }
 });

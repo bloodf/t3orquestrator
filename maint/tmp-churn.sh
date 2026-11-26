@@ -48,14 +48,16 @@ inodes_used() {
 
 # Lines of $1 that are not protected: not a kept path, under one or holding one; not inside a repository found in the
 # root (repos: one real path per line); not held by a process (exact match: an open file, a working directory).
+# Only absolute paths strictly under ROOT ($2) with no control character pass (a split line never does).
 filter() {
-  awk -v keep="$work/keep" -v repos="$work/repos" -v busy="$work/busy" '
+  awk -v root="$2" -v keep="$work/keep" -v repos="$work/repos" -v busy="$work/busy" '
     BEGIN {
       while ((getline l < keep) > 0) if (l != "") k[++nk] = l
       while ((getline l < repos) > 0) if (l != "") k[++nk] = l
       while ((getline l < busy) > 0) b[l] = 1
     }
     {
+      if (index($0, root "/") != 1 || length($0) <= length(root) + 1 || $0 ~ /[\001-\037\177]/) next
       if ($0 in b) next
       for (i = 1; i <= nk; i++) {
         if ($0 == k[i] || index($0, k[i] "/") == 1 || index(k[i], $0 "/") == 1) next
@@ -77,6 +79,8 @@ churn() {
   [ -d "$r" ] && [ ! -L "$r" ] || return 0
   [ "$(stat -c %u "$r" 2>/dev/null || stat -f %u "$r" 2>/dev/null)" = "$me" ] || return 0 # another user's root
   r=$(cd "$r" && pwd -P) || return 0
+  case "$r" in /*) ;; *) return 0 ;; esac
+  case "$r" in $CTRL_GLOB) return 0 ;; esac
   under_kept "$r" && return 0
   age=$AGE
   used=$(inodes_used "$r")
@@ -87,16 +91,16 @@ churn() {
   while IFS= read -r g; do [ -n "$g" ] || continue; set -- "$@" ! -path "$g" ! -path "$g/*"; done <<EOF
 $(skip_args)
 EOF
-  find "$r" -xdev -mindepth 1 -type f -user "$me" -mmin +"$age" "$@" 2>/dev/null > "$work/files.all"
-  filter "$work/files.all" > "$work/files"
+  find "$r" -xdev -mindepth 1 -type f -user "$me" -mmin +"$age" ! -path "$CTRL_GLOB" "$@" 2>/dev/null > "$work/files.all"
+  filter "$work/files.all" "$r" > "$work/files"
   n=$(wc -l < "$work/files" | tr -d ' ')
   if [ -n "$DRY" ]; then
     echo "$r: $n files idle over $age min (inodes ${used:-?}% used)"
     return 0
   fi
   tr '\n' '\0' < "$work/files" | xargs -0 rm -f -- 2>/dev/null
-  find "$r" -xdev -mindepth 1 -depth -type d -user "$me" -empty -mmin +"$age" "$@" 2>/dev/null > "$work/dirs.all"
-  filter "$work/dirs.all" | while IFS= read -r d; do rmdir -- "$d" 2>/dev/null; done
+  find "$r" -xdev -mindepth 1 -depth -type d -user "$me" -empty -mmin +"$age" ! -path "$CTRL_GLOB" "$@" 2>/dev/null > "$work/dirs.all"
+  filter "$work/dirs.all" "$r" | while IFS= read -r d; do rmdir -- "$d" 2>/dev/null; done
   total=$((total + n))
 }
 

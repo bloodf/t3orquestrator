@@ -50,9 +50,11 @@ clean_root() {
   r=$1
   [ -d "$r" ] || return 0
   [ -L "$r" ] && r=$(cd "$r" 2>/dev/null && pwd -P) # a linked root is cleaned at its real place
-  [ -n "$r" ] || return 0
+  case "$r" in /*) ;; *) return 0 ;; esac
+  case "$r" in $CTRL_GLOB) return 0 ;; esac
   under_kept "$r" && return 0 # the root itself is kept, or is a repository: nothing under it is scratch
-  find "$r" -mindepth 1 -maxdepth 1 -user "$me" -mmin +"$AGE" 2>/dev/null | while IFS= read -r e; do
+  find "$r" -mindepth 1 -maxdepth 1 -user "$me" -mmin +"$AGE" ! -path "$CTRL_GLOB" 2>/dev/null | while IFS= read -r e; do
+    safe_under "$e" "$r" || continue # never a split line, never outside the root
     case "$(basename "$e")" in
       PostgreSQL.*|tmux-*|systemd-private-*|.X11-unix|.ICE-unix|.font-unix|snap-private-tmp|ssh-*|diskclean.*|com.apple.*|launchd*|*.sock) continue ;;
     esac

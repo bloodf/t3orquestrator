@@ -10,6 +10,18 @@
 #
 # $T3ORQ_HOME/maint-skip: one shell glob per line, matched against real paths (for example */t3-home.backup-*).
 
+# Paths are read one per line, so a name with a newline (or any control character) could split into another path:
+# every candidate is found with `! -path "$CTRL_GLOB"` and checked with safe_under before anything is deleted.
+LC_ALL=C; export LC_ALL # byte-wise globs and ranges in find, case and awk
+CTRL_GLOB=$(printf '*[\001-\037\177]*')
+
+# PATH is absolute, strictly under ROOT, and has no control character.
+safe_under() {
+  case "$1" in $CTRL_GLOB) return 1 ;; esac
+  case "$1" in "$2"/?*) return 0 ;; esac
+  return 1
+}
+
 # The real path of PATH without following PATH itself when it is a symlink (deleting a link never touches its target).
 canon_path() {
   _d=$(dirname "$1")
