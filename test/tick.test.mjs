@@ -134,20 +134,23 @@ test('rule 2: a lost gate is restarted once, then needs judgment; concurrency li
   assert.deepEqual(evTypes(twice), ['needs-judgment:a']);
   assert.equal(twice.events[0].reason, 'gate could not complete');
   assert.deepEqual(twice.report.judgment, [{ unit: 'a', reason: 'gate could not complete' }]);
-  const two = go([...doneA, launched('b'), ended('b'), launched('c'), ended('c')]);
+  const one = { gateConcurrency: 1 };
+  const two = go([...doneA, launched('b'), ended('b'), launched('c'), ended('c')], { config: one });
   assert.deepEqual(r2(two), ['gate-start:b']);
   const busy = go([...doneA, launched('b'), ended('b'), gateStarted('b'), launched('c'), ended('c')], {
-    gates: { b: { running: true, result: null } },
+    gates: { b: { running: true, result: null } }, config: one,
   });
   assert.deepEqual(r2(busy), []);
   assert.deepEqual(r2(go([...doneA, launched('b'), ended('b'), launched('c'), ended('c')], { config: { gateConcurrency: 2 } })), ['gate-start:b', 'gate-start:c']);
+  // default gateConcurrency is 2
+  assert.deepEqual(r2(go([...doneA, launched('b'), ended('b'), launched('c'), ended('c')])), ['gate-start:b', 'gate-start:c']);
 });
 function r2(r) { return r.actions.filter((a) => a.type === 'gate-start').map((a) => `${a.type}:${a.unit}`); }
 
 test('fix units go first: a fix unit takes the free gate slot and the free launch slot before earlier units', () => {
   const fixLast = { goal: 'g', units: [unit('a'), unit('b'), unit('f2', { job: 'fix' }), unit('c'), unit('f', { job: 'fix' })] };
   const waiting = [launched('b'), ended('b'), launched('f'), ended('f'), launched('f2'), ended('f2')];
-  assert.deepEqual(r2(go(waiting, { plan: fixLast })), ['gate-start:f2']);
+  assert.deepEqual(r2(go(waiting, { plan: fixLast, config: { gateConcurrency: 1 } })), ['gate-start:f2']);
   // the plan's own order still holds among fix units and among the others
   assert.deepEqual(r2(go(waiting, { plan: fixLast, config: { gateConcurrency: 3 } })), ['gate-start:f2', 'gate-start:f', 'gate-start:b']);
   const one = go(doneA, { plan: fixLast, cap: 1 });
