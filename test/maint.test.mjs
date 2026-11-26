@@ -405,3 +405,22 @@ test('a cleanup root that is a symlink to elsewhere is never followed; a root be
     assert.equal(fs.existsSync(path.join(w.temp, 'old-scratch', 'f')), false, `${script} still cleans a real root`);
   }
 });
+
+test('a $TMPDIR that is a link to an outside folder is no temp alias: none of its forms is cleaned', (t) => {
+  for (const script of ['disk-clean.sh', 'tmp-churn.sh']) {
+    const w = world(t);
+    const outside = path.join(w.dir, 'documents');
+    mkOld(path.join(outside, 'important', 'f'), 'data');
+    mkOld(path.join(outside, 'node-compile-cache', 'g'), 'cache data');
+    const at = OLD();
+    for (const d of ['important', 'node-compile-cache']) fs.utimesSync(path.join(outside, d), at, at);
+    const tmpLink = path.join(w.dir, 'tmp-link');
+    fs.symlinkSync(outside, tmpLink);
+    for (const root of [tmpLink, `${tmpLink}/`, path.join(tmpLink, 'node-compile-cache')]) {
+      const r = w.run(script, { TMPDIR: tmpLink, MAINT_TEMP_ROOTS: root, MAINT_CHURN_ROOTS: root });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(fs.readFileSync(path.join(outside, 'important', 'f'), 'utf8'), 'data', `${script} ${root}`);
+      assert.equal(fs.readFileSync(path.join(outside, 'node-compile-cache', 'g'), 'utf8'), 'cache data', `${script} ${root}`);
+    }
+  }
+});

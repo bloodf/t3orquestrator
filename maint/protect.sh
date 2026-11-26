@@ -23,17 +23,29 @@ safe_under() {
 }
 
 # The real path of a cleanup root, or failure. A root is never reached through a symlink, with one fixed exception: the
-# system temp aliases (/tmp, /var/tmp, /private/tmp, /dev/shm, $TMPDIR), which may be links themselves (/tmp to
-# /private/tmp on macOS); below such an alias nothing may be a link either. A glob that matched a link to elsewhere
-# (a root named like scratch that points at a home folder) is skipped.
+# platform's own temp aliases, which may be links themselves. Always /tmp, /var/tmp, /private/tmp and /dev/shm (/tmp
+# is a link to /private/tmp on macOS); $TMPDIR only on macOS and only when its real path is exactly the user's system
+# temp dir (`getconf DARWIN_USER_TEMP_DIR`, under /private/var/folders/). Below an alias nothing may be a link either. Any other root (a $TMPDIR that points at a
+# documents folder, a glob match that is a link to elsewhere) must resolve to itself, or it is skipped.
+temp_aliases() {
+  printf '%s\n' /tmp /var/tmp /private/tmp /dev/shm
+  [ "$(uname -s)" = Darwin ] || return 0
+  _t=${TMPDIR%/}
+  case "$_t" in /?*) ;; *) return 0 ;; esac
+  _rt=$(cd "$_t" 2>/dev/null && pwd -P) || return 0
+  _sys=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null) || return 0
+  _rs=$(cd "$_sys" 2>/dev/null && pwd -P) || return 0
+  case "$_rs/" in /private/var/folders/?*/) ;; *) return 0 ;; esac
+  [ "$_rt" = "$_rs" ] && printf '%s\n' "$_t" # exactly this user's system temp dir, nothing below or beside it
+}
+
 resolve_root() {
   _r=${1%/}
   case "$_r" in /?*) ;; *) return 1 ;; esac
   case "$_r" in $CTRL_GLOB) return 1 ;; esac
   [ -d "$_r" ] || return 1
   _want=$_r
-  for _a in /tmp /var/tmp /private/tmp /dev/shm "${TMPDIR%/}"; do
-    case "$_a" in /?*) ;; *) continue ;; esac
+  for _a in $(temp_aliases); do
     case "$_r" in "$_a"|"$_a"/*) ;; *) continue ;; esac
     _ca=$(cd "$_a" 2>/dev/null && pwd -P) || return 1
     _want="$_ca${_r#"$_a"}"
