@@ -3,7 +3,7 @@
 #
 #   protect_init     reads the keep list (`orq maint keep`), the maint-skip globs and the paths processes hold. It
 #                    fails (returns 1) when the keep list cannot be learned: the caller then deletes nothing.
-#   under_kept PATH  true when PATH is, or is under, a kept path or a maint-skip match, or is a repository root
+#   under_kept PATH  true when PATH is, or is under, a kept path or a maint-skip match, or is inside a repository
 #   protected PATH   true when PATH must stay: it is, is under, or holds a kept path; it matches a maint-skip glob, is
 #                    under one, or holds a match; it is or holds a git repository or worktree (.git); a process holds
 #                    it or something in it.
@@ -26,6 +26,20 @@ canon_glob() {
   [ -n "$_dir" ] || { printf '%s\n' "$_g"; return 0; }
   _real=$(cd "$_dir" 2>/dev/null && pwd -P) || { printf '%s\n' "$_g"; return 0; }
   printf '%s%s\n' "$_real" "${_g#"$_dir"}"
+}
+
+# A literal entry (no wildcard) that exists, fully resolved, its last component too: a symlink protects its target.
+canon_target() {
+  case "$1" in *[*?[]*) return 0 ;; esac
+  [ -e "$1" ] || return 0
+  if [ -d "$1" ]; then (cd "$1" 2>/dev/null && pwd -P); return 0; fi
+  if command -v realpath >/dev/null 2>&1; then realpath "$1" 2>/dev/null; return 0; fi
+  _t=$1
+  while [ -L "$_t" ]; do
+    _l=$(readlink "$_t")
+    case "$_l" in /*) _t=$_l ;; *) _t=$(dirname "$_t")/$_l ;; esac
+  done
+  canon_path "$_t"
 }
 
 protect_init() {
@@ -61,6 +75,7 @@ protect_init() {
       [ -n "$g" ] || continue
       printf '%s\n' "$g" >> "$PROTECT_WORK/skip"
       canon_glob "$g" >> "$PROTECT_WORK/skip"
+      canon_target "$g" >> "$PROTECT_WORK/skip"
     done < "$_home/maint-skip"
   fi
   return 0
@@ -89,7 +104,14 @@ under_kept() {
     # shellcheck disable=SC2254
     case "$_p" in $g|$g/*) return 0 ;; esac
   done < "$PROTECT_WORK/skip"
-  [ -e "$_p/.git" ] && return 0 # a repository is never a temp root
+  # a repository, or a directory anywhere inside one, is never a temp root
+  _a=$_p
+  while :; do
+    [ -e "$_a/.git" ] && return 0
+    [ "$_a" = / ] || [ -z "$_a" ] && break
+    _a=$(dirname "$_a")
+  done
+  git -C "$_p" rev-parse --show-toplevel >/dev/null 2>&1 && return 0
   return 1
 }
 

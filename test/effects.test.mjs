@@ -643,7 +643,7 @@ test('machine gate budget: a gate starts only while gateCap has room over every 
   assert.equal(defaultGateCap(32), 4);
 });
 
-test('gate leases: a reused pid, an expired reservation and a dead owner hold nothing; an unreadable lease counts; the gate confirms its own', async (t) => {
+test('gate leases: a reused pid and an expired reservation hold nothing; a fresh reservation counts for its whole window, even after its orq wait died; an unreadable lease counts; the gate confirms its own', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orq-gl-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const alive = new Set([10, 20, 30]);
@@ -656,11 +656,15 @@ test('gate leases: a reused pid, an expired reservation and a dead owner hold no
   }); // never confirmed, older than the reservation window
   await writeGateLease(dir, {
     id: 'c'.repeat(16), reservation: true, owner: 99, project: '/p', unit: 'w', startedAt: NOW,
-  }); // its orq wait died
+  }); // its orq wait died after the spawn, before the gate confirmed: the gate may be running
   await writeGateLease(dir, {
     id: 'd'.repeat(16), reservation: true, owner: 30, ownerStart: 'start-30', project: '/p', unit: 'x', startedAt: NOW,
   });
-  assert.deepEqual((await liveGateLeases(dir, deps)).map((l) => l.unit), ['x']);
+  assert.deepEqual((await liveGateLeases(dir, deps)).map((l) => l.unit), ['w', 'x']);
+  const later = { ...deps, now: NOW + 2 * 60_000 - 1 };
+  assert.deepEqual((await liveGateLeases(dir, later)).map((l) => l.unit), ['w', 'x']); // the whole window
+  assert.deepEqual((await liveGateLeases(dir, { ...deps, now: NOW + 2 * 60_000 })).map((l) => l.unit), []);
+  await fs.rm(path.join(dir, `${'c'.repeat(16)}.json`));
   await confirmGateLease(dir, 'd'.repeat(16), { pid: 20, pidStart: 'start-20', startedAt: NOW + 5 });
   const confirmed = JSON.parse(await fs.readFile(path.join(dir, `${'d'.repeat(16)}.json`), 'utf8'));
   assert.deepEqual([confirmed.pid, confirmed.reservation, confirmed.startedAt, confirmed.unit], [20, undefined, NOW, 'x']);

@@ -84,7 +84,7 @@ churn() {
   # repositories and worktrees inside the root: nothing in them is scratch
   find "$r" -xdev -name .git 2>/dev/null | sed 's#/\.git$##' > "$work/repos"
   set --
-  while IFS= read -r g; do set -- "$@" ! -path "$g" ! -path "$g/*"; done <<EOF
+  while IFS= read -r g; do [ -n "$g" ] || continue; set -- "$@" ! -path "$g" ! -path "$g/*"; done <<EOF
 $(skip_args)
 EOF
   find "$r" -xdev -mindepth 1 -type f -user "$me" -mmin +"$age" "$@" 2>/dev/null > "$work/files.all"

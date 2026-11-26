@@ -315,3 +315,49 @@ test('tmp-churn deletes old files only: never in a repository, a maint-skip matc
   fs.symlinkSync(w.temp, link);
   assert.match(churn({ MAINT_CHURN_ROOTS: link }).stdout, /removed=0 files/); // a linked root is not searched
 });
+
+test('neither script cleans a root inside a git repository, however deep', (t) => {
+  const w = world(t);
+  const repo = path.join(w.dir, 'outer-repo');
+  fs.mkdirSync(repo, { recursive: true });
+  git(repo, 'init', '-q');
+  const root = path.join(repo, 'deep', 'scratch');
+  mkOld(path.join(root, 'old-entry', 'f'));
+  const at = OLD();
+  fs.utimesSync(path.join(root, 'old-entry'), at, at);
+  for (const [script, env] of [['disk-clean.sh', { MAINT_TEMP_ROOTS: root }], ['tmp-churn.sh', { MAINT_CHURN_ROOTS: root }]]) {
+    const r = w.run(script, env);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(fs.existsSync(path.join(root, 'old-entry', 'f')), script);
+  }
+});
+
+test('a literal maint-skip entry that is a symlink protects its target in both scripts', (t) => {
+  const w = world(t);
+  const target = path.join(w.temp, 'old-target');
+  mkOld(path.join(target, 'f'));
+  age(target);
+  const link = path.join(w.dir, 'skip-link');
+  fs.symlinkSync(target, link);
+  fs.writeFileSync(path.join(w.orqHome, 'maint-skip'), `${link}\n`);
+  const churn = w.run('tmp-churn.sh', { MAINT_CHURN_ROOTS: w.temp });
+  assert.equal(churn.status, 0, churn.stderr);
+  assert.ok(fs.existsSync(path.join(target, 'f')));
+  const clean = w.run('disk-clean.sh');
+  assert.equal(clean.status, 0, clean.stderr);
+  assert.ok(fs.existsSync(path.join(target, 'f')));
+});
+
+test('with no maint-skip file, or an empty one, tmp-churn still deletes old scratch', (t) => {
+  for (const skip of [null, '', '\n\n']) {
+    const w = world(t);
+    const file = path.join(w.orqHome, 'maint-skip');
+    if (skip === null) fs.rmSync(file);
+    else fs.writeFileSync(file, skip);
+    const r = w.run('tmp-churn.sh', { MAINT_CHURN_ROOTS: w.temp });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /removed=\d+ files/);
+    assert.equal(fs.existsSync(path.join(w.temp, 'old-scratch', 'f')), false, JSON.stringify(skip));
+    assert.ok(fs.existsSync(path.join(w.checkout, 'uncommitted.txt')));
+  }
+});
