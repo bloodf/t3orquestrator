@@ -63,6 +63,7 @@ test('accountFor: a display name matches the e-mail\'s local part on a driver of
   const twice = [...QUOTA.accounts, account('codex', 'alice.dev@other.example', [])];
   assert.equal(accountFor('codex', r.instances.codex, twice, {}), null, 'two accounts of one local part: not guessed');
   assert.equal(accountFor('codex', r.instances.codex, twice, { codex: 'alice.dev@other.example' }).account, 'alice.dev@other.example');
+  assert.equal(accountFor('codex', r.instances.codex, twice, { codex: 'alice.dev' }), null, 'an ambiguous override is not guessed either');
 });
 
 test('real quota routes: a used-up window cools until its reset, headroom is what is left, a pool binds only its models', () => {
@@ -77,6 +78,35 @@ test('real quota routes: a used-up window cools until its reset, headroom is wha
   assert.equal(view.models['antigravity-2::claude-sonnet-5-5'].cooldownUntil ?? null, null, 'the shared claude and gpt pool has room');
   assert.equal(view.models['antigravity-2::gemini-4-argon'].cooldownUntil, NOW + 70 * H, 'argon draws on the gemini pool too');
   assert.equal(instances['antigravity-2'].windows[0].group, 'gemini');
+});
+
+test('scoped windows bind only their work: Codex code review binds nothing, a Claude model week only that model', () => {
+  const r = registry({ models: { 'claudeAgent-2::claude-sonnet-5-5': model('claudeAgent-2', 'claude-sonnet-5-5', 'anthropic'), 'claudeAgent-2::claude-fable-5': model('claudeAgent-2', 'claude-fable-5', 'anthropic') } });
+  const q = {
+    at: NOW - MIN,
+    accounts: [
+      account('codex', 'alice.dev@example.test', [w('5h', 60), w('code-review-weekly', 0, NOW + 100 * H)].map((x, i) => (i ? { ...x, scope: 'feature' } : x))),
+      account('claude', 'alice.dev01@example.test', [w('5h', 76), { ...w('weekly-opus', 0, NOW + 60 * H), scope: 'model:opus' }, { ...w('weekly-fable', 50), scope: 'model:fable' }]),
+    ],
+  };
+  const view = applyUsage(r, { instances: overlayQuota({}, r, q, {}, NOW) }, {}, NOW);
+  assert.equal(view.models['codex::gpt-6.1'].cooldownUntil, null, 'the code-review week does not hold normal work');
+  assert.equal(view.models['codex::gpt-6.1'].headroom, 0.6);
+  assert.equal(view.models['claudeAgent-2::claude-opus-5-5'].cooldownUntil, NOW + 60 * H);
+  assert.equal(view.models['claudeAgent-2::claude-sonnet-5-5'].cooldownUntil, null, 'the opus week binds opus only');
+  assert.equal(view.models['claudeAgent-2::claude-fable-5'].headroom, 0.5);
+});
+
+test('an antigravity model\'s own pool keeps the members T3 ties to it', () => {
+  const r = registry({ models: { 'antigravity-2::gemini-pro-orchestrator-g1-pro': model('antigravity-2', 'gemini-pro-orchestrator-g1-pro', 'google') } });
+  const models = { 'antigravity-2': [{ slug: 'gemini-4-argon', name: 'Gemini 4 Argon' }, { slug: 'gemini-pro-orchestrator-g1-pro', name: 'Orchestrator (Argon)' }, { slug: 'gemini-4-neon', name: 'Gemini 4 Neon' }] };
+  const q = { at: NOW - MIN, accounts: [account('antigravity', 'shopsite@example.test', [w('gemini-weekly', 80), w('gemini-argon-weekly', 0, NOW + 30 * H)])] };
+  const instances = overlayQuota({}, r, q, {}, NOW, models);
+  assert.deepEqual(instances['antigravity-2'].windows[1].members, ['gemini-4-argon', 'gemini-pro-orchestrator-g1-pro']);
+  const view = applyUsage(r, { instances }, {}, NOW);
+  assert.equal(view.models['antigravity-2::gemini-pro-orchestrator-g1-pro'].cooldownUntil, NOW + 30 * H);
+  assert.equal(view.models['antigravity-2::gemini-4-argon'].cooldownUntil, NOW + 30 * H);
+  assert.equal(view.models['antigravity-2::gemini-4-neon'].cooldownUntil ?? null, null);
 });
 
 test('real quota replaces T3\'s windows, keeps its sign-in flags, drops windows already reset', () => {
@@ -153,6 +183,24 @@ test('refreshQuota asks EasyCLI at most every 5 minutes, keeps the last good sna
   assert.deepEqual(await refreshQuota(ctx, { quotaSource: { kind: 'off' } }, { force: true }), { fetched: false });
 });
 
+test('refreshQuota: two processes at once ask EasyCLI once', async (t) => {
+  const { ctx, cfg } = await context(t);
+  const machine = { quotaSource: { configPath: cfg } };
+  const results = await Promise.all([refreshQuota(ctx, machine), refreshQuota(ctx, machine), refreshQuota(ctx, machine)]);
+  assert.equal(results.filter((x) => x.fetched).length, 1);
+  assert.equal(ctx.fetched, 4, 'one account list and three accounts (antigravity not allowed), once');
+});
+
+test('refreshQuota passes allowTokenRefresh; kind off means no snapshot is used, local or peer', async (t) => {
+  const { ctx, cfg } = await context(t);
+  await refreshQuota(ctx, { quotaSource: { configPath: cfg, allowTokenRefresh: ['antigravity'] } });
+  const q = await currentQuota(ctx, {});
+  assert.equal(q.accounts.find((a) => a.provider === 'antigravity').windows.length, 4);
+  assert.equal(await currentQuota(ctx, { quotaSource: { kind: 'off' } }), null);
+  const facts = { cores: 8, load1: 0.5, availableMemBytes: 8 * 2 ** 30 };
+  assert.equal((await admission(ctx, { machine: { quotaSource: { kind: 'off' } }, facts, cap: 4, active: 1 })).status.quota, undefined, 'nor published');
+});
+
 test('readUsage lays the real quota over T3\'s readings', async (t) => {
   const { ctx, cfg } = await context(t);
   await refreshQuota(ctx, { quotaSource: { configPath: cfg } });
@@ -188,7 +236,7 @@ test('peers: the Mac publishes its snapshot; a machine without EasyCLI routes by
 test('orq usage prints each account, its windows and the instance it maps to', async (t) => {
   const { ctx, cfg } = await context(t);
   await fs.mkdir(ctx.env.T3ORQ_HOME, { recursive: true });
-  await fs.writeFile(path.join(ctx.env.T3ORQ_HOME, 'config.json'), JSON.stringify({ perInstanceLimit: 2, quotaSource: { configPath: cfg, accounts: { grok: 'alice.dev' } } }));
+  await fs.writeFile(path.join(ctx.env.T3ORQ_HOME, 'config.json'), JSON.stringify({ perInstanceLimit: 2, quotaSource: { configPath: cfg, accounts: { grok: 'alice.dev@example.test' }, allowTokenRefresh: ['antigravity'] } }));
   await fs.writeFile(path.join(ctx.env.T3ORQ_HOME, 'registry.json'), JSON.stringify(registry()));
   const out = [];
   const io = { ...ctx, stdout: { write: (x) => out.push(x) }, stderr: { write: (x) => out.push(x) } };
@@ -211,7 +259,8 @@ test('orq usage prints each account, its windows and the instance it maps to', a
 test('quotaSource: checked when set', () => {
   assert.equal(quotaSourceError(undefined), null);
   assert.equal(quotaSourceError({ kind: 'easycli', url: 'http://127.0.0.1:8317', configPath: '/a/config.toml', accounts: { codex: 'alice.dev' } }), null);
-  for (const bad of [[], { kind: 'x' }, { url: 'file:///etc' }, { configPath: 'rel' }, { accounts: { codex: 1 } }, { secret: 'x' }]) assert.ok(quotaSourceError(bad), JSON.stringify(bad));
+  assert.equal(quotaSourceError({ allowTokenRefresh: ['antigravity'] }), null);
+  for (const bad of [[], { kind: 'x' }, { url: 'file:///etc' }, { configPath: 'rel' }, { accounts: { codex: 1 } }, { secret: 'x' }, { allowTokenRefresh: ['codex'] }, { allowTokenRefresh: 'antigravity' }]) assert.ok(quotaSourceError(bad), JSON.stringify(bad));
   const c = setConfigValue({ perInstanceLimit: 2 }, 'quotaSource', '{"accounts":{"codex-3":"alice.dev01"}}', 'machine');
   assert.deepEqual(c.quotaSource, { accounts: { 'codex-3': 'alice.dev01' } });
   assert.throws(() => setConfigValue({}, 'quotaSource', '{"kind":"maybe"}', 'machine'), /quotaSource must be/);

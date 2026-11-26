@@ -56,18 +56,25 @@ test('codexQuota: windows named by their length, remaining percent, resets, and 
   assert.deepEqual(q.windows, [
     { name: '5h', remainingPct: 72, resetsAt: 1795000000_000 },
     { name: 'weekly', remainingPct: 0, resetsAt: 1795300000_000 },
-    { name: 'code-review-weekly', remainingPct: 100, resetsAt: 1795300000_000 },
+    { name: 'code-review-weekly', remainingPct: 100, resetsAt: 1795300000_000, scope: 'feature' },
   ]);
   assert.equal(q.credits, 12.5);
   assert.equal(q.plan, 'pro');
   const reached = codexQuota({ rate_limit: { limit_reached: true, primary_window: { reset_after_seconds: 60 } }, credits: { unlimited: true } }, NOW);
   assert.deepEqual(reached.windows, [{ name: '5h', remainingPct: 0, resetsAt: NOW + 60_000 }]);
   assert.equal(reached.credits, Infinity);
+  const extra = codexQuota({
+    additional_rate_limits: [
+      { limit_name: 'GPT-5.3-Codex-Spark', rate_limit: { primary_window: { used_percent: 100, limit_window_seconds: 18000 } } },
+      { metered_feature: 'cloud_tasks', rate_limit: { primary_window: { used_percent: 100, limit_window_seconds: 18000 } } },
+    ],
+  }, NOW);
+  assert.deepEqual(extra.windows.map((x) => [x.name, x.scope]), [['gpt-5-3-codex-spark-5h', 'model:gpt-5-3-codex-spark'], ['cloud-tasks-5h', 'feature']]);
 });
 
 test('claudeQuota: the Fable limit wins over the legacy field; a dollar pool is credits, not a window', () => {
   const q = claudeQuota(json('claude-usage.json'));
-  assert.deepEqual(q.windows.map((w) => [w.name, w.remainingPct]), [['5h', 76], ['weekly', 59], ['weekly-fable', 4]]);
+  assert.deepEqual(q.windows.map((w) => [w.name, w.remainingPct, w.scope]), [['5h', 76, undefined], ['weekly', 59, undefined], ['weekly-fable', 4, 'model:fable']]);
   assert.equal(q.windows[0].resetsAt, Date.parse('2026-11-16T23:00:00.000Z'));
   assert.equal(q.credits, 76.5);
 });
@@ -82,7 +89,7 @@ test('antigravityQuota: each window carries the pool T3 names (gemini, 3p, a mod
 
 test('fetchEasyCli: lists the accounts, asks each provider through the proxy with the account, skips disabled and unknown', async () => {
   const fx = fakeEasyCli({ upstream: UPSTREAM });
-  const snap = await fetchEasyCli(EP, { fetch: fx.fetch, now: NOW });
+  const snap = await fetchEasyCli(EP, { fetch: fx.fetch, now: NOW, allowRefresh: ['antigravity'] });
   assert.equal(snap.at, NOW);
   assert.deepEqual(snap.accounts.map((a) => [a.provider, a.account, a.windows.length]), [
     ['codex', 'alice.dev@example.test', 3], ['codex', 'bob.ops@example.test', 3], ['claude', 'alice.dev01@example.test', 3],
@@ -93,6 +100,16 @@ test('fetchEasyCli: lists the accounts, asks each provider through the proxy wit
   assert.deepEqual([ag.body.auth_index, ag.body.method, ag.body.data, ag.body.header.Authorization], ['a4', 'POST', '{"project":"demo-project-123"}', 'Bearer $TOKEN$']);
   assert.ok(!JSON.stringify(snap).includes(KEY), 'the key is never in the snapshot');
   assert.equal(fx.calls.filter((c) => c.body?.auth_index === 'a5' || c.body?.auth_index === 'a7').length, 0);
+});
+
+test('fetchEasyCli: antigravity, whose read may refresh and rewrite its token in CLIProxyAPI, is not asked unless allowed', async () => {
+  const fx = fakeEasyCli({ upstream: UPSTREAM });
+  const snap = await fetchEasyCli(EP, { fetch: fx.fetch, now: NOW });
+  const ag = snap.accounts.find((a) => a.provider === 'antigravity');
+  assert.deepEqual(ag.windows, []);
+  assert.match(ag.error, /allowTokenRefresh/);
+  assert.equal(fx.calls.filter((c) => c.body?.url?.includes('retrieveUserQuotaSummary')).length, 0, 'no api-call for it');
+  assert.equal(fx.calls.filter((c) => c.body?.url).length, 3, 'codex and claude still asked: their token is read as stored');
 });
 
 test('fetchEasyCli: a refused account has no windows; an unreachable EasyCLI is no snapshot, never an error', async () => {
@@ -118,6 +135,14 @@ test('cleanQuota keeps known providers and strict names only (a peer\'s snapshot
   assert.deepEqual(q, {
     at: NOW, accounts: [{ provider: 'codex', account: 'a@example.test', plan: 'pro', windows: [{ name: '5h', remainingPct: 10, resetsAt: NOW }], credits: 'unlimited' }],
   });
+  assert.equal(cleanQuota({ at: NOW, accounts: [{ provider: 'codex', account: 123, windows: [] }] }).accounts.length, 0, 'a number is not an account name');
+  const typed = cleanQuota({
+    at: NOW,
+    accounts: [{
+      provider: 'codex', account: 'a@example.test', plan: 7, windows: [{ name: 5, remainingPct: 1, resetsAt: null }, { name: 'x', remainingPct: 1, resetsAt: null, scope: 3 }, { name: 'y', remainingPct: 1, resetsAt: null, scope: 'model:opus' }, { name: 'z', remainingPct: 1, resetsAt: null, scope: 'do it' }],
+    }],
+  });
+  assert.deepEqual(typed.accounts[0], { provider: 'codex', account: 'a@example.test', windows: [{ name: 'y', remainingPct: 1, resetsAt: null, scope: 'model:opus' }], credits: null });
   assert.equal(cleanQuota({ accounts: [] }), null);
   assert.equal(cleanQuota('x'), null);
 });
