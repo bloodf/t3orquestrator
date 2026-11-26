@@ -577,3 +577,26 @@ test('S2: a linking error never kills the gate or leaves its checkout behind', a
   assert.equal(r.verdict, 'pass', JSON.stringify(r.failures));
   assert.equal(fsSync.existsSync(w.workDir), false);
 });
+
+test('install cache: a hit skips setup, a miss runs setup and publishes, a failed setup publishes nothing', async () => {
+  const cache = (hit) => {
+    const seen = [];
+    return {
+      seen, key: 'f'.repeat(64), restore: (dir) => { seen.push(['restore', dir]); return hit; }, publish: (dir) => { seen.push(['publish', dir]); return true; },
+    };
+  };
+  const hit = cache(true);
+  const a = await gate({ checks: { setup: 'pnpm install', unit: 'chk' }, depCache: hit });
+  assert.equal(a.verdict, 'pass');
+  assert.deepEqual(a.calls.map((c) => c.command), ['ev', 'chk']); // no install
+  assert.deepEqual([a.steps[0].name, a.steps[0].cached, a.steps[0].tail], ['setup', true, `node_modules from the install cache (${'f'.repeat(12)})`]);
+  assert.deepEqual(hit.seen, [['restore', WORKDIR]]);
+  const miss = cache(false);
+  const b = await gate({ checks: { setup: 'pnpm install', unit: 'chk' }, depCache: miss });
+  assert.deepEqual(b.calls.map((c) => c.command), ['pnpm install', 'ev', 'chk']);
+  assert.deepEqual(miss.seen, [['restore', WORKDIR], ['publish', WORKDIR]]);
+  const broken = cache(false);
+  const c = await gate({ checks: { setup: 'pnpm install', unit: 'chk' }, depCache: broken, script: { 'pnpm install': [{ code: 1, output: 'ERR' }] } });
+  assert.equal(c.setupFailed, true);
+  assert.deepEqual(broken.seen, [['restore', WORKDIR]]);
+});

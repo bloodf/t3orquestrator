@@ -53,7 +53,7 @@ export async function makeProject(t, units, { cap = 2, checks = {}, registry = R
     playbook: { hash: playbookHash(fileURLToPath(new URL('../../playbook/ORCHESTRATOR.md', import.meta.url))) }, // read: no update line
   }));
   await fs.writeFile(path.join(home, 'registry.json'), JSON.stringify(registry));
-  await fs.writeFile(path.join(home, 'config.json'), JSON.stringify({ cap }));
+  await fs.writeFile(path.join(home, 'config.json'), JSON.stringify({ cap, gatePriority: false })); // real gates in tests never wait on the host's background QoS
   const t3home = path.join(root, 't3'); // T3's data directory, empty: no provider caches, so no usage
   await fs.mkdir(t3home);
   return { root, repo, home, env: { T3ORQ_HOME: home, T3CODE_HOME: t3home }, baseSha: sh(repo, 'rev-parse', 'HEAD') };

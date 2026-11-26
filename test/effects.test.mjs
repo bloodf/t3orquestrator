@@ -12,7 +12,9 @@ import { awaitsFeedback } from '../lib/tick-util.mjs';
 import { ensurePlanStarted } from '../lib/launch.mjs';
 import { collectGate, spawnGateRun } from '../lib/gaterun.mjs';
 import { commit, readState, unitOf } from '../lib/ledger.mjs';
-import { listLeases, removeLease, writeLease } from '../lib/leases.mjs';
+import {
+  confirmGateLease, defaultGateCap, listLeases, liveGateLeases, readGateLeases, removeLease, writeGateLease, writeLease,
+} from '../lib/leases.mjs';
 import { loadProjectConfig } from '../lib/config.mjs';
 import { readLines } from '../lib/store.mjs';
 import { gateFile } from '../lib/paths.mjs';
@@ -596,6 +598,81 @@ test('item 10: a live gate pid file prevents a second gate process for the same 
   assert.equal(await fs.readFile(pidFile, 'utf8'), '5151\n');
 });
 
+test('machine gate budget: a gate starts only while gateCap has room over every project, and frees it when done', async (t) => {
+  const spawned = [];
+  const alive = new Set([777]);
+  const procStart = (pid) => `start-${pid}`;
+  let seenAtSpawn = null;
+  const dir = (s) => path.join(s.p.home, 'gate-leases');
+  let s;
+  const spawnGate = async ({ env }) => {
+    seenAtSpawn = await readGateLeases(dir(s)); // the lease is reserved before the gate exists
+    spawned.push(env.ORQ_GATE_LEASE);
+    alive.add(5151);
+    return 5151;
+  };
+  s = await setup(t, [unitSpec('a')], {
+    fx: {
+      spawnGate, isAlive: (pid) => alive.has(pid), procStart, gateCap: 1,
+    },
+  });
+  await s.act(launchA());
+  const u = unitOf(await readState(s.p.repo), 'a');
+  const sha = await commitOn(s.p.repo, u.branch, { 'a.txt': 'A\n' });
+  await append(s, { type: 'thread-ended', unit: 'a', status: 'completed' });
+  await writeGateLease(dir(s), {
+    id: '0'.repeat(16), pid: 777, pidStart: 'start-777', project: '/elsewhere', unit: 'x', startedAt: NOW,
+  }); // another project's gate
+  assert.deepEqual(await s.act({ type: 'gate-start', unit: 'a', attempt: 1 }), { skipped: 'gate cap reached' });
+  assert.equal(spawned.length, 0);
+  assert.equal(unitOf(await readState(s.p.repo), 'a').gateStarts, 0); // asked for again on the next poll
+  await assert.rejects(fs.stat(gateFile(s.p.repo, 'a', 1, 'pid')));
+  alive.delete(777); // that gate ended without cleaning up: its lease no longer counts
+  await s.act({ type: 'gate-start', unit: 'a', attempt: 1 });
+  assert.equal(spawned.length, 1);
+  assert.deepEqual(seenAtSpawn.filter((l) => l.project === s.p.repo).map((l) => [l.reservation, l.id]), [[true, spawned[0]]]);
+  const deps = { isAlive: (pid) => alive.has(pid), procStart, now: NOW };
+  assert.deepEqual((await liveGateLeases(dir(s), deps)).map((l) => [l.pid, l.pidStart, l.project, l.unit]), [[5151, 'start-5151', s.p.repo, 'a']]);
+  await fs.writeFile(gateFile(s.p.repo, 'a', 1, 'json'), JSON.stringify({
+    verdict: 'pass', failures: [], flags: [], headSha: sha,
+  }));
+  assert.equal((await collectGate(s.fx, 'a', 1, sha)).result.verdict, 'pass');
+  await assert.rejects(fs.stat(path.join(dir(s), `${spawned[0]}.json`))); // finished: its budget slot is free
+  assert.equal(defaultGateCap(10), 2);
+  assert.equal(defaultGateCap(20), 2);
+  assert.equal(defaultGateCap(32), 4);
+});
+
+test('gate leases: a reused pid and an expired reservation hold nothing; a fresh reservation counts for its whole window, even after its orq wait died; an unreadable lease counts; the gate confirms its own', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orq-gl-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const alive = new Set([10, 20, 30]);
+  const deps = { isAlive: (pid) => alive.has(pid), procStart: (pid) => (pid === 10 ? 'new start' : `start-${pid}`), now: NOW };
+  await writeGateLease(dir, {
+    id: 'a'.repeat(16), pid: 10, pidStart: 'old start', project: '/p', unit: 'u', startedAt: NOW,
+  }); // pid 10 now belongs to another process
+  await writeGateLease(dir, {
+    id: 'b'.repeat(16), reservation: true, owner: 20, ownerStart: 'start-20', project: '/p', unit: 'v', startedAt: NOW - 3 * 60_000,
+  }); // never confirmed, older than the reservation window
+  await writeGateLease(dir, {
+    id: 'c'.repeat(16), reservation: true, owner: 99, project: '/p', unit: 'w', startedAt: NOW,
+  }); // its orq wait died after the spawn, before the gate confirmed: the gate may be running
+  await writeGateLease(dir, {
+    id: 'd'.repeat(16), reservation: true, owner: 30, ownerStart: 'start-30', project: '/p', unit: 'x', startedAt: NOW,
+  });
+  assert.deepEqual((await liveGateLeases(dir, deps)).map((l) => l.unit), ['w', 'x']);
+  const later = { ...deps, now: NOW + 2 * 60_000 - 1 };
+  assert.deepEqual((await liveGateLeases(dir, later)).map((l) => l.unit), ['w', 'x']); // the whole window
+  assert.deepEqual((await liveGateLeases(dir, { ...deps, now: NOW + 2 * 60_000 })).map((l) => l.unit), []);
+  await fs.rm(path.join(dir, `${'c'.repeat(16)}.json`));
+  await confirmGateLease(dir, 'd'.repeat(16), { pid: 20, pidStart: 'start-20', startedAt: NOW + 5 });
+  const confirmed = JSON.parse(await fs.readFile(path.join(dir, `${'d'.repeat(16)}.json`), 'utf8'));
+  assert.deepEqual([confirmed.pid, confirmed.reservation, confirmed.startedAt, confirmed.unit], [20, undefined, NOW, 'x']);
+  await fs.writeFile(path.join(dir, `${'e'.repeat(16)}.json`), '{torn');
+  assert.equal((await liveGateLeases(dir, deps)).length, 2); // never fewer than may be running
+  await assert.rejects(readGateLeases(dir), /invalid JSON/);
+});
+
 test('item 1: gate-run removes its pid file when it finishes, also when it fails', async (t) => {
   const s = await setup(t, [unitSpec('a')]);
   await s.act(launchA());
@@ -637,6 +714,39 @@ test('gate-run: a failed final check is not run a second time (a full suite cost
   calls = 0;
   await orq(['gate-run', 'integration', '1', sha]);
   assert.equal(calls, 2); // setup still gets its second try
+});
+
+test('gate-run: install once: a pnpm-only setup installs on the first gate and the next gate gets the cached node_modules; depCache false turns it off', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await s.act(launchA());
+  const sha = await commitOn(s.p.repo, unitOf(await readState(s.p.repo), 'a').branch, { 'a.txt': 'A\n' });
+  const quiet = { write: () => {} };
+  const commands = [];
+  const run = async (command, { cwd, prefix }) => {
+    commands.push([command, Array.isArray(prefix)]);
+    if (command === 'pnpm install --frozen-lockfile') fsSync.mkdirSync(path.join(cwd, 'node_modules', 'dep'), { recursive: true });
+    if (command === 'test -d node_modules/dep') return { code: fsSync.existsSync(path.join(cwd, 'node_modules', 'dep')) ? 0 : 1, output: '', timedOut: false };
+    return { code: 0, output: '', timedOut: false };
+  };
+  const clone = (src, dst) => { fsSync.cpSync(src, dst, { recursive: true }); return true; };
+  const orq = (args) => cli(args, {
+    stdout: quiet, stderr: quiet, env: s.p.env, cwd: s.p.repo, deps: { run, clone, depCacheKey: () => 'd'.repeat(64) },
+  });
+  assert.equal(await orq(['config', 'set', 'checks.setup', 'pnpm install --frozen-lockfile']), 0);
+  assert.equal(await orq(['config', 'set', 'checks.unit', 'test -d node_modules/dep']), 0);
+  await orq(['gate-run', 'a', '1', sha]);
+  assert.deepEqual(commands.map(([c]) => c), ['pnpm install --frozen-lockfile', 'test -f a.txt', 'test -d node_modules/dep']);
+  assert.ok(commands.every(([, p]) => p)); // every step gets the priority prefix
+  commands.length = 0;
+  await orq(['gate-run', 'a', '1', sha]);
+  assert.deepEqual(commands.map(([c]) => c), ['test -f a.txt', 'test -d node_modules/dep']); // no install, and the checks find the deps
+  const result = JSON.parse(await fs.readFile(gateFile(s.p.repo, 'a', 1, 'json'), 'utf8'));
+  assert.equal(result.verdict, 'pass');
+  assert.equal(result.steps[0].cached, true);
+  assert.equal(await orq(['config', 'set', '--machine', 'depCache', 'false']), 0);
+  commands.length = 0;
+  await orq(['gate-run', 'a', '1', sha]);
+  assert.equal(commands[0][0], 'pnpm install --frozen-lockfile');
 });
 
 test('gate-run: a failed final gate keeps its whole output in head-<sha>.log and names it; a passing one keeps none', async (t) => {
