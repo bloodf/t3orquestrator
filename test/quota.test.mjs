@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import {
-  accountFor, currentQuota, localQuota, mapAccounts, overlayQuota, quotaPath, quotaSourceError, quotaTable, refreshQuota, REFRESH_MS, MAX_AGE_MS,
+  accountFor, currentQuota, INFLIGHT_MS, localQuota, mapAccounts, overlayQuota, quotaPath, quotaSourceError, quotaTable, refreshQuota, REFRESH_MS, MAX_AGE_MS,
 } from '../lib/quota.mjs';
 import { applyUsage, readUsage } from '../lib/usage-source.mjs';
 import { cleanStatus, readPeers, selfPath } from '../lib/peers.mjs';
@@ -219,6 +219,41 @@ test('refreshQuota: an in-flight mark left by a crashed process expires', async 
   await fs.mkdir(ctx.env.T3ORQ_HOME, { recursive: true });
   await fs.writeFile(quotaPath(ctx.env), JSON.stringify({ triedAt: NOW - H, inflight: { id: 'x', until: NOW - 1 } }));
   assert.deepEqual(await refreshQuota(ctx, { quotaSource: { configPath: cfg } }), { fetched: true });
+});
+
+test('refreshQuota: an answer that comes after its mark expired and another refresh took over is discarded', async (t) => {
+  const { ctx, cfg } = await context(t);
+  const machine = { quotaSource: { configPath: cfg } };
+  const real = ctx.deps.fetch;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const slow = { ...ctx, clock: NOW, deps: { ...ctx.deps, fetch: async (...args) => { await gate; return real(...args); } } };
+  slow.now = () => slow.clock;
+  const a = refreshQuota(slow, machine, { force: true }); // A reserves at NOW and hangs
+  await new Promise((r) => { setTimeout(r, 50); });
+  ctx.clock = NOW + INFLIGHT_MS + 1_000; // A's mark has expired
+  assert.deepEqual(await refreshQuota(ctx, machine, { force: true }), { fetched: true }, 'B takes over and publishes');
+  release();
+  assert.deepEqual(await a, { fetched: false, error: 'superseded by a later refresh' });
+  const kept = JSON.parse(await fs.readFile(quotaPath(ctx.env), 'utf8'));
+  assert.deepEqual([kept.snapshot.at, kept.triedAt], [ctx.clock, ctx.clock], 'B\'s newer result stays');
+  assert.equal(kept.inflight, undefined);
+});
+
+test('refreshQuota without EasyCLI: the mark is held until the peer answer is kept, so peers are asked once', async (t) => {
+  const { ctx } = await context(t);
+  const machine = { peers: [{ host: 'mac', ssh: 'mac' }], quotaSource: { configPath: '/nowhere/config.toml' } };
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  ctx.deps.ssh = async (target) => { ctx.asked.push(target); await gate; return { code: 255, stdout: '', stderr: 'Connection refused' }; };
+  const first = refreshQuota(ctx, machine, { force: true });
+  await new Promise((r) => { setTimeout(r, 50); }); // the first is in its ssh call
+  const second = refreshQuota(ctx, machine, { force: true });
+  setTimeout(release, 150);
+  const [x, y] = await Promise.all([first, second]);
+  assert.deepEqual(x, { fetched: false, error: 'no EasyCLI config on this machine' });
+  assert.deepEqual(y, { fetched: false, waited: true, error: 'no EasyCLI config on this machine' });
+  assert.deepEqual(ctx.asked, ['mac'], 'one ssh read');
 });
 
 test('refreshQuota passes allowTokenRefresh; kind off means no snapshot is used, local or peer', async (t) => {
