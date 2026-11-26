@@ -49,15 +49,19 @@ const plan = { units: [{ id: 'u' }] };
 const fx = (messages, said) => ({ now: () => NOW, threadError: () => said, t3: { showThread: () => ({ thread: {}, messages }) } });
 const failed = { id: 'mcp:t1', status: 'failed', updatedAt: NOW - 1000 };
 
-test('a failed thread with no reply carries the limit its provider logged; a reply, or a completed turn, is read as before', () => {
+test('a failed thread carries the limit its provider logged, before its last reply; a completed turn is read from its reply', () => {
   const user = [{ role: 'user', text: '# Work order' }];
   const { limit } = observeThreads(fx(user, REFUSAL), plan, state, [failed])['mcp:t1'];
   assert.deepEqual([limit.kind, limit.until], ['limit', new Date(2026, 10, 24, 19, 59).getTime()]); // no zone: this machine's time
   assert.equal(observeThreads(fx(user, null), plan, state, [failed])['mcp:t1'].limit, undefined);
   assert.equal(observeThreads(fx(user, 'unexpected status 404 Not Found'), plan, state, [failed])['mcp:t1'].limit, undefined); // not a limit: a failure
-  // the worker said something: its reply is what counts, the log is not consulted
+  // the worker said something before the refusal: the logged error wins over its narration
   const narrated = [{ role: 'assistant', text: 'Now let me check the docs.' }];
-  assert.equal(observeThreads(fx(narrated, REFUSAL), plan, state, [failed])['mcp:t1'].limit, undefined);
+  assert.equal(observeThreads(fx(narrated, REFUSAL), plan, state, [failed])['mcp:t1'].limit.kind, 'limit');
+  // a logged error that is no limit leaves the reply to speak for itself
+  const refused = [{ role: 'assistant', text: 'Token Plan usage limit reached (2056)' }];
+  assert.equal(observeThreads(fx(refused, 'unexpected status 404 Not Found'), plan, state, [failed])['mcp:t1'].limit.kind, 'limit');
+  assert.equal(observeThreads(fx(narrated, null), plan, state, [failed])['mcp:t1'].limit, undefined);
   const done = { ...failed, status: 'completed' };
   assert.equal(observeThreads(fx(user, REFUSAL), plan, state, [done])['mcp:t1'].limit, undefined);
 });
