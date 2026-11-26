@@ -44,11 +44,11 @@ async function orq(args, p, world = {}) {
 
 async function integratedProject(t, opts = {}) {
   const p = await makeProject(t, [unitSpec('a')], opts);
-  if (opts.lockfile) { // a pnpm project: its node_modules may be shared (the head must hold the lockfile)
-    await fs.writeFile(path.join(p.repo, 'pnpm-lock.yaml'), 'lockfileVersion: 1\n');
+  if (opts.lockfile) { // a bun project: its node_modules may be shared (the head must hold the lockfile)
+    await fs.writeFile(path.join(p.repo, 'bun.lock'), 'lockfileVersion: 1\n');
     await fs.writeFile(path.join(p.repo, 'package.json'), '{}\n');
     await fs.writeFile(path.join(p.repo, '.gitignore'), 'node_modules/\n');
-    sh(p.repo, 'add', 'pnpm-lock.yaml', 'package.json', '.gitignore');
+    sh(p.repo, 'add', 'bun.lock', 'package.json', '.gitignore');
     sh(p.repo, 'commit', '-q', '-m', 'lock');
     p.baseSha = sh(p.repo, 'rev-parse', 'HEAD');
   }

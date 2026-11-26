@@ -6,14 +6,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { createGit, defaultExec } from '../lib/git.mjs';
 import {
-  validSharePath, detectShares, eligibleShares, linkShares, shareLine, syncShareExclude,
+  validSharePath, detectShares, eligibleShares, linkShares, pnpmInstall, replaceOldShares, shareLine, syncShareExclude, unlinkOldShares,
 } from '../lib/share.mjs';
+import { spawnSync } from 'node:child_process';
 import { sh } from './support/project.mjs';
 
 const git = createGit({ exec: defaultExec });
 
 // A repo whose main checkout has installed dependencies; the commit holds the manifests.
-async function repo(t, { gitignore = 'node_modules/\n.venv/\n', lock = 'pnpm-lock.yaml' } = {}) {
+async function repo(t, { gitignore = 'node_modules/\n.venv/\n', lock = 'bun.lock' } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orq-share-')));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const dir = path.join(root, 'repo');
@@ -61,7 +62,7 @@ test('eligibleShares: only when the target exists and the governing manifests ma
   assert.deepEqual(eligibleShares({
     cwd: r.dir, commit: r.sha, paths, unit: { id: 'u', paths: ['package-lock.json', 'src/**'] }, git,
   }), []); // a unit that changes dependencies gets its own copy of every one
-  await fs.writeFile(path.join(r.dir, 'pnpm-lock.yaml'), 'lockfileVersion: 2\n'); // the main checkout moved on
+  await fs.writeFile(path.join(r.dir, 'bun.lock'), 'lockfileVersion: 2\n'); // the main checkout moved on
   assert.deepEqual(eligibleShares({
     cwd: r.dir, commit: r.sha, paths, unit, git,
   }), ['.venv']); // the root lock governs every node_modules
@@ -183,9 +184,9 @@ test('init detects share once, prints it and makes the links ignorable; config s
   assert.equal((await orqIn(r.dir, home, ['config', 'set', 'share', '.git'])).code, 1);
 });
 
-test('only node_modules governed by a pnpm or bun lockfile is shared: npm, yarn or no lockfile never, whatever share says', async (t) => {
+test('only node_modules governed by a bun lockfile is shared: pnpm, npm, yarn or no lockfile never, whatever share says', async (t) => {
   const cases = [
-    ['pnpm-lock.yaml', ['node_modules'], null],
+    ['pnpm-lock.yaml', [], 'pnpm projects are not shared: pnpm writes links through a linked node_modules that dangle once the worktree is removed; each checkout installs from the pnpm store'],
     ['bun.lock', ['node_modules'], null],
     ['bun.lockb', ['node_modules'], null],
     ['package-lock.json', [], 'npm projects are not shared: "npm ci" empties a linked node_modules'],
@@ -200,7 +201,7 @@ test('only node_modules governed by a pnpm or bun lockfile is shared: npm, yarn 
     }), want, String(lock));
     assert.deepEqual(detectShares(r.dir, git), { paths: want.length ? ['apps/shop/node_modules', 'node_modules'] : [], why }, String(lock));
   }
-  // a pnpm lockfile next to an npm one is still an npm project; the nested app uses the root lockfile
+  // a bun lockfile next to an npm one is still an npm project; the nested app uses the root lockfile
   const mixed = await repo(t);
   await fs.writeFile(path.join(mixed.dir, 'apps', 'shop', 'package-lock.json'), '{}\n');
   sh(mixed.dir, 'add', '-A');
@@ -291,4 +292,44 @@ test('nothing installed in the root of a pnpm or bun project: init says so, and 
   const npm = await repo(t, { lock: 'package-lock.json' });
   for (const d of ['node_modules', 'apps/shop/node_modules']) await fs.rm(path.join(npm.dir, d), { recursive: true });
   assert.deepEqual(detectShares(npm.dir, git), { paths: [], why: null });
+});
+
+test('pnpmInstall: one install per directory with a pnpm lockfile and an installed node_modules; none without', async (t) => {
+  const r = await repo(t, { lock: 'pnpm-lock.yaml' });
+  for (const d of ['tests', 'site', '.hidden']) {
+    await fs.mkdir(path.join(r.dir, d, 'node_modules'), { recursive: true });
+    await fs.writeFile(path.join(r.dir, d, 'pnpm-lock.yaml'), 'lockfileVersion: 1\n');
+  }
+  await fs.rm(path.join(r.dir, 'site', 'node_modules'), { recursive: true }); // never installed in the main checkout
+  assert.equal(pnpmInstall(r.dir), 'pnpm install --frozen-lockfile --prefer-offline && pnpm -C tests install --frozen-lockfile --prefer-offline');
+  assert.equal(pnpmInstall((await repo(t)).dir), null); // a bun project
+  // a directory that needs quoting is quoted, never dropped with the rest
+  for (const d of ["my app", "it's"]) {
+    await fs.mkdir(path.join(r.dir, d, 'node_modules'), { recursive: true });
+    await fs.writeFile(path.join(r.dir, d, 'pnpm-lock.yaml'), 'lockfileVersion: 1\n');
+  }
+  const cmd = pnpmInstall(r.dir);
+  assert.equal(cmd, "pnpm install --frozen-lockfile --prefer-offline && pnpm -C 'it'\\''s' install --frozen-lockfile --prefer-offline && pnpm -C 'my app' install --frozen-lockfile --prefer-offline && pnpm -C tests install --frozen-lockfile --prefer-offline");
+  const args = spawnSync('sh', ['-c', cmd.replaceAll('pnpm -C', 'printf "%s\\n"').replaceAll(' install --frozen-lockfile --prefer-offline', '').replace('pnpm && ', '')], { encoding: 'utf8' }).stdout;
+  assert.equal(args, "it's\nmy app\ntests\n"); // each is one shell word
+});
+
+test('old pnpm links: a checkout\'s link to the main node_modules is removed (never its target), then a real install', async (t) => {
+  const r = await repo(t, { lock: 'pnpm-lock.yaml' });
+  const wt = path.join(r.root, 'wt');
+  sh(r.dir, 'worktree', 'add', '-q', '--detach', wt, r.sha);
+  await fs.symlink(path.join(r.dir, 'node_modules'), path.join(wt, 'node_modules')); // what orq's old sharing made
+  await fs.symlink(path.join(r.root, 'elsewhere'), path.join(wt, 'apps', 'shop', 'node_modules')); // not orq's: kept
+  assert.deepEqual(unlinkOldShares(r.dir, r.dir), []); // the main checkout itself: never
+  const installs = [];
+  const fx = {
+    cwd: r.dir, t3: { showThread: () => ({ thread: { worktreePath: wt } }) }, install: (dir, cmd) => { installs.push([dir, cmd]); return true; },
+  };
+  assert.deepEqual(replaceOldShares(fx, 'th1'), { removed: ['node_modules'], installed: true });
+  assert.deepEqual(installs, [[wt, 'pnpm install --frozen-lockfile --prefer-offline']]);
+  assert.equal(fsSync.existsSync(path.join(wt, 'node_modules')), false);
+  assert.equal(await fs.readFile(path.join(r.dir, 'node_modules', 'x', 'y.js'), 'utf8'), 'module.exports = 1;\n');
+  assert.ok(fsSync.lstatSync(path.join(wt, 'apps', 'shop', 'node_modules')).isSymbolicLink());
+  assert.deepEqual(replaceOldShares(fx, 'th1'), { removed: [], installed: null }); // nothing left: no install
+  assert.deepEqual(replaceOldShares({ ...fx, t3: { showThread: () => { throw new Error('gone'); } } }, 'th1'), { removed: [], installed: null });
 });

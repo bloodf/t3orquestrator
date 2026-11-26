@@ -554,7 +554,7 @@ test('a package manifest or lockfile outside the writable paths fails; inside th
 });
 
 test('S: the gate checkout links shared dependencies before its steps; removing it leaves them alone', async (t) => {
-  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'pnpm-lock.yaml': 'lockfileVersion: 1\n', '.gitignore': 'node_modules/\n' });
+  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'bun.lock': 'lockfileVersion: 1\n', '.gitignore': 'node_modules/\n' });
   await fs.mkdir(path.join(w.repo, 'node_modules', 'x'), { recursive: true });
   await fs.writeFile(path.join(w.repo, 'node_modules', 'x', 'y.js'), '1\n');
   const evidence = 'test -f node_modules/x/y.js && test -z "$(git status --porcelain)"';
@@ -569,8 +569,16 @@ test('S: the gate checkout links shared dependencies before its steps; removing 
   assert.equal(fsSync.existsSync(w.workDir), false);
 });
 
+test('S3: a pnpm project\'s gate checkout is never linked: pnpm in it cannot write links into the main node_modules', async (t) => {
+  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'pnpm-lock.yaml': 'lockfileVersion: 1\n', '.gitignore': 'node_modules/\n' });
+  await fs.mkdir(path.join(w.repo, 'node_modules', 'x'), { recursive: true });
+  const r = await real(w, 'test ! -e node_modules', { share: { paths: ['node_modules'], unit: null } });
+  assert.equal(r.verdict, 'pass', JSON.stringify(r.failures));
+  assert.deepEqual(await fs.readdir(path.join(w.repo, 'node_modules')), ['x']);
+});
+
 test('S2: a linking error never kills the gate or leaves its checkout behind', async (t) => {
-  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'pnpm-lock.yaml': 'lockfileVersion: 1\n' });
+  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'bun.lock': 'lockfileVersion: 1\n' });
   await fs.mkdir(path.join(w.repo, 'node_modules'), { recursive: true });
   const git = { ...w.git, ignored: () => { throw new Error('git check-ignore failed (exit 128)'); } };
   const r = await real(w, 'test ! -e node_modules', { git, share: { paths: ['node_modules'], unit: null } });
