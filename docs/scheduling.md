@@ -55,11 +55,12 @@ The cap is a ceiling, not a target. On every poll `orq wait` also asks the machi
 
 | Metric | Read from | Limit |
 |---|---|---|
-| `load` | 1-minute load average per core | 2 |
+| `load` | 1-minute load average per core (not judged on macOS when `busy` is read) | 2 |
 | `cpu`, `io`, `mem` | Linux pressure stall information, the 10-second `some` share in percent (`/proc/pressure/cpu`, `io`, `memory`; `io` comes from `/sys/fs/cgroup/user.slice/io.pressure` when present, so a disk only system services use does not hold agents) | 60, 40, 10 |
 | `memLevel` | macOS memory pressure level, one `sysctl` (1 normal, 2 warning, 4 critical) | 4 |
+| `busy` | macOS CPU busy share in percent, from `os.cpus()` times since the previous reading (the first reading of a process takes two, 250 ms apart). A Mac's load average counts threads waiting on disk and system daemons, so it reads high with the CPU half idle | 90 |
 
-A metric at or over its limit holds the machine, and that metric keeps holding until it is back under `release` times its limit (default 0.8, so `io` holds at 40% and releases under 32%), so a machine near a limit does not flap. The other metrics are still judged against their own limits. A metric that cannot be read is not judged. Set limits with `orq config set --machine pressure '{"io":30,"load":1.5}'` (any of `load`, `cpu`, `io`, `mem`, `memLevel`, `release`); `pressure false` turns the check off and `pressure null` restores the defaults.
+A metric at or over its limit holds the machine, and that metric keeps holding until it is back under `release` times its limit (default 0.8, so `io` holds at 40% and releases under 32%), so a machine near a limit does not flap. The other metrics are still judged against their own limits. A metric that cannot be read is not judged. Set limits with `orq config set --machine pressure '{"io":30,"load":1.5}'` (any of `load`, `cpu`, `io`, `mem`, `memLevel`, `busy`, `release`); `pressure false` turns the check off and `pressure null` restores the defaults.
 
 **Protected services.** `orq config set --machine protect '[{"name":"gateway","url":"http://127.0.0.1:11434/v1/models","timeoutMs":3000}]'` names services on this machine that must keep answering while agents work. Each is asked with one `GET` at most once a minute by whichever `orq wait` polls first; the answer is cached in `~/.t3orq/protect.json` for every project. No answer within `timeoutMs` (default 3000, 100 to 30000), a connection error or a status of 500 or more is a failure; any other status counts as alive. A failing service holds the machine, and the hold ends after two good probes in a row.
 

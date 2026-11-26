@@ -200,7 +200,7 @@ inbox: <n> message(s) waiting   (only while .orq/inbox.md is not empty)
 integration: <branch> head=<sha> base=<sha>
 ship: green=<sha12|none> shipped=<sha12|none> ships=<n>[ synced=<base12>-><head12>][ sync-conflict=<base12> in <files>]   (continuous mode only)
 cap=<n> active=<n> blocked=<n> gates=<n> machine_leases=<n>[ expired_leases=<n>][ project_cap=<n> project_leases=<n>]
-pressure: load=<x>/core[ cpu=<n>% io=<n>% mem=<n>%][ mem_level=<n>] ok|HELD, nothing new starts: <reasons>[, for <n> min]
+pressure: load=<x>/core[ cpu=<n>% io=<n>% mem=<n>%][ busy=<n>%][ mem_level=<n>] ok|HELD, nothing new starts: <reasons>[, for <n> min]
 protect: <name> ok|recovering|FAILING (<why>), …   (only with machine `protect`)
 peers: <host> ok|HELD free=<n>/<cap> load=<x>/core …[ protect=failing]|<host> stale (status <n> min old)|<host> unreachable (<why>); …[; least loaded with room: <host>]   (only with machine `peers`)
 providers: … (as for init)
