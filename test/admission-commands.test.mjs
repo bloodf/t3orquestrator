@@ -20,7 +20,7 @@ async function machine(t, deps = {}) {
     const code = await run(args, {
       stdout: { write: (x) => out.push(x) }, stderr: { write: (x) => err.push(x) }, env: { T3ORQ_HOME: path.join(dir, 'home'), T3CODE_HOME: path.join(dir, 't3') }, cwd: dir, now: () => NOW,
       deps: {
-        hostname: () => 'host-1', readMachine: () => ({ cores: 20, availableMemBytes: 40 * GIB, load1: 36, pressure: { cpu: 2, io: 72, mem: 0 } }),
+        hostname: () => 'host-1', readStorage: () => [], readMachine: () => ({ cores: 20, availableMemBytes: 40 * GIB, load1: 36, pressure: { cpu: 2, io: 72, mem: 0 } }),
         fetch: async () => ({ status: 200, body: { cancel: async () => {} } }),
         ssh: async (target) => {
           asked.push(target);

@@ -266,3 +266,19 @@ test('a shipped head must come later in the integration order than the one shipp
   assert.equal(newerThanShipped({ ...p, shipped: D }, C), false);
   assert.equal(newerThanShipped({ ...p, shipped: C }, E), false); // not an integration head at all
 });
+
+test('machine gate budget: unit gates and the rolling final stop at gateCap counted over every project; a pressure hold does not stop them', () => {
+  const bGating = [...aInC, ...through('b', D).slice(0, 2)];
+  const types = (r) => r.actions.map((a) => a.type);
+  assert.deepEqual(types(go(bGating, { machineGates: { cap: 4, running: 2 } })), ['gate-start', 'final-gate']);
+  assert.deepEqual(types(go(bGating, { machineGates: { cap: 4, running: 3 } })), ['gate-start']); // one slot: the unit first
+  assert.deepEqual(types(go(bGating, { machineGates: { cap: 2, running: 2 } })), []); // other projects' gates fill it
+  const held = go(bGating, { machineGates: { cap: 4, running: 0 }, hold: { reasons: ['io pressure 72% (limit 40%)'], protect: false } });
+  assert.deepEqual(types(held), ['gate-start', 'final-gate']);
+  const protect = go(bGating, { machineGates: { cap: 4, running: 0 }, hold: { reasons: ['protected service gw is failing'], protect: true } });
+  assert.deepEqual(types(protect), []); // a failing protected service starts no gate, as before
+  // other modes: the final gate takes a project slot, and the machine budget too
+  const allIn = [...aInC, ...through('b', D)];
+  assert.deepEqual(types(go(allIn, { config: {}, machineGates: { cap: 2, running: 1 } })), ['final-gate']);
+  assert.deepEqual(types(go(allIn, { config: {}, machineGates: { cap: 2, running: 2 } })), []);
+});

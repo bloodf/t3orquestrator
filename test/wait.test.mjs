@@ -1047,6 +1047,24 @@ test('wait: a machine under pressure starts nothing and says why; work goes on w
   assert.match(done.out, /^done: 1 units integrated/);
 });
 
+test('wait: a disk short of free inodes holds new launches, starts one cleanup run, and work goes on once there is room', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const sim = simulator(p, { a: [['commit-complete']] });
+  let storage = [{ path: '/tmp', bytesPct: 60, inodesPct: 3 }];
+  const cleans = [];
+  const deps = { readStorage: () => storage, spawnClean: (o) => cleans.push(o) };
+  const held = await orq(['wait', '--max-seconds', '40'], p, sim, deps);
+  assert.equal(held.code, 0, held.err);
+  assert.match(held.out, /waiting: 1 launches or checks wait for this machine: disk \/tmp: 3% inodes free \(limit 10%\)/);
+  assert.equal(sim.threads.size, 0);
+  assert.equal(cleans.length, 1); // once, not once per poll
+  assert.equal(cleans[0].env.T3ORQ_HOME, p.home);
+  storage = [{ path: '/tmp', bytesPct: 60, inodesPct: 40 }];
+  const done = await orq(['wait'], p, sim, deps);
+  assert.match(done.out, /^done: 1 units integrated/);
+  assert.equal(cleans.length, 1);
+});
+
 test('wait: a failing protected service holds launches on this machine, whatever the project cap says', async (t) => {
   const p = await makeProject(t, [unitSpec('a')], { cap: 8 });
   await fs.writeFile(path.join(p.home, 'config.json'), JSON.stringify({ cap: 8, protect: [{ name: 'gateway', url: 'http://127.0.0.1:1/v1/models', timeoutMs: 200 }] }));
