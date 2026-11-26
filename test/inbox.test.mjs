@@ -11,11 +11,13 @@ const ISO = new Date(NOW).toISOString();
 const GIB = 1024 ** 3;
 const HEAD = 'message: from the user, through orq inbox; read it and follow it before anything else';
 
-async function orq(args, p, { stdin = '', now = NOW, exec } = {}) {
+async function orq(args, p, {
+  stdin = '', now = NOW, exec, env = {},
+} = {}) {
   const out = [];
   const err = [];
   const code = await run(args, {
-    stdout: { write: (x) => out.push(x) }, stderr: { write: (x) => err.push(x) }, env: p.env, cwd: p.repo, now: () => now, stdin: async () => stdin,
+    stdout: { write: (x) => out.push(x) }, stderr: { write: (x) => err.push(x) }, env: { ...p.env, ...env }, cwd: p.repo, now: () => now, stdin: async () => stdin,
     deps: {
       readMachine: () => ({ cores: 8, availableMemBytes: 16 * GIB, load1: 0 }),
       exec: exec ?? ((_bin, args) => ({ code: 0, stdout: args[1] === 'list' ? '[]' : '{}', stderr: '' })), // never a real t3
@@ -27,8 +29,12 @@ async function orq(args, p, { stdin = '', now = NOW, exec } = {}) {
 const orqPath = (p, ...f) => path.join(p.repo, '.orq', ...f);
 const exists = (f) => fs.stat(f).then(() => true, () => false);
 
+// an `orq wait` holds the runner lock while it runs: this test process stands in for it
+const waitRuns = (p) => fs.writeFile(orqPath(p, 'runner.lock'), JSON.stringify({ pid: process.pid, token: 't' }));
+
 test('inbox appends a timestamped message per call, from args or stdin', async (t) => {
   const p = await makeProject(t, [unitSpec('a')]);
+  await waitRuns(p);
   assert.deepEqual(await orq(['inbox', 'switch', 'to', 'draft'], p), { code: 0, out: 'inbox: queued for the next "orq wait"\n', err: '' });
   assert.equal((await orq(['inbox', '-'], p, { stdin: 'line one\nline two\n', now: NOW + 1000 })).code, 0);
   assert.equal(await fs.readFile(orqPath(p, 'inbox.md'), 'utf8'),
@@ -121,4 +127,74 @@ test('inbox keeps .orq/ out of git like the other writers', async (t) => {
   await fs.writeFile(exclude, '');
   assert.equal((await orq(['inbox', 'hi'], p, { exec: gitExec })).code, 0);
   assert.equal(await fs.readFile(exclude, 'utf8'), '.orq/\n');
+});
+
+const NOT_DELIVERED = 'not delivered: no orq wait is running; queued for the next "orq wait"';
+const ORCH = 'mcp:orch-1';
+const withOrchestrator = async (p) => {
+  const file = orqPath(p, 'config.json');
+  const c = JSON.parse(await fs.readFile(file, 'utf8'));
+  await fs.writeFile(file, JSON.stringify({ ...c, orchestrator: { instance: 'codex', model: 'sol', threadId: ORCH } }));
+};
+// a t3 whose orchestrator thread has the given status; every call is recorded
+function fakeT3(status, { sendFails = false } = {}) {
+  const calls = [];
+  const exec = (_bin, args, opts) => {
+    if (args[0] === 'thread') calls.push([args.slice(0, 3).join(' '), opts?.input ?? null]);
+    if (args[1] === 'show') {
+      return {
+        code: 0, stdout: JSON.stringify({ thread: { threadId: ORCH, projectId: 'p', status, updatedAt: ISO, itemCount: 3 }, messages: [] }), stderr: '',
+      };
+    }
+    if (args[1] === 'send') {
+      return sendFails ? { code: 1, stdout: '', stderr: 'thread not found' } : { code: 0, stdout: JSON.stringify({ threadId: ORCH, runId: 'r', status: 'running', delivery: 'started' }), stderr: '' };
+    }
+    return { code: 0, stdout: '[]', stderr: '' };
+  };
+  return { exec, calls };
+}
+
+test('inbox with no orq wait running: says not delivered, keeps the message, and wakes an idle orchestrator thread', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  const none = await orq(['inbox', 'first'], p);
+  assert.deepEqual(none, {
+    code: 0, out: `${NOT_DELIVERED}\nnote: no orchestrator thread is recorded ("orq sync" from it records it); tell it to run "orq wait"\n`, err: '',
+  });
+  await withOrchestrator(p);
+  const idle = fakeT3('completed');
+  const woke = await orq(['inbox', 'second'], p, { exec: idle.exec });
+  assert.equal(woke.out, `${NOT_DELIVERED}\nwoke orchestrator thread ${ORCH} to run "orq wait"\n`);
+  assert.deepEqual(idle.calls.map(([c]) => c), [`thread show ${ORCH}`, `thread send ${ORCH}`]);
+  assert.match(idle.calls[1][1], /Run "orq wait" now/);
+  // both messages wait for the next orq wait, which delivers them
+  assert.match(await fs.readFile(orqPath(p, 'inbox.md'), 'utf8'), /first\n## .*\nsecond\n$/);
+  assert.equal((await orq(['wait'], p)).out.split('\n')[0], HEAD);
+});
+
+test('inbox does not send to an orchestrator thread at work, nor from the orchestrator itself; a failed wake is a note', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  await withOrchestrator(p);
+  const busy = fakeT3('running');
+  assert.equal((await orq(['inbox', 'x'], p, { exec: busy.exec })).out,
+    `${NOT_DELIVERED}\nnote: orchestrator thread ${ORCH} is at work; it reads the message at its next "orq wait"\n`);
+  assert.deepEqual(busy.calls.map(([c]) => c), [`thread show ${ORCH}`]);
+  const self = fakeT3('completed');
+  assert.equal((await orq(['inbox', 'x'], p, { exec: self.exec, env: { T3CODE_THREAD_ID: ORCH } })).out, `${NOT_DELIVERED}\n`);
+  assert.deepEqual(self.calls, []);
+  const broken = fakeT3('completed', { sendFails: true });
+  const r = await orq(['inbox', 'x'], p, { exec: broken.exec });
+  assert.equal(r.code, 0);
+  assert.match(r.out, new RegExp(`^note: could not wake orchestrator thread ${ORCH}: thread send failed \\(exit 1\\): thread not found$`, 'm'));
+});
+
+test('inbox while an orq wait runs: queued for it, no thread is woken', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  await withOrchestrator(p);
+  await waitRuns(p);
+  const t3 = fakeT3('completed');
+  assert.equal((await orq(['inbox', 'x'], p, { exec: t3.exec })).out, 'inbox: queued for the next "orq wait"\n');
+  assert.deepEqual(t3.calls, []);
+  // a lock left by a dead process is no running wait
+  await fs.writeFile(orqPath(p, 'runner.lock'), JSON.stringify({ pid: 2 ** 22 + 12345, token: 't' }));
+  assert.match((await orq(['inbox', 'y'], p, { exec: t3.exec })).out, /^not delivered: /);
 });
