@@ -198,3 +198,38 @@ test('inbox while an orq wait runs: queued for it, no thread is woken', async (t
   await fs.writeFile(orqPath(p, 'runner.lock'), JSON.stringify({ pid: 2 ** 22 + 12345, token: 't' }));
   assert.match((await orq(['inbox', 'y'], p, { exec: t3.exec })).out, /^not delivered: /);
 });
+
+test('inbox respects a watchdog hold on this project: no wake, the message stays queued', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  await withOrchestrator(p);
+  const other = path.join(p.home, 'watchdog', 'other');
+  const mine = path.join(p.home, 'watchdog', 'this-one');
+  await fs.mkdir(other, { recursive: true });
+  await fs.mkdir(mine, { recursive: true });
+  await fs.writeFile(path.join(other, 'path'), '/somewhere/else\n');
+  await fs.writeFile(path.join(other, 'hold'), '');
+  await fs.writeFile(path.join(mine, 'path'), `${p.repo}\n`);
+  const free = fakeT3('completed');
+  assert.match((await orq(['inbox', 'x'], p, { exec: free.exec })).out, /^woke orchestrator thread/m); // a hold on another project
+  await fs.writeFile(path.join(mine, 'hold'), '');
+  const held = fakeT3('completed');
+  const r = await orq(['inbox', 'y'], p, { exec: held.exec, now: NOW + 10 * 60_000 });
+  assert.equal(r.out, `${NOT_DELIVERED}\nnote: not waking orchestrator thread ${ORCH}: watchdog this-one holds it (remove its hold file to resume)\n`);
+  assert.deepEqual(held.calls, []);
+  assert.match(await fs.readFile(orqPath(p, 'inbox.md'), 'utf8'), /\ny\n$/);
+});
+
+test('inbox: two senders at once wake the orchestrator once; a later message within 5 minutes does not wake it again', async (t) => {
+  const p = await makeProject(t, [unitSpec('a')]);
+  await withOrchestrator(p);
+  const t3 = fakeT3('completed');
+  const sends = () => t3.calls.filter(([c]) => c.startsWith('thread send')).length;
+  const both = await Promise.all([orq(['inbox', 'one'], p, { exec: t3.exec }), orq(['inbox', 'two'], p, { exec: t3.exec })]);
+  assert.equal(sends(), 1);
+  assert.equal(both.filter((r) => /^woke orchestrator thread/m.test(r.out)).length, 1);
+  assert.equal(both.filter((r) => /was woken in the last 5 min; not woken again/.test(r.out)).length, 1);
+  await orq(['inbox', 'three'], p, { exec: t3.exec, now: NOW + 4 * 60_000 });
+  assert.equal(sends(), 1);
+  await orq(['inbox', 'four'], p, { exec: t3.exec, now: NOW + 6 * 60_000 });
+  assert.equal(sends(), 2);
+});
