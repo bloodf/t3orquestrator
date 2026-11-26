@@ -1,0 +1,12 @@
+locale = "en"
+port = 8317
+allow-lan = false
+host = "127.0.0.1"
+auth-dir = "../oauth"
+management-secret-key = "test-management-key-not-real"
+debug = false
+api-keys = ["client-key-not-real"]
+
+[auto-update]
+enabled = false
+port = 9999

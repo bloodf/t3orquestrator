@@ -11,6 +11,6 @@
     "orq": "bin/orq.mjs"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test --import ./test/support/offline.mjs"
   }
 }

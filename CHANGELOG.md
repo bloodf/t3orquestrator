@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - `orq inbox` says `not delivered: no orq wait is running` when no live `orq wait` holds the runner lock, and wakes the orchestrator thread `orq sync` recorded with a short message to run `orq wait`, unless T3 shows it at work or a supervisor watchdog directory for the project (`<T3ORQ_HOME>/watchdog/<name>/{path,hold}`) holds it, and at most once every 5 minutes. The message stays queued either way.
+- Real account quota from EasyCLIProxyAPI: on a machine that runs it, `orq wait` reads each account's windows, reset times and credit balance through its management API at most every 5 minutes (`~/.t3orq/quota.json`), maps accounts to instances by T3 display name (or machine `quotaSource.accounts`), and routes by them: headroom from the real windows, a used-up window cools its models until its reset, a real reading ends a limit hold early on every provider, and a `creditInstances` instance with 0 credits counts its windows. The snapshot is published in the peer status, so peers without EasyCLI use it; with neither, routing is as before. New `orq usage [--refresh] [--json]` prints the per-account table; new machine key `quotaSource`. See docs/easycli-quota.md.
 - `orq wait` (once per call) and `orq status` note T3 threads at work in the project that hold no orq lease, and files under `.orq/` the kit did not write. Notes only: nothing stops.
 
 ### Changed
