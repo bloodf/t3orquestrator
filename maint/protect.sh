@@ -205,3 +205,37 @@ emit_paths() {
     printf '%s\n' "$_e"
   done
 }
+
+# A find -path pattern that matches PATH literally (its *, ?, [ and \ escaped).
+find_literal() {
+  printf '%s\n' "$1" | sed 's/[][*?\\]/\\&/g'
+}
+
+# Root overrides (MAINT_TEMP_ROOTS, MAINT_CHURN_ROOTS) are for tests only: honored when ORQ_MAINT_TEST=1 and every
+# root is inside ORQ_MAINT_TEST_AREA, itself a directory under a system temp dir. Prints the roots one per line, or
+# fails: the caller then deletes nothing.
+override_roots() {
+  [ "${ORQ_MAINT_TEST:-}" = 1 ] || return 1
+  _area=${ORQ_MAINT_TEST_AREA:-}
+  case "$_area" in /?*) ;; *) return 1 ;; esac
+  _ra=$(cd "$_area" 2>/dev/null && pwd -P) || return 1
+  case "$_ra/" in /tmp/?*|/private/tmp/?*|/var/tmp/?*|/private/var/folders/?*) ;; *) return 1 ;; esac
+  printf '%s\n' "$1" | tr ' ' '\n' | while IFS= read -r _x; do
+    [ -n "$_x" ] || continue
+    # shellcheck disable=SC2254 # CTRL_GLOB is a pattern on purpose
+    case "$_x" in $CTRL_GLOB) exit 1 ;; esac
+    case "$_x" in */..|*/../*|*/.|*/./*) exit 1 ;; esac # no way out of the area by name
+    case "$_x" in "$_area"/?*|"$_ra"/?*) printf '%s\n' "$_x" ;; *) exit 1 ;; esac
+  done
+}
+
+# Tests only: stop between validating a root and deleting in it, until the test says go (ORQ_MAINT_TEST_PAUSE).
+test_pause() {
+  [ "${ORQ_MAINT_TEST:-}" = 1 ] && [ -n "${ORQ_MAINT_TEST_PAUSE:-}" ] || return 0
+  : > "$ORQ_MAINT_TEST_PAUSE.ready"
+  _n=0
+  while [ ! -e "$ORQ_MAINT_TEST_PAUSE.go" ] && [ "$_n" -lt 300 ]; do
+    sleep 0.1
+    _n=$((_n + 1))
+  done
+}

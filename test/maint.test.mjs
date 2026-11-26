@@ -173,10 +173,17 @@ test('startCleanup starts one run at most once an hour', async (t) => {
   const dir = tmp(t);
   let clock = NOW;
   const started = [];
-  const ctx = { env: { T3ORQ_HOME: dir }, now: () => clock };
+  const ctx = {
+    env: {
+      T3ORQ_HOME: dir, MAINT_TEMP_ROOTS: '/', MAINT_CHURN_ROOTS: '/', ORQ_MAINT_TEST: '1', ORQ_MAINT_TEST_AREA: '/', ORQ_MAINT_TEST_PAUSE: '/x', KEEP_ME: 'y',
+    },
+    now: () => clock,
+  };
   const spawnClean = (o) => started.push(o);
   assert.equal(await startCleanup(ctx, { spawnClean }), true);
   assert.equal(started[0].env.T3ORQ_HOME, dir);
+  assert.equal(started[0].env.KEEP_ME, 'y');
+  assert.deepEqual(Object.keys(started[0].env).filter((k) => /^(MAINT_|ORQ_MAINT_)/.test(k)), []); // test-only overrides never reach a real run
   clock += 30 * 60_000;
   assert.equal(await startCleanup(ctx, { spawnClean }), false);
   clock += 31 * 60_000;
@@ -239,7 +246,7 @@ function world(t) {
     encoding: 'utf8',
     cwd,
     env: {
-      PATH: process.env.PATH, HOME: home, T3ORQ_HOME: orqHome, T3CODE_CLI_PATH: bin, TMPDIR: dir, MAINT_TEMP_ROOTS: temp, MAINT_DOCKER: '0', ORQ_MAINT_LOWPRIO: '1', ...env,
+      PATH: process.env.PATH, HOME: home, T3ORQ_HOME: orqHome, T3CODE_CLI_PATH: bin, TMPDIR: dir, MAINT_TEMP_ROOTS: temp, MAINT_DOCKER: '0', ORQ_MAINT_LOWPRIO: '1', ORQ_MAINT_TEST: '1', ORQ_MAINT_TEST_AREA: dir, ...env,
     },
   });
   return {
@@ -481,5 +488,55 @@ test('adversarial names and links: nothing outside the root, nothing young and n
     assert.equal(fs.readFileSync(path.join(w.temp, 'globX'), 'utf8'), 'young', script);
     assert.equal(fs.readFileSync(path.join(w.temp, 'qX'), 'utf8'), 'young', script);
     for (const rel of ['-rf', '*', 'a b c']) assert.equal(fs.existsSync(path.join(w.temp, rel)), false, `${script} cleans ${rel}`);
+  }
+});
+
+test('the root overrides are test-only: without ORQ_MAINT_TEST, or a root outside the test area, nothing is deleted', (t) => {
+  for (const script of ['disk-clean.sh', 'tmp-churn.sh']) {
+    const w = world(t);
+    const outside = path.join(os.homedir(), '.orq-never-used');
+    for (const env of [
+      { ORQ_MAINT_TEST: '' }, // production: an override set by accident
+      { ORQ_MAINT_TEST: '0' },
+      { ORQ_MAINT_TEST_AREA: '' },
+      { ORQ_MAINT_TEST_AREA: os.homedir() }, // an area that is no temp dir
+      { MAINT_TEMP_ROOTS: `${w.temp} ${outside}`, MAINT_CHURN_ROOTS: `${w.temp} ${outside}` }, // one root outside the area
+      { MAINT_TEMP_ROOTS: `${w.dir}/../x`, MAINT_CHURN_ROOTS: `${w.dir}/../x` },
+    ]) {
+      const r = w.run(script, { MAINT_CHURN_ROOTS: w.temp, ...env });
+      assert.equal(r.status, 2, `${script} ${JSON.stringify(env)}: ${r.stderr}`);
+      assert.match(r.stderr, /nothing deleted: MAINT_(TEMP|CHURN)_ROOTS is for tests only/);
+      assert.ok(fs.existsSync(path.join(w.temp, 'old-scratch', 'f')), `${script} ${JSON.stringify(env)}`);
+    }
+  }
+});
+
+test('a root swapped for a symlink after the checks and before the deletion deletes nothing outside it', async (t) => {
+  for (const script of ['disk-clean.sh', 'tmp-churn.sh']) {
+    const w = world(t);
+    const docs = path.join(w.dir, 'documents');
+    mkOld(path.join(docs, 'old-scratch', 'f'), 'precious'); // the same names as the scratch the checks approved
+    mkOld(path.join(docs, 'precious'), 'precious');
+    const at = OLD();
+    fs.utimesSync(path.join(docs, 'old-scratch'), at, at);
+    const pause = path.join(w.dir, 'pause');
+    const child = spawn('/bin/sh', [path.join(KIT, 'maint', script)], {
+      cwd: w.dir,
+      env: {
+        PATH: process.env.PATH, HOME: path.join(w.dir, 'home'), T3ORQ_HOME: w.orqHome, TMPDIR: w.dir, MAINT_TEMP_ROOTS: w.temp, MAINT_CHURN_ROOTS: w.temp,
+        MAINT_DOCKER: '0', ORQ_MAINT_LOWPRIO: '1', ORQ_MAINT_TEST: '1', ORQ_MAINT_TEST_AREA: w.dir, ORQ_MAINT_TEST_PAUSE: pause,
+        T3CODE_CLI_PATH: path.join(w.dir, 't3'),
+      },
+      stdio: 'ignore',
+    });
+    const exited = new Promise((r) => { child.on('exit', r); });
+    for (let i = 0; i < 300 && !fs.existsSync(`${pause}.ready`); i += 1) await new Promise((r) => { setTimeout(r, 100); });
+    assert.ok(fs.existsSync(`${pause}.ready`), `${script} reached the deletion`);
+    fs.renameSync(w.temp, `${w.temp}.real`); // swap the validated root for a link to documents
+    fs.symlinkSync(docs, w.temp);
+    fs.writeFileSync(`${pause}.go`, '');
+    assert.equal(await exited, 0, script);
+    assert.equal(fs.readFileSync(path.join(docs, 'old-scratch', 'f'), 'utf8'), 'precious', script);
+    assert.equal(fs.readFileSync(path.join(docs, 'precious'), 'utf8'), 'precious', script);
   }
 });

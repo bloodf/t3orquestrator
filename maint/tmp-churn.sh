@@ -12,7 +12,8 @@
 # or more of its inodes in use, files idle for $EMERGENCY_AGE minutes go too.
 #   DRY=1  print how many files would go per root; change nothing
 #   AGE (default 120), EMERGENCY (default 90), EMERGENCY_AGE (default 10)
-#   MAINT_CHURN_ROOTS  space-separated roots instead of the built-in list
+#   MAINT_CHURN_ROOTS  tests only (ORQ_MAINT_TEST=1, every root inside ORQ_MAINT_TEST_AREA): space-separated roots
+#                      instead of the built-in list; set any other way, the script deletes nothing
 # Runs at the lowest I/O priority it can get: ionice -c3 + nice on Linux, taskpolicy -b on macOS.
 set -u
 set -f # no pathname expansion: see emit_roots
@@ -47,24 +48,10 @@ inodes_used() {
   df -Pi "$1" 2>/dev/null | awk 'NR==2{v=0; for(i=1;i<=NF;i++) if ($i ~ /^[0-9]+%$/) v=$i; sub("%","",v); print v+0}'
 }
 
-# Lines of $1 that are not protected: not a kept path, under one or holding one; not inside a repository found in the
-# root (repos: one real path per line); not held by a process (exact match: an open file, a working directory).
-# Only absolute paths strictly under ROOT ($2) with no control character pass (a split line never does).
-filter() {
-  awk -v root="$2" -v keep="$work/keep" -v repos="$work/repos" -v busy="$work/busy" '
-    BEGIN {
-      while ((getline l < keep) > 0) if (l != "") k[++nk] = l
-      while ((getline l < repos) > 0) if (l != "") k[++nk] = l
-      while ((getline l < busy) > 0) b[l] = 1
-    }
-    {
-      if (index($0, root "/") != 1 || length($0) <= length(root) + 1 || $0 ~ /[\001-\037\177]/) next
-      if ($0 in b) next
-      for (i = 1; i <= nk; i++) {
-        if ($0 == k[i] || index($0, k[i] "/") == 1 || index(k[i], $0 "/") == 1) next
-      }
-      print
-    }' "$1"
+# The paths of FILE (one per line) strictly under ROOT, with no control character: kept paths, repositories and held
+# paths that a find in ROOT must leave out.
+under_root() {
+  awk -v root="$2" 'index($0, root "/") == 1 && length($0) > length(root) + 1 && $0 !~ /[\001-\037\177]/' "$1"
 }
 
 total=0
@@ -76,24 +63,35 @@ churn() {
   age=$AGE
   used=$(inodes_used "$r")
   [ "${used:-0}" -ge "$EMERGENCY" ] && age=$EMERGENCY_AGE
-  # repositories and worktrees inside the root: nothing in them is scratch
-  find "$r" -xdev -name .git 2>/dev/null | sed 's#/\.git$##' > "$work/repos"
-  # find arguments that leave out every maint-skip match and everything under it
+  # Everything find must leave out, as its own predicates (deletion is find's, never a path string's):
+  #   maint-skip matches and everything under them;
+  #   kept paths and repositories or worktrees inside the root, and everything under them;
+  #   paths a process holds (an open file, a working directory).
+  find -P "$r" -xdev -name .git 2>/dev/null | sed 's#/\.git$##' > "$work/repos"
   set --
   while IFS= read -r g; do
     [ -n "$g" ] || continue
     set -- "$@" ! -path "$g" ! -path "$g/*"
   done < "$work/skip"
-  find "$r" -xdev -mindepth 1 -type f -user "$me" -mmin +"$age" ! -path "$CTRL_GLOB" "$@" 2>/dev/null > "$work/files.all"
-  filter "$work/files.all" "$r" > "$work/files"
-  n=$(wc -l < "$work/files" | tr -d ' ')
+  cat "$work/keep" "$work/repos" > "$work/prefixes"
+  under_root "$work/prefixes" "$r" > "$work/prefixes.in"
+  while IFS= read -r k; do
+    lit=$(find_literal "$k")
+    set -- "$@" ! -path "$lit" ! -path "$lit/*"
+  done < "$work/prefixes.in"
+  under_root "$work/busy" "$r" > "$work/busy.in"
+  while IFS= read -r k; do
+    set -- "$@" ! -path "$(find_literal "$k")"
+  done < "$work/busy.in"
   if [ -n "$DRY" ]; then
+    n=$(find -P "$r" -xdev -mindepth 1 -type f -user "$me" -mmin +"$age" ! -path "$CTRL_GLOB" "$@" -print 2>/dev/null | wc -l | tr -d ' ')
     echo "$r: $n files idle over $age min (inodes ${used:-?}% used)"
     return 0
   fi
-  tr '\n' '\0' < "$work/files" | xargs -0 rm -f -- 2>/dev/null
-  find "$r" -xdev -mindepth 1 -depth -type d -user "$me" -empty -mmin +"$age" ! -path "$CTRL_GLOB" "$@" 2>/dev/null > "$work/dirs.all"
-  filter "$work/dirs.all" "$r" | while IFS= read -r d; do rmdir -- "$d" 2>/dev/null; done
+  test_pause
+  # find -P walks the root without following a symlinked root or any link inside it, and deletes what it matched
+  n=$(find -P "$r" -xdev -mindepth 1 -type f -user "$me" -mmin +"$age" ! -path "$CTRL_GLOB" "$@" -print -delete 2>/dev/null | wc -l | tr -d ' ')
+  find -P "$r" -xdev -mindepth 1 -depth -type d -user "$me" -empty -mmin +"$age" ! -path "$CTRL_GLOB" "$@" -delete 2>/dev/null
   total=$((total + n))
 }
 
@@ -102,8 +100,8 @@ churn() {
 # again by churn (resolve_root: a real directory reached through no link, owned by this user).
 emit_roots() {
   if [ -n "${MAINT_CHURN_ROOTS:-}" ]; then
-    printf '%s\n' "$MAINT_CHURN_ROOTS" | tr ' ' '\n' | grep -v "$(printf '[\001-\037\177]')"
-    return 0
+    override_roots "$MAINT_CHURN_ROOTS"
+    return
   fi
   emit_paths /tmp/claude-"$me" /private/tmp/claude-"$me" "$T"/claude-"$me" \
     /tmp/node-compile-cache "$T"/node-compile-cache "$HOME"/.cache/node-compile-cache \
@@ -112,7 +110,10 @@ emit_roots() {
   emit_paths /tmp/playwright-* "$T"/playwright-*
   set -f
 }
-emit_roots > "$work/roots"
+if ! emit_roots > "$work/roots"; then
+  echo "tmp-churn: nothing deleted: MAINT_CHURN_ROOTS is for tests only (ORQ_MAINT_TEST=1, roots in ORQ_MAINT_TEST_AREA)" >&2
+  exit 2
+fi
 while IFS= read -r r; do
   [ -n "$r" ] && churn "$r"
 done < "$work/roots"

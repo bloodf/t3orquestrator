@@ -14,7 +14,8 @@
 #   DRY=1        print what would go (du -sk); change nothing at all
 #   AGE          minutes a temp entry must be idle (default 360)
 #   ORQ          the orq command (default: node <kit>/bin/orq.mjs)
-#   MAINT_TEMP_ROOTS  space-separated temp roots instead of the built-in list; MAINT_DOCKER=0 skips docker
+#   MAINT_TEMP_ROOTS  tests only (ORQ_MAINT_TEST=1, every root inside ORQ_MAINT_TEST_AREA): space-separated temp roots
+#                     instead of the built-in list; set any other way, the script deletes nothing. MAINT_DOCKER=0 skips docker
 #   $T3ORQ_HOME/maint-skip  globs of paths never touched, one per line
 # Runs at the lowest I/O priority it can get: ionice -c3 + nice on Linux, taskpolicy -b on macOS.
 set -u
@@ -43,14 +44,11 @@ if ! protect_init "$work"; then
   exit 1
 fi
 
-act_rm() { # remove a path, or say what would go
-  if [ -n "$DRY" ]; then du -sk "$1" 2>/dev/null; else rm -rf -- "$1" 2>/dev/null; fi
-}
-
 clean_root() {
   r=$(resolve_root "$1") || return 0 # never a root reached through a link (but the system temp aliases)
   under_kept "$r" && return 0 # the root itself is kept, or is a repository: nothing under it is scratch
-  find "$r" -mindepth 1 -maxdepth 1 -user "$me" -mmin +"$AGE" ! -path "$CTRL_GLOB" 2>/dev/null | while IFS= read -r e; do
+  : > "$work/approved"
+  find -P "$r" -mindepth 1 -maxdepth 1 -user "$me" -mmin +"$AGE" ! -path "$CTRL_GLOB" 2>/dev/null | while IFS= read -r e; do
     safe_under "$e" "$r" || continue # never a split line, never outside the root
     case "$(basename "$e")" in
       PostgreSQL.*|tmux-*|systemd-private-*|.X11-unix|.ICE-unix|.font-unix|snap-private-tmp|ssh-*|diskclean.*|com.apple.*|launchd*|*.sock) continue ;;
@@ -61,8 +59,23 @@ clean_root() {
       [ -n "$(find "$e" -mmin -"$AGE" -print -quit 2>/dev/null)" ] && continue
     fi
     protected "$e" && continue
-    act_rm "$e"
+    printf '%s\n' "$e" >> "$work/approved"
   done
+  [ -s "$work/approved" ] || return 0
+  if [ -n "$DRY" ]; then
+    while IFS= read -r e; do du -sk "$e" 2>/dev/null; done < "$work/approved"
+    return 0
+  fi
+  test_pause
+  # Delete by walking the root, never by a path string: find -P does not follow a symlinked root or any link inside,
+  # so a root swapped for a link after the checks above deletes nothing. -xdev: never into another filesystem.
+  set --
+  while IFS= read -r e; do
+    lit=$(find_literal "$e")
+    if [ "$#" -gt 0 ]; then set -- "$@" -o; fi
+    set -- "$@" -path "$lit" -o -path "$lit/*"
+  done < "$work/approved"
+  find -P "$r" -xdev -mindepth 1 -depth \( "$@" \) -delete 2>/dev/null
 }
 
 before=$(df -Pk "$HOME" | awk 'NR==2{print $4}')
@@ -73,8 +86,8 @@ before=$(df -Pk "$HOME" | awk 'NR==2{print $4}')
 # clean_root (resolve_root: a real directory reached through no link).
 emit_roots() {
   if [ -n "${MAINT_TEMP_ROOTS:-}" ]; then
-    printf '%s\n' "$MAINT_TEMP_ROOTS" | tr ' ' '\n' | grep -v "$(printf '[\001-\037\177]')"
-    return 0
+    override_roots "$MAINT_TEMP_ROOTS"
+    return
   fi
   emit_paths /tmp /var/tmp /dev/shm "${TMPDIR:-}" /private/tmp
   set +f
@@ -82,7 +95,10 @@ emit_roots() {
     "$HOME"/.cache/*-tmp "$HOME"/.cache/*scratch* "$HOME"/.cache/*orq*
   set -f
 }
-emit_roots > "$work/roots"
+if ! emit_roots > "$work/roots"; then
+  echo "disk-clean: nothing deleted: MAINT_TEMP_ROOTS is for tests only (ORQ_MAINT_TEST=1, roots in ORQ_MAINT_TEST_AREA)" >&2
+  exit 2
+fi
 while IFS= read -r r; do
   [ -n "$r" ] && clean_root "$r"
 done < "$work/roots"
