@@ -134,11 +134,20 @@ protect_init() {
   if [ -f "$_home/maint-skip" ]; then
     while IFS= read -r g; do
       [ -n "$g" ] || continue
-      {
-        printf '%s\n' "$g"
-        canon_glob "$g"
-        canon_target "$g"
-      } >> "$PROTECT_WORK/skip"
+      case "$g" in
+        *[*?[]*) # a glob: kept as written, and with its literal directory made real
+          {
+            printf '%s\n' "$g"
+            canon_glob "$g"
+          } >> "$PROTECT_WORK/skip" ;;
+        *) # a literal path: escaped (a backslash in it is a backslash), as written, real, and through a final link
+          {
+            find_literal "$g"
+            find_literal "$(canon_glob "$g")"
+            _t=$(canon_target "$g")
+            [ -z "$_t" ] || find_literal "$_t"
+          } >> "$PROTECT_WORK/skip" ;;
+      esac
     done < "$_home/maint-skip"
   fi
   return 0

@@ -540,3 +540,26 @@ test('a root swapped for a symlink after the checks and before the deletion dele
     assert.equal(fs.readFileSync(path.join(docs, 'precious'), 'utf8'), 'precious', script);
   }
 });
+
+test('a root with a backslash in its name keeps every exclusion: a backslash-t name is not a tab', (t) => {
+  for (const script of ['tmp-churn.sh', 'disk-clean.sh']) {
+    const w = world(t);
+    const root = path.join(w.dir, 'root\\t'); // a backslash and a t, not a tab
+    const checkout = path.join(root, 'checkout');
+    fs.mkdirSync(checkout, { recursive: true });
+    git(checkout, 'init', '-q');
+    mkOld(path.join(checkout, 'uncommitted.txt'), 'work');
+    mkOld(path.join(root, 'held.log'), 'held');
+    mkOld(path.join(root, 'kept', 'f'), 'kept');
+    mkOld(path.join(root, 'scratch', 'f'), 'scratch');
+    const at = OLD();
+    for (const d of ['checkout', 'kept', 'scratch']) fs.utimesSync(path.join(root, d), at, at);
+    fs.utimesSync(root, at, at);
+    fs.writeFileSync(path.join(w.orqHome, 'maint-skip'), `${path.join(root, 'kept')}\n`);
+    const r = w.run(script, { MAINT_TEMP_ROOTS: root, MAINT_CHURN_ROOTS: root });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(fs.readFileSync(path.join(checkout, 'uncommitted.txt'), 'utf8'), 'work', script);
+    assert.equal(fs.readFileSync(path.join(root, 'kept', 'f'), 'utf8'), 'kept', script);
+    assert.equal(fs.existsSync(path.join(root, 'scratch', 'f')), false, `${script} still cleans`);
+  }
+});

@@ -51,7 +51,8 @@ inodes_used() {
 # The paths of FILE (one per line) strictly under ROOT, with no control character: kept paths, repositories and held
 # paths that a find in ROOT must leave out.
 under_root() {
-  awk -v root="$2" 'index($0, root "/") == 1 && length($0) > length(root) + 1 && $0 !~ /[\001-\037\177]/' "$1"
+  # the root goes in through the environment: awk -v would read backslash escapes in it (a root named a\t)
+  ORQ_AWK_ROOT=$2 awk 'BEGIN { root = ENVIRON["ORQ_AWK_ROOT"] } index($0, root "/") == 1 && length($0) > length(root) + 1 && $0 !~ /[\001-\037\177]/' "$1"
 }
 
 total=0
