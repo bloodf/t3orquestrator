@@ -818,11 +818,9 @@ test('hold: no launch while the machine is held; the report says what waits and 
   assert.deepEqual([launches(free).length, free.report.held], [2, false]);
 });
 
-test('hold: no new gate, no feedback and no final gate start; a passed unit still integrates', () => {
+test('hold: only new launches and feedback wait; unit gates, the final gate and integration keep draining', () => {
   const gating = go([launched('a'), ended('a')], { hold: HOLD });
-  assert.deepEqual(types(gating).filter((x) => x === 'gate-start'), []);
-  assert.equal(gating.report.held, true);
-  assert.ok(!gating.report.notes.some((n) => /wait for checks/.test(n)));
+  assert.deepEqual(types(gating).filter((x) => x === 'gate-start'), ['gate-start']);
   const passed = go([launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'pass')], { hold: HOLD });
   assert.deepEqual(types(passed).filter((x) => x === 'integrate'), ['integrate']);
   const failedOnce = go([launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'fail')], { hold: HOLD, threads: { 't-a': thread('t-a', { status: 'completed' }) } });
@@ -830,7 +828,7 @@ test('hold: no new gate, no feedback and no final gate start; a passed unit stil
   assert.equal(failedOnce.report.held, true);
   const one = { goal: 'g', units: [unit('a')] };
   const final = go(doneA, { plan: one, hold: HOLD });
-  assert.deepEqual([types(final).includes('final-gate'), final.report.held, final.report.done], [false, true, false]);
+  assert.deepEqual([types(final).includes('final-gate'), final.report.done], [true, false]);
 });
 
 test('hold: a running gate result is still read, and a held machine with nothing to start is not held back', () => {
