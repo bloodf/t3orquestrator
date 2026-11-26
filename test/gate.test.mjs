@@ -7,7 +7,6 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createGit, defaultExec } from '../lib/git.mjs';
 import { runGate, defaultRun } from '../lib/gate.mjs';
-import { linkShares } from '../lib/share.mjs';
 
 const BASE = 'a'.repeat(40);
 const HEAD = 'b'.repeat(40);
@@ -555,7 +554,7 @@ test('a package manifest or lockfile outside the writable paths fails; inside th
 });
 
 test('S: the gate checkout links shared dependencies before its steps; removing it leaves them alone', async (t) => {
-  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'pnpm-lock.yaml': 'lockfileVersion: 1\n', '.gitignore': 'node_modules/\n' });
+  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'bun.lock': 'lockfileVersion: 1\n', '.gitignore': 'node_modules/\n' });
   await fs.mkdir(path.join(w.repo, 'node_modules', 'x'), { recursive: true });
   await fs.writeFile(path.join(w.repo, 'node_modules', 'x', 'y.js'), '1\n');
   const evidence = 'test -f node_modules/x/y.js && test -z "$(git status --porcelain)"';
@@ -570,33 +569,16 @@ test('S: the gate checkout links shared dependencies before its steps; removing 
   assert.equal(fsSync.existsSync(w.workDir), false);
 });
 
-test('S3: links pnpm wrote through a removed worker or gate checkout are repaired: the next gate finds eslint', async (t) => {
+test('S3: a pnpm project\'s gate checkout is never linked: pnpm in it cannot write links into the main node_modules', async (t) => {
   const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'pnpm-lock.yaml': 'lockfileVersion: 1\n', '.gitignore': 'node_modules/\n' });
-  const nm = path.join(w.repo, 'node_modules');
-  const pkg = '.pnpm/eslint@9/node_modules/eslint';
-  await fs.mkdir(path.join(nm, pkg), { recursive: true });
-  await fs.writeFile(path.join(nm, pkg, 'bin.js'), 'ok\n');
-  assert.deepEqual(linkShares({
-    dir: w.wt, cwd: w.repo, paths: ['node_modules'], git: w.git,
-  }), ['node_modules']);
-  // pnpm in the worker's worktree writes into the main node_modules, relative to the worktree's own path
-  await fs.symlink(path.relative(nm, path.join(w.wt, 'node_modules', pkg)), path.join(nm, 'eslint'));
-  w.git.removeWorktree(w.repo, w.wt);
-  assert.equal(fsSync.existsSync(path.join(nm, 'eslint')), false); // dangling: "missing eslint"
-  const share = { share: { paths: ['node_modules'], unit: null } };
-  const r = await real(w, 'test -f node_modules/eslint/bin.js', share);
+  await fs.mkdir(path.join(w.repo, 'node_modules', 'x'), { recursive: true });
+  const r = await real(w, 'test ! -e node_modules', { share: { paths: ['node_modules'], unit: null } });
   assert.equal(r.verdict, 'pass', JSON.stringify(r.failures));
-  // a gate step that writes through the gate checkout's own link leaves no link into it once the checkout is gone
-  const through = `node -e "const fs=require('fs'),p=require('path');const m=fs.realpathSync('node_modules');fs.symlinkSync(p.relative(m,p.resolve('node_modules/${pkg}')),p.join(m,'via-gate'))"`;
-  const g = await real(w, through, share);
-  assert.equal(g.verdict, 'pass', JSON.stringify(g.failures));
-  assert.equal(fsSync.existsSync(w.workDir), false);
-  assert.equal(await fs.readFile(path.join(nm, 'via-gate', 'bin.js'), 'utf8'), 'ok\n');
-  assert.ok(!fsSync.readlinkSync(path.join(nm, 'via-gate')).includes('gate-wd'));
+  assert.deepEqual(await fs.readdir(path.join(w.repo, 'node_modules')), ['x']);
 });
 
 test('S2: a linking error never kills the gate or leaves its checkout behind', async (t) => {
-  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'pnpm-lock.yaml': 'lockfileVersion: 1\n' });
+  const w = await realWork(t, { 'lib/a.mjs': 'x\n' }, {}, { 'package.json': '{}\n', 'bun.lock': 'lockfileVersion: 1\n' });
   await fs.mkdir(path.join(w.repo, 'node_modules'), { recursive: true });
   const git = { ...w.git, ignored: () => { throw new Error('git check-ignore failed (exit 128)'); } };
   const r = await real(w, 'test ! -e node_modules', { git, share: { paths: ['node_modules'], unit: null } });

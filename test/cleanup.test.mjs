@@ -33,25 +33,6 @@ test('cleanup: a worktree dirty only with ignored build files goes without a pat
   assert.ok(hasBranch(p, 'orq/p/a-a1'));
 });
 
-test('cleanup: links pnpm wrote into the shared node_modules through a removed worktree point back inside it', async (t) => {
-  const p = await makeProject(t, [unitSpec('a')]);
-  await fs.appendFile(path.join(p.repo, '.git', 'info', 'exclude'), '/node_modules\n');
-  const cfgFile = orqDir(p, 'config.json');
-  const cfg = JSON.parse(await fs.readFile(cfgFile, 'utf8').catch(() => '{}'));
-  await fs.writeFile(cfgFile, JSON.stringify({ ...cfg, share: ['node_modules'] }));
-  const nm = path.join(p.repo, 'node_modules');
-  const pkg = '.pnpm/eslint@9/node_modules/eslint';
-  await fs.mkdir(path.join(nm, pkg), { recursive: true });
-  await fs.writeFile(path.join(nm, pkg, 'bin.js'), 'ok\n');
-  const dir = worktreeOn(p, 'a1', 'orq/p/a-a1');
-  await fs.symlink(nm, path.join(dir, 'node_modules'));
-  await fs.symlink(path.relative(nm, path.join(dir, 'node_modules', pkg)), path.join(nm, 'eslint'));
-  await ledger(p, [launch('a', 'orq/p/a-a1'), ...merged('a')]);
-  const r = await cleanAll(fxOf(p));
-  assert.deepEqual(r.removed.map((w) => w.path), [dir]);
-  assert.equal(await fs.readFile(path.join(nm, 'eslint', 'bin.js'), 'utf8'), 'ok\n');
-});
-
 test('cleanup: uncommitted tracked changes and untracked source are saved as a patch that applies, then the worktree goes', async (t) => {
   const p = await makeProject(t, [unitSpec('c')]);
   const dir = worktreeOn(p, 'c1', 'orq/p/c-a1');

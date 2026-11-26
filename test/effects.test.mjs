@@ -1313,7 +1313,7 @@ async function withDeps(t, over = {}) {
   t.after(() => fs.rm(`${s.p.repo}-wt-1`, { recursive: true, force: true }));
   await fs.writeFile(path.join(s.p.repo, '.gitignore'), 'node_modules/\n');
   await fs.writeFile(path.join(s.p.repo, 'package.json'), '{"name":"x"}\n');
-  await fs.writeFile(path.join(s.p.repo, 'pnpm-lock.yaml'), 'lockfileVersion: 1\n'); // npm projects are never shared
+  await fs.writeFile(path.join(s.p.repo, over.lock ?? 'bun.lock'), 'lockfileVersion: 1\n'); // npm and pnpm projects are never shared
   sh(s.p.repo, 'add', '-A');
   sh(s.p.repo, 'commit', '-q', '-m', 'deps');
   await fs.mkdir(path.join(s.p.repo, 'node_modules', 'x'), { recursive: true });
@@ -1330,6 +1330,38 @@ test('S: a worker whose commit has the same manifests gets the main checkout\'s 
   assert.ok(o.message.startsWith('Dependencies: node_modules are linked from the main checkout. Do not install, delete or modify them; if you must change dependencies, report NEEDS_CONTEXT.\n\nWork order for a.'), o.message);
   const link = path.join(world.worktrees.th1, 'node_modules');
   assert.equal(await fs.readlink(link), path.join(s.p.repo, 'node_modules'));
+});
+
+test('S: a pnpm worker gets no link (pnpm writes links through it that dangle once the worktree goes) but how to install', async (t) => {
+  const { s, world } = await withDeps(t, { lock: 'pnpm-lock.yaml' });
+  await s.act(launchA());
+  const o = s.t3.calls.find((c) => c[0] === 'start')[1];
+  assert.ok(o.message.startsWith('Dependencies: this worktree has no node_modules and none is linked. Install them before running anything: `pnpm install --frozen-lockfile --prefer-offline`'), o.message);
+  assert.equal(fsSync.existsSync(path.join(world.worktrees.th1, 'node_modules')), false);
+});
+
+test('gate-run: a pnpm project with no setup step installs its own node_modules in the gate; share null keeps the old way', async (t) => {
+  const s = await setup(t, [unitSpec('a')]);
+  await s.act(launchA());
+  await fs.writeFile(path.join(s.p.repo, 'pnpm-lock.yaml'), 'lockfileVersion: 1\n');
+  await fs.mkdir(path.join(s.p.repo, 'node_modules'));
+  const sha = await commitOn(s.p.repo, unitOf(await readState(s.p.repo), 'a').branch, { 'a.txt': 'A\n' });
+  const quiet = { write: () => {} };
+  const commands = [];
+  const run = async (command, { cwd }) => {
+    commands.push([command, fsSync.existsSync(path.join(cwd, 'node_modules'))]);
+    return { code: 0, output: '', timedOut: false };
+  };
+  const orq = (args) => cli(args, {
+    stdout: quiet, stderr: quiet, env: s.p.env, cwd: s.p.repo, deps: { run, clone: () => false },
+  });
+  assert.equal(await orq(['config', 'set', 'share', 'node_modules']), 0);
+  await orq(['gate-run', 'a', '1', sha]);
+  assert.deepEqual(commands, [['pnpm install --frozen-lockfile --prefer-offline', false], ['test -f a.txt', false]]);
+  commands.length = 0;
+  assert.equal(await orq(['config', 'set', 'share', 'null']), 0);
+  await orq(['gate-run', 'a', '1', sha]);
+  assert.deepEqual(commands.map(([c]) => c), ['test -f a.txt']);
 });
 
 test('S: no link and no line when the manifests differ, the unit changes dependencies, or it opts out', async (t) => {

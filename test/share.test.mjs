@@ -6,14 +6,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { createGit, defaultExec } from '../lib/git.mjs';
 import {
-  validSharePath, detectShares, eligibleShares, linkShares, repairShares, shareLine, syncShareExclude,
+  validSharePath, detectShares, eligibleShares, linkShares, pnpmInstall, shareLine, syncShareExclude,
 } from '../lib/share.mjs';
 import { sh } from './support/project.mjs';
 
 const git = createGit({ exec: defaultExec });
 
 // A repo whose main checkout has installed dependencies; the commit holds the manifests.
-async function repo(t, { gitignore = 'node_modules/\n.venv/\n', lock = 'pnpm-lock.yaml' } = {}) {
+async function repo(t, { gitignore = 'node_modules/\n.venv/\n', lock = 'bun.lock' } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orq-share-')));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const dir = path.join(root, 'repo');
@@ -61,7 +61,7 @@ test('eligibleShares: only when the target exists and the governing manifests ma
   assert.deepEqual(eligibleShares({
     cwd: r.dir, commit: r.sha, paths, unit: { id: 'u', paths: ['package-lock.json', 'src/**'] }, git,
   }), []); // a unit that changes dependencies gets its own copy of every one
-  await fs.writeFile(path.join(r.dir, 'pnpm-lock.yaml'), 'lockfileVersion: 2\n'); // the main checkout moved on
+  await fs.writeFile(path.join(r.dir, 'bun.lock'), 'lockfileVersion: 2\n'); // the main checkout moved on
   assert.deepEqual(eligibleShares({
     cwd: r.dir, commit: r.sha, paths, unit, git,
   }), ['.venv']); // the root lock governs every node_modules
@@ -151,59 +151,6 @@ test('removing a worktree or a gate directory with links never touches the share
   assert.equal(fsSync.existsSync(left), false);
 });
 
-// What pnpm does when run in a checkout whose node_modules links to the main one: it writes each link into the real
-// (main) directory, relative from there to the entry as seen through the checkout's own path.
-function pnpmLinkThrough(mainShare, checkout, share, link, entry) {
-  const at = path.join(mainShare, link);
-  fsSync.mkdirSync(path.dirname(at), { recursive: true });
-  fsSync.symlinkSync(path.relative(path.dirname(at), path.join(checkout, share, entry)), at);
-  return at;
-}
-
-test('repairShares: links pnpm wrote through a removed checkout point back inside the main checkout; others stay', async (t) => {
-  const r = await repo(t);
-  await fs.mkdir(path.join(r.dir, 'apps', 'shop', 'node_modules', '.pnpm', 'z@1', 'node_modules', 'z'), { recursive: true });
-  const nm = path.join(r.dir, 'node_modules');
-  const pkg = '.pnpm/eslint@9/node_modules/eslint';
-  await fs.mkdir(path.join(nm, pkg), { recursive: true });
-  await fs.writeFile(path.join(nm, pkg, 'bin.js'), 'ok\n');
-  await fs.mkdir(path.join(nm, '.pnpm/@scope+a@1/node_modules/@scope/a'), { recursive: true });
-  const paths = ['node_modules', 'apps/shop/node_modules'];
-  const wt = path.join(r.root, 'wt');
-  sh(r.dir, 'worktree', 'add', '-q', '--detach', wt, r.sha);
-  assert.deepEqual(linkShares({ dir: wt, cwd: r.dir, paths, git }), paths);
-  const gateDir = path.join(r.dir, '.orq', 'gate', 'u'); // a gate checkout inside the project
-  await fs.mkdir(gateDir, { recursive: true });
-  await fs.symlink(nm, path.join(gateDir, 'node_modules'));
-  const bad = [
-    pnpmLinkThrough(nm, wt, 'node_modules', 'eslint', pkg),
-    pnpmLinkThrough(nm, wt, 'node_modules', '.pnpm/node_modules/@scope/a', '.pnpm/@scope+a@1/node_modules/@scope/a'),
-    pnpmLinkThrough(nm, gateDir, 'node_modules', '.pnpm/node_modules/eslint', pkg),
-    pnpmLinkThrough(path.join(r.dir, 'apps/shop/node_modules'), wt, 'apps/shop/node_modules', 'zz', '.pnpm/z@1/node_modules/z'),
-    pnpmLinkThrough(path.join(r.dir, 'apps/shop/node_modules'), wt, 'node_modules', 'eslint', pkg), // into another share
-  ];
-  const good = {
-    [path.join(nm, 'rel')]: `${pkg}`,
-    [path.join(nm, 'abs')]: path.join(nm, pkg),
-    [path.join(nm, 'shop')]: '../apps/shop', // a workspace package in the main checkout
-    [path.join(nm, 'elsewhere')]: '/nonexistent/node_modules/q', // nothing to map it to
-  };
-  for (const [at, to] of Object.entries(good)) await fs.symlink(to, at);
-  git.removeWorktree(r.dir, wt);
-  await fs.rm(gateDir, { recursive: true });
-  assert.equal(fsSync.existsSync(path.join(nm, 'eslint', 'bin.js')), false); // the reported failure: dangling
-  assert.equal(repairShares(r.dir, paths), bad.length);
-  for (const at of bad) {
-    assert.ok(fsSync.existsSync(at), at);
-    const to = fsSync.readlinkSync(at);
-    assert.ok(!path.isAbsolute(to) && path.resolve(path.dirname(at), to).startsWith(`${r.dir}/`), to);
-  }
-  assert.equal(await fs.readFile(path.join(nm, 'eslint', 'bin.js'), 'utf8'), 'ok\n');
-  for (const [at, to] of Object.entries(good)) assert.equal(fsSync.readlinkSync(at), to);
-  assert.equal(repairShares(r.dir, paths), 0); // nothing left to repair
-  assert.equal(repairShares(r.dir, ['missing']), 0);
-});
-
 const { run } = await import('../lib/cli.mjs');
 async function orqIn(dir, home, args) {
   const out = []; const err = [];
@@ -236,9 +183,9 @@ test('init detects share once, prints it and makes the links ignorable; config s
   assert.equal((await orqIn(r.dir, home, ['config', 'set', 'share', '.git'])).code, 1);
 });
 
-test('only node_modules governed by a pnpm or bun lockfile is shared: npm, yarn or no lockfile never, whatever share says', async (t) => {
+test('only node_modules governed by a bun lockfile is shared: pnpm, npm, yarn or no lockfile never, whatever share says', async (t) => {
   const cases = [
-    ['pnpm-lock.yaml', ['node_modules'], null],
+    ['pnpm-lock.yaml', [], 'pnpm projects are not shared: pnpm writes links through a linked node_modules that dangle once the worktree is removed; each checkout installs from the pnpm store'],
     ['bun.lock', ['node_modules'], null],
     ['bun.lockb', ['node_modules'], null],
     ['package-lock.json', [], 'npm projects are not shared: "npm ci" empties a linked node_modules'],
@@ -253,7 +200,7 @@ test('only node_modules governed by a pnpm or bun lockfile is shared: npm, yarn 
     }), want, String(lock));
     assert.deepEqual(detectShares(r.dir, git), { paths: want.length ? ['apps/shop/node_modules', 'node_modules'] : [], why }, String(lock));
   }
-  // a pnpm lockfile next to an npm one is still an npm project; the nested app uses the root lockfile
+  // a bun lockfile next to an npm one is still an npm project; the nested app uses the root lockfile
   const mixed = await repo(t);
   await fs.writeFile(path.join(mixed.dir, 'apps', 'shop', 'package-lock.json'), '{}\n');
   sh(mixed.dir, 'add', '-A');
@@ -344,4 +291,15 @@ test('nothing installed in the root of a pnpm or bun project: init says so, and 
   const npm = await repo(t, { lock: 'package-lock.json' });
   for (const d of ['node_modules', 'apps/shop/node_modules']) await fs.rm(path.join(npm.dir, d), { recursive: true });
   assert.deepEqual(detectShares(npm.dir, git), { paths: [], why: null });
+});
+
+test('pnpmInstall: one install per directory with a pnpm lockfile and an installed node_modules; none without', async (t) => {
+  const r = await repo(t, { lock: 'pnpm-lock.yaml' });
+  for (const d of ['tests', 'site', '.hidden']) {
+    await fs.mkdir(path.join(r.dir, d, 'node_modules'), { recursive: true });
+    await fs.writeFile(path.join(r.dir, d, 'pnpm-lock.yaml'), 'lockfileVersion: 1\n');
+  }
+  await fs.rm(path.join(r.dir, 'site', 'node_modules'), { recursive: true }); // never installed in the main checkout
+  assert.equal(pnpmInstall(r.dir), 'pnpm install --frozen-lockfile --prefer-offline && pnpm -C tests install --frozen-lockfile --prefer-offline');
+  assert.equal(pnpmInstall((await repo(t)).dir), null); // a bun project
 });

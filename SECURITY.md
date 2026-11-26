@@ -18,7 +18,7 @@ The gate checks out a worker's commit and runs `checks.setup`, the unit's `evide
 
 To save disk, `orq` links `node_modules` from your main checkout into worker worktrees instead of installing it again. A link is a symlink whose target is always inside your main checkout. It is made only:
 
-- in projects whose lockfile is pnpm's or bun's. Both were tested to leave the main checkout's directory intact when an install runs on a linked worktree. `npm ci` was tested to empty the directory a link points to, so npm projects are never linked; yarn is untested and is not linked either;
+- in projects whose lockfile is bun's, which was tested to leave the main checkout's directory intact when an install runs on a linked worktree. `npm ci` was tested to empty the directory a link points to, so npm projects are never linked; pnpm writes links into it that dangle once the worktree is removed, so pnpm projects install per checkout from the pnpm store; yarn is untested and is not linked either;
 - where git ignores the path, and when the manifests and lockfiles match your main checkout. A unit that changes dependencies gets no link and installs its own copy;
 - in a gate checkout only when no setup step runs there.
 
