@@ -36,6 +36,16 @@ test('adoptLaunches: a lease with a live thread and no launched event is adopted
   assert.deepEqual(await adoptLaunches(s.fx, [{ id: 'th-a' }]), []);
 });
 
+test('adoptLaunches: keeps the lease run clock so an immediate refusal still counts as this run', async (t) => {
+  const s = await setup(t);
+  await writeLease(s.dir, s.ahead('a', { runStartedAt: NOW - 3 * MIN }));
+  await writeLease(s.dir, s.ahead('b'));
+  await adoptLaunches(s.fx, [{ id: 'th-a' }, { id: 'th-b' }]);
+  const state = await readState(s.p.repo);
+  assert.equal(unitOf(state, 'a').runStartedAt, NOW - 3 * MIN); // from the lease, not the adoption time
+  assert.equal(unitOf(state, 'b').runStartedAt, NOW); // old leases without the field fall back to the event time
+});
+
 test('tendLeases: refreshes referenced leases, reaps orphans and stale reservations, leaves other projects alone', async (t) => {
   const s = await setup(t);
   await writeLease(s.dir, s.ahead('a'));
