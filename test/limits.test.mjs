@@ -94,7 +94,7 @@ test('long texts and newer shapes: MiniMax, a bare "Quota reached", a long quota
   assert.match(ag.reason, /^⚠ Individual quota reached/);
   const codex = classifyFailure(`${NARRATION}${SHAPES.codex}`, Date.parse('2026-11-26T15:00:00Z'));
   assert.equal(codex.until, new Date(2026, 10, 27, 15, 5).getTime());
-  assert.equal(classifyFailure(`Usage limit reached ${'x'.repeat(700)}`, NOW).kind, 'limit'); // a long line is still a refusal
+  assert.equal(classifyFailure(`Usage limit reached. ${'x'.repeat(700)}`, NOW).kind, 'limit'); // a long line is still a refusal
 });
 
 test('long prose that only mentions quotas and limits is no failure', () => {
@@ -110,6 +110,16 @@ test('long prose that only mentions quotas and limits is no failure', () => {
   for (const strict of [false, true]) {
     assert.equal(classifyFailure(`${NARRATION}${prose.join('\n')}\n${NARRATION}`, NOW, { strict }), null, `strict=${strict}`);
     assert.equal(classifyFailure(`${NARRATION.repeat(4)}${prose.join('\n')}`, NOW, { strict }), null, `long, strict=${strict}`);
+  }
+  // the phrase must end the refusal (end of line, punctuation, a code, the provider's follow-up), not start a sentence
+  for (const t of ['DONE\nUsage limit reached handling now has regression tests.', 'DONE\nToken Plan usage limit reached handling is covered by tests.',
+    'DONE\nWeekly limit reached banners now link to the plan page.', 'DONE\nIndividual quota reached events are counted per tenant.',
+    "DONE\nYou've hit your limit message is now translated.", 'DONE\nYou have reached your quota page redesigned.']) {
+    for (const strict of [true, false]) assert.equal(classifyFailure(t, NOW, { strict }), null, `${t} strict=${strict}`);
+  }
+  for (const t of ['Usage limit reached', 'Usage limit reached. Upgrade to continue.', 'Token Plan usage limit reached (2056)', 'Usage limit reached|1794000000',
+    'Weekly limit reached ∙ resets Nov 20, 5pm', 'Usage limit reached, please upgrade', 'Usage limit reached - try again later']) {
+    assert.equal(classifyFailure(`DONE\n${t}`, NOW, { strict: true })?.kind, 'limit', t);
   }
   // a completed turn is judged by its first and last lines only: a refusal quoted mid-report is not one
   assert.equal(classifyFailure(`DONE\n${SHAPES.minimax}\nAll tests pass.`, NOW, { strict: true }), null);
