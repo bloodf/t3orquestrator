@@ -5,7 +5,11 @@ import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createGit, defaultExec } from '../lib/git.mjs';
-import { repairShares } from '../lib/share-repair.mjs';
+import {
+  markRepairing, repairing, repairMarkPath, repairShares, unmarkRepairing,
+} from '../lib/share-repair.mjs';
+import { reserve } from '../lib/launch.mjs';
+import { spawnWithinBudget } from '../lib/gaterun.mjs';
 import { writeLease } from '../lib/leases.mjs';
 import { run } from '../lib/cli.mjs';
 import { sh } from './support/project.mjs';
@@ -180,11 +184,57 @@ test('finding 5: orq share repair runs only on demand and refuses while a thread
   assert.equal(dry.code, 0, dry.err);
   assert.ok(dry.out.startsWith('would repair 1 links\n  node_modules/eslint -> '), dry.out);
   await fs.rm(path.join(home, 'leases'), { recursive: true });
-  // the check and the repair run under the machine lock every thread and gate reservation takes: none starts meanwhile
-  const held = [];
-  const done = await orq(w, home, ['share', 'repair'], { beforeSwap: () => held.push(fsSync.existsSync(path.join(home, 'lock'))) });
-  assert.deepEqual(held, [true]);
+  // the walk holds the project (its mark), not the machine lock: other projects' reservations go on
+  const during = [];
+  const done = await orq(w, home, ['share', 'repair'], {
+    beforeSwap: () => during.push([fsSync.existsSync(path.join(home, 'lock')), repairing(w.repo)]),
+  });
+  assert.deepEqual(during, [[false, true]]);
   assert.equal(done.code, 0, done.err);
   assert.ok(done.out.startsWith('repaired 1 links'), done.out);
   assert.equal(await fs.readFile(path.join(link, 'index.js'), 'utf8'), 'ok\n');
+  assert.equal(repairing(w.repo), false); // the mark is gone
+  assert.equal(fsSync.existsSync(repairMarkPath(w.repo)), false);
+});
+
+test('a repair in progress in project A blocks A\'s thread and gate reservations, never project B\'s', async (t) => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orq-repair-lock-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const env = { T3ORQ_HOME: path.join(root, 'home') };
+  const [a, b] = ['a', 'b'].map((n) => path.join(root, n));
+  for (const d of [a, b]) await fs.mkdir(path.join(d, '.orq'), { recursive: true });
+  markRepairing(a);
+  const fx = (cwd) => ({ cwd, env, now: () => 1000 });
+  const unit = { unit: 'u', attempt: 1, instance: 'i', model: 'm' };
+  assert.equal(await reserve(fx(a), unit, 4, 60_000), null);
+  assert.match(await reserve(fx(b), unit, 4, 60_000), /^reserve-/);
+  const spawned = [];
+  const spawn = (cwd) => async () => { spawned.push(cwd); return 4242; };
+  for (const gateCap of [undefined, 4]) {
+    assert.equal(await spawnWithinBudget({ ...fx(a), gateCap, isAlive: () => false }, spawn(a), 'u'), null);
+    assert.equal(await spawnWithinBudget({ ...fx(b), gateCap, isAlive: () => false }, spawn(b), 'u'), 4242);
+  }
+  assert.deepEqual(spawned, [b, b]);
+  // a mark whose process is gone, or another process that reused its pid, holds nothing
+  await fs.writeFile(repairMarkPath(a), JSON.stringify({ pid: 999999, pidStart: 'x', startedAt: Date.now() }));
+  assert.equal(repairing(a), false);
+  await fs.writeFile(repairMarkPath(a), JSON.stringify({ pid: process.pid, pidStart: 'not this start', startedAt: Date.now() }));
+  assert.equal(repairing(a), false);
+  markRepairing(a);
+  assert.equal(repairing(a, { now: Date.now() + 2 * 60 * 60_000 }), false); // past its TTL
+  unmarkRepairing(a);
+  assert.match(await reserve(fx(a), unit, 4, 60_000), /^reserve-/);
+});
+
+test('a second repair of the same project is refused while the first holds it', async (t) => {
+  const w = await world(t);
+  const home = path.join(w.root, 'home');
+  await fs.mkdir(path.join(w.repo, '.orq'), { recursive: true });
+  await fs.writeFile(path.join(w.repo, '.orq', 'config.json'), JSON.stringify({ share: ['node_modules'] }));
+  markRepairing(w.repo);
+  const r = await orq(w, home, ['share', 'repair']);
+  assert.equal(r.code, 1);
+  assert.match(r.err, /another repair of this project is running/);
+  assert.equal(repairing(w.repo), true); // not removed by the refused one
+  unmarkRepairing(w.repo);
 });
