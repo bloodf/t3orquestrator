@@ -834,6 +834,22 @@ test('hold: only new launches and feedback wait; unit gates, the final gate and 
   assert.deepEqual([types(final).includes('final-gate'), final.report.done], [true, false]);
 });
 
+test('hold: a failing protected service starts no new gate or final gate; results are read and passed work integrates', () => {
+  const PROTECT = { reasons: ['gateway failing (timeout)'], protect: true };
+  const gating = go([launched('a'), ended('a')], { hold: PROTECT });
+  assert.deepEqual(types(gating).filter((x) => x === 'gate-start'), []);
+  assert.equal(gating.report.held, true);
+  const g = { a: { running: false, result: { verdict: 'pass', failures: [], flags: [], headSha: B } } };
+  const read = go([launched('a'), ended('a'), gateStarted('a')], { hold: PROTECT, gates: g, plan: { goal: 'g', units: [unit('a')] } });
+  assert.ok(evTypes(read).includes('gated:a'));
+  const passed = go([launched('a'), ended('a'), gateStarted('a'), gatedEv('a', 'pass')], { hold: PROTECT });
+  assert.deepEqual(types(passed).filter((x) => x === 'integrate'), ['integrate']);
+  const final = go(doneA, { plan: { goal: 'g', units: [unit('a')] }, hold: PROTECT });
+  assert.deepEqual([types(final).includes('final-gate'), final.report.held], [false, true]);
+  const rolling = go(doneA, { plan: { goal: 'g', units: [unit('a'), unit('b')] }, hold: PROTECT, config: { continuous: true } });
+  assert.equal(types(rolling).includes('final-gate'), false);
+});
+
 test('hold: a running gate result is still read, and a held machine with nothing to start is not held back', () => {
   const g = { a: { running: false, result: { verdict: 'pass', failures: [], flags: [], headSha: B } } };
   const r = go([launched('a'), ended('a'), gateStarted('a')], { hold: HOLD, gates: g, plan: { goal: 'g', units: [unit('a')] } });
