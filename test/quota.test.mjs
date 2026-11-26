@@ -191,6 +191,36 @@ test('refreshQuota: two processes at once ask EasyCLI once', async (t) => {
   assert.equal(ctx.fetched, 4, 'one account list and three accounts (antigravity not allowed), once');
 });
 
+test('refreshQuota: a forced refresh while another is in flight waits for it and asks nothing itself', async (t) => {
+  const { ctx, cfg } = await context(t);
+  const machine = { quotaSource: { configPath: cfg } };
+  const real = ctx.deps.fetch;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  ctx.deps.fetch = async (...args) => { await gate; return real(...args); };
+  const first = refreshQuota(ctx, machine, { force: true });
+  await new Promise((r) => { setTimeout(r, 50); }); // the first holds the in-flight mark
+  const second = refreshQuota(ctx, machine, { force: true });
+  assert.deepEqual(await refreshQuota(ctx, machine), { fetched: false }, 'an unforced one does not wait');
+  setTimeout(release, 150);
+  const [a, b] = await Promise.all([first, second]);
+  assert.deepEqual(a, { fetched: true });
+  assert.deepEqual(b, { fetched: false, waited: true });
+  assert.equal(ctx.fetched, 4, 'asked once');
+  assert.equal((await localQuota(ctx.env, NOW)).accounts.length, 5, 'the waiter reads the answer');
+  const kept = JSON.parse(await fs.readFile(quotaPath(ctx.env), 'utf8'));
+  assert.equal(kept.inflight, undefined, 'the mark is cleared');
+  ctx.deps.fetch = real;
+  assert.deepEqual(await refreshQuota(ctx, machine, { force: true }), { fetched: true }, 'with nothing in flight, force asks again');
+});
+
+test('refreshQuota: an in-flight mark left by a crashed process expires', async (t) => {
+  const { ctx, cfg } = await context(t);
+  await fs.mkdir(ctx.env.T3ORQ_HOME, { recursive: true });
+  await fs.writeFile(quotaPath(ctx.env), JSON.stringify({ triedAt: NOW - H, inflight: { id: 'x', until: NOW - 1 } }));
+  assert.deepEqual(await refreshQuota(ctx, { quotaSource: { configPath: cfg } }), { fetched: true });
+});
+
 test('refreshQuota passes allowTokenRefresh; kind off means no snapshot is used, local or peer', async (t) => {
   const { ctx, cfg } = await context(t);
   await refreshQuota(ctx, { quotaSource: { configPath: cfg, allowTokenRefresh: ['antigravity'] } });

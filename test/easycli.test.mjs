@@ -46,8 +46,8 @@ test('easyCliEndpoint: the configured path and url win; a missing file is no end
   const seen = [];
   assert.deepEqual(await easyCliEndpoint({ configPath: '/x/config.toml', url: 'http://10.0.0.2:9000/' }, { readFile: read(seen) }), { url: 'http://10.0.0.2:9000', key: KEY });
   assert.deepEqual(seen, ['/x/config.toml']);
-  await easyCliEndpoint({}, { readFile: read(seen), homedir: () => '/home/u' });
-  assert.equal(seen[1], '/home/u/Library/Application Support/com.cpa.gui/config.toml');
+  await easyCliEndpoint({}, { readFile: read(seen), homedir: () => '/var/empty/u' });
+  assert.equal(seen[1], '/var/empty/u/Library/Application Support/com.cpa.gui/config.toml');
   assert.equal(await easyCliEndpoint({}, { readFile: async () => { throw Object.assign(new Error('x'), { code: 'ENOENT' }); } }), null);
 });
 
