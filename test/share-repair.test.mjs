@@ -203,7 +203,7 @@ test('a repair in progress in project A blocks A\'s thread and gate reservations
   const env = { T3ORQ_HOME: path.join(root, 'home') };
   const [a, b] = ['a', 'b'].map((n) => path.join(root, n));
   for (const d of [a, b]) await fs.mkdir(path.join(d, '.orq'), { recursive: true });
-  markRepairing(a);
+  const mark = markRepairing(a);
   const fx = (cwd) => ({ cwd, env, now: () => 1000 });
   const unit = { unit: 'u', attempt: 1, instance: 'i', model: 'm' };
   assert.equal(await reserve(fx(a), unit, 4, 60_000), null);
@@ -211,8 +211,8 @@ test('a repair in progress in project A blocks A\'s thread and gate reservations
   const spawned = [];
   const spawn = (cwd) => async () => { spawned.push(cwd); return 4242; };
   for (const gateCap of [undefined, 4]) {
-    assert.equal(await spawnWithinBudget({ ...fx(a), gateCap, isAlive: () => false }, spawn(a), 'u'), null);
-    assert.equal(await spawnWithinBudget({ ...fx(b), gateCap, isAlive: () => false }, spawn(b), 'u'), 4242);
+    assert.deepEqual(await spawnWithinBudget({ ...fx(a), gateCap, isAlive: () => false }, spawn(a), 'u'), { skipped: 'share repair in progress' });
+    assert.deepEqual(await spawnWithinBudget({ ...fx(b), gateCap, isAlive: () => false }, spawn(b), 'u'), { pid: 4242 });
   }
   assert.deepEqual(spawned, [b, b]);
   // a mark whose process is gone, or another process that reused its pid, holds nothing
@@ -220,10 +220,36 @@ test('a repair in progress in project A blocks A\'s thread and gate reservations
   assert.equal(repairing(a), false);
   await fs.writeFile(repairMarkPath(a), JSON.stringify({ pid: process.pid, pidStart: 'not this start', startedAt: Date.now() }));
   assert.equal(repairing(a), false);
-  markRepairing(a);
-  assert.equal(repairing(a, { now: Date.now() + 2 * 60 * 60_000 }), false); // past its TTL
-  unmarkRepairing(a);
+  // a live repairer keeps it however long it takes; the TTL only bounds a mark with no start time to compare
+  const own = markRepairing(a);
+  assert.equal(repairing(a, { now: Date.now() + 24 * 60 * 60_000 }), true);
+  // the start time cannot be read now: the TTL decides
+  assert.equal(repairing(a, { procStart: () => null }), true);
+  assert.equal(repairing(a, { now: Date.now() + 2 * 60 * 60_000, procStart: () => null }), false);
+  await fs.writeFile(repairMarkPath(a), JSON.stringify({ pid: process.pid, pidStart: null, startedAt: Date.now() }));
+  assert.equal(repairing(a), true);
+  assert.equal(repairing(a, { now: Date.now() + 2 * 60 * 60_000 }), false);
+  // only the mark's owner removes it
+  const other = markRepairing(a);
+  assert.equal(unmarkRepairing(a, mark), false);
+  assert.equal(unmarkRepairing(a, { ...own, startedAt: own.startedAt - 1 }), false);
+  assert.equal(repairing(a), true);
+  assert.equal(unmarkRepairing(a, other), true);
   assert.match(await reserve(fx(a), unit, 4, 60_000), /^reserve-/);
+});
+
+test('a gate started with no gate budget still leaves its lease: share repair sees it running', async (t) => {
+  const w = await world(t);
+  const home = path.join(w.root, 'home');
+  await fs.mkdir(path.join(w.repo, '.orq'), { recursive: true });
+  await fs.writeFile(path.join(w.repo, '.orq', 'config.json'), JSON.stringify({ share: ['node_modules'] }));
+  const started = await spawnWithinBudget({
+    cwd: w.repo, env: { T3ORQ_HOME: home }, now: () => 1000,
+  }, async (extra) => { assert.match(extra.ORQ_GATE_LEASE, /^[0-9a-f]{16}$/); return process.pid; }, 'u'); // a live pid
+  assert.deepEqual(started, { pid: process.pid });
+  const r = await orq(w, home, ['share', 'repair'], { isAlive: () => true });
+  assert.equal(r.code, 1);
+  assert.match(r.err, /refused: 0 threads and 1 gates of this project are running/);
 });
 
 test('a second repair of the same project is refused while the first holds it', async (t) => {
@@ -231,10 +257,10 @@ test('a second repair of the same project is refused while the first holds it', 
   const home = path.join(w.root, 'home');
   await fs.mkdir(path.join(w.repo, '.orq'), { recursive: true });
   await fs.writeFile(path.join(w.repo, '.orq', 'config.json'), JSON.stringify({ share: ['node_modules'] }));
-  markRepairing(w.repo);
+  const mark = markRepairing(w.repo);
   const r = await orq(w, home, ['share', 'repair']);
   assert.equal(r.code, 1);
   assert.match(r.err, /another repair of this project is running/);
   assert.equal(repairing(w.repo), true); // not removed by the refused one
-  unmarkRepairing(w.repo);
+  assert.equal(unmarkRepairing(w.repo, mark), true);
 });
