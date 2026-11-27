@@ -61,6 +61,10 @@ test('setConfigValue: project keys, immutability, null clears', () => {
   assert.equal(setConfigValue(base, 'shipMode', 'pr-squash', 'project').shipMode, 'pr-squash');
   assert.equal('shipMode' in setConfigValue({ ...base, shipMode: 'pr-squash' }, 'shipMode', 'null', 'project'), false);
   assert.throws(() => setConfigValue(base, 'shipMode', 'force', 'project'), /shipMode must be null or one of push, pr-squash/);
+  assert.equal(setConfigValue(base, 'install', 'off', 'project').install, 'off');
+  assert.equal(setConfigValue(base, 'install', 'scripts/private-install.sh', 'project').install, 'scripts/private-install.sh');
+  assert.equal('install' in setConfigValue({ ...base, install: 'off' }, 'install', 'null', 'project'), false);
+  assert.throws(() => setConfigValue(base, 'install', '  ', 'project'), /install must be null/);
 });
 
 test('project config: questions defaults to auto; the orchestrator model is {instance, model} when recorded', async () => {
