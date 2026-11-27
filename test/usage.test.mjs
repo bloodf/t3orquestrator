@@ -115,6 +115,14 @@ test('withUsage: at the threshold a model cools until the reset; two full window
   assert.equal(withUsage(longer, { cx: usage([w('p', 100)]) }, { now: NOW }).models['cx::gpt-x'].cooldownUntil, NOW + 99 * H);
 });
 
+test('withUsage: usageThresholds sets the threshold per instance, first matching pattern first', () => {
+  const both = { codex: usage([w('weekly', 86, NOW + H)]), cx: usage([w('p', 86, NOW + H)]) };
+  const v = withUsage(REG, both, { now: NOW, thresholds: { '^codex$': 85 } });
+  assert.equal(v.models['codex::gpt-x'].cooldownUntil, NOW + H); // 86% used: over its own 85
+  assert.equal(v.models['cx::gpt-x'].cooldownUntil, null); // no match: the default 90 still has room
+  assert.equal(withUsage(REG, both, { now: NOW, thresholds: { '^c': 95, '^codex$': 50 } }).models['codex::gpt-x'].cooldownUntil, null); // first match wins
+});
+
 test('withUsage: antigravity windows apply to their model family, 3p to claude and gpt', () => {
   const v = withUsage(REG, { ag: instanceUsage(cache('antigravity-2'), NOW) }, { now: NOW });
   assert.equal(v.models['ag::gemini-3-pro'].cooldownUntil, Date.parse('2026-11-20T23:44:18.000Z'));

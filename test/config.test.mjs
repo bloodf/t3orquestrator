@@ -62,6 +62,9 @@ test('setConfigValue: project keys, immutability, null clears', async () => {
   assert.equal('shipMode' in setConfigValue({ ...base, shipMode: 'pr-squash' }, 'shipMode', 'null', 'project'), false);
   assert.throws(() => setConfigValue(base, 'shipMode', 'force', 'project'), /shipMode must be null or one of push, pr-squash/);
   assert.equal(setConfigValue(base, 'install', 'off', 'project').install, 'off');
+  assert.deepEqual(setConfigValue({}, 'usageThresholds', '{"^claudeAgent":85}', 'machine').usageThresholds, { '^claudeAgent': 85 });
+  assert.throws(() => setConfigValue({}, 'usageThresholds', '{"^c":101}', 'machine'), /must map to an integer 1-100/);
+  assert.throws(() => setConfigValue({}, 'usageThresholds', '{"(":80}', 'machine'), /not a valid pattern/);
   assert.equal((await loadProjectConfig(await tmpFile('{"install":null}'))).install, null); // a literal null is the default
   assert.equal((await loadProjectConfig(await tmpFile('{"install":"off"}'))).install, 'off');
   await assert.rejects(loadProjectConfig(await tmpFile('{"install":3}')), /install must be/);
