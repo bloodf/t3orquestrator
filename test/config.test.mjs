@@ -58,6 +58,9 @@ test('setConfigValue: project keys, immutability, null clears', () => {
   assert.equal(setConfigValue(base, 'questions', 'user', 'project').questions, 'user');
   assert.equal(setConfigValue(base, 'questions', 'auto', 'project').questions, 'auto');
   assert.throws(() => setConfigValue(base, 'questions', 'never', 'project'), /questions must be one of auto, user/);
+  assert.equal(setConfigValue(base, 'shipMode', 'pr-squash', 'project').shipMode, 'pr-squash');
+  assert.equal('shipMode' in setConfigValue({ ...base, shipMode: 'pr-squash' }, 'shipMode', 'null', 'project'), false);
+  assert.throws(() => setConfigValue(base, 'shipMode', 'force', 'project'), /shipMode must be null or one of push, pr-squash/);
 });
 
 test('project config: questions defaults to auto; the orchestrator model is {instance, model} when recorded', async () => {
