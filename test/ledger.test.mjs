@@ -219,8 +219,22 @@ test('authorsOf: highest tier among integrated units, first in the given order o
   const pass = (u) => [ev('thread-ended', u, { status: 'completed' }), gated(u, 'pass'), ev('integrated', u, { sha: B, head: C })];
   const s = run(launched('a', { tier: 3, family: 'x' }), launched('b', { tier: 4, family: 'y' }), launched('c', { tier: 4, family: 'z' }),
     launched('d', { tier: 4, family: 'w' }), ...pass('a'), ...pass('b'), ...pass('c'));
-  assert.deepEqual(authorsOf(['a', 'c', 'b', 'd'], s), { maxTier: 4, family: 'z' });
+  assert.deepEqual(authorsOf(['a', 'c', 'b', 'd'], s), { maxTier: 4, family: 'z', families: ['x', 'z', 'y'] });
   assert.equal(authorsOf(['d'], s), null);
+});
+
+test('authorsOf: families cover every launch of a continued unit; unrecorded ones resolve from the registry', () => {
+  const pass = (u) => [ev('thread-ended', u, { status: 'completed' }), gated(u, 'pass'), ev('integrated', u, { sha: B, head: C })];
+  // a: started on one family, continued on another; b: a launch with no family recorded, then one on an unknown instance
+  const s = run(
+    launched('a', { key: 'x::m', instance: 'x', family: 'fam-x' }), ev('thread-ended', 'a', { status: 'interrupted' }),
+    launched('a', { key: 'y::m', instance: 'y', family: 'fam-y' }), ...pass('a'),
+    launched('b', { key: 'z::old', instance: 'z' }), ev('thread-ended', 'b', { status: 'interrupted' }),
+    launched('b', { key: 'q::m', instance: 'q' }), ...pass('b'),
+  );
+  assert.deepEqual(authorsOf(['a'], s).families, ['fam-x', 'fam-y']);
+  const registry = { instances: {}, models: { 'z::new': { instance: 'z', family: 'fam-z' } } }; // z::old is gone: z's family
+  assert.deepEqual(authorsOf(['a', 'b'], s, registry).families.sort(), ['fam-x', 'fam-y', 'fam-z', 'unknown']);
 });
 
 test('item 3: the second quality failure adds the failed key to tried', () => {

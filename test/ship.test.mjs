@@ -172,6 +172,34 @@ test('ship: a protected base refuses the push; the pull request is merged on the
   assert.equal((await readState(p.repo)).plan.shipped, p.X);
 });
 
+test('ship: shipMode pr-squash never pushes to the base; it only squash-merges the pull request on the host', async (t) => {
+  const p = await shipProject(t, { shipMode: 'pr-squash' });
+  const gh = fakeGh({ remote: p.remote });
+  const inner = gh.exec;
+  gh.exec = (bin, args) => (args[1] === 'merge' ? (gh.calls.push(args), { code: 0, stdout: '', stderr: '' }) : inner(bin, args));
+  const pushes = [];
+  const git = (cmd, args, opts) => {
+    if (args.includes('push')) pushes.push(args.at(-1));
+    return defaultExec(cmd, args, opts);
+  };
+  const r = await orq(['ship'], p, { ghExec: gh.exec, gitExec: git });
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(pushes, [`${p.X}:refs/heads/orq/p1/ship-1`]); // the ship branch only
+  assert.equal(p.remoteSha('refs/heads/main'), p.baseSha);
+  assert.deepEqual(gh.calls.filter((a) => a[1] === 'merge'), [['pr', 'merge', URL1, '--squash']]); // no --admin, no --delete-branch
+  assert.equal((await readState(p.repo)).plan.shipped, p.X);
+});
+
+test('ship: shipMode pr-squash names the open pull request when the host refuses the merge', async (t) => {
+  const p = await shipProject(t, { shipMode: 'pr-squash' });
+  const gh = fakeGh({ remote: p.remote });
+  const r = await orq(['ship'], p, { ghExec: gh.exec });
+  assert.equal(r.code, 1);
+  assert.equal(r.err, `orq: ship: ${URL1} is open, but the host refused to squash-merge it: unexpected gh pr merge ${URL1} --squash; fix that, or merge it on the host, and run "orq ship" again (it reuses or records the pull request)\n`);
+  assert.equal(p.remoteSha('refs/heads/main'), p.baseSha);
+  assert.equal((await readState(p.repo)).plan.shipped, undefined);
+});
+
 test('ship: a pull request squashed by hand is recorded, even after the base moved on', async (t) => {
   const p = await shipProject(t);
   sh(p.repo, 'push', '-q', 'origin', `${p.X}:refs/heads/orq/p1/ship-1`);

@@ -121,7 +121,8 @@ test('route: ordered candidates, json, usage errors', async () => {
   const j = JSON.parse((await orq(['route', '--job', 'plan', '--json'], s)).out);
   assert.equal(j.candidates[0].model, 'z-opus');
   const rev = await orq(['route', '--job', 'review', '--author-tier', '3', '--author-family', 'unknown'], s);
-  assert.match(rev.out, /same-family/);
+  assert.equal(rev.code, 4); // a model of unknown family is never a reviewer: it may be the author's
+  assert.match(rev.out, /^none blocked=family .*no usable model outside the author families \(unknown\)/);
   assert.equal((await orq(['route', '--job', 'x', '--bogus'], s)).code, 2);
   assert.equal((await orq(['route'], s)).code, 2);
   const bad = await orq(['route', '--job', 'nope'], s);

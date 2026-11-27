@@ -152,7 +152,7 @@ test('status: flags, tiers and the authors line once units are integrated', asyn
   assert.equal(lines[8], 'authors: max_tier=4 family=fam-c');
   const json = JSON.parse((await orq(['status', '--json'], p)).out);
   assert.deepEqual(json.integration, { branch: 'orq/p1/integration', head: C, base: A });
-  assert.deepEqual(json.authors, { maxTier: 4, family: 'fam-c' });
+  assert.deepEqual(json.authors, { maxTier: 4, family: 'fam-c', families: ['fam-b', 'fam-c', 'fam-d'] });
   assert.deepEqual(json.units[0].flagKinds, ['flaky', 'placeholder']);
   assert.equal(json.units[0].tier, 3);
 });
