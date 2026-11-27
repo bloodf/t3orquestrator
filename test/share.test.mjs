@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createGit, defaultExec } from '../lib/git.mjs';
 import {
-  validSharePath, detectShares, eligibleShares, linkShares, pnpmInstall, replaceOldShares, shareLine, syncShareExclude, unlinkOldShares,
+  validSharePath, detectShares, eligibleShares, linkShares, pnpmInstall, installLine, dependencyLines, replaceOldShares, shareLine, syncShareExclude, unlinkOldShares,
 } from '../lib/share.mjs';
 import { spawnSync } from 'node:child_process';
 import { sh } from './support/project.mjs';
@@ -312,6 +312,18 @@ test('pnpmInstall: one install per directory with a pnpm lockfile and an install
   assert.equal(cmd, "pnpm install --frozen-lockfile --prefer-offline && pnpm -C 'it'\\''s' install --frozen-lockfile --prefer-offline && pnpm -C 'my app' install --frozen-lockfile --prefer-offline && pnpm -C tests install --frozen-lockfile --prefer-offline");
   const args = spawnSync('sh', ['-c', cmd.replaceAll('pnpm -C', 'printf "%s\\n"').replaceAll(' install --frozen-lockfile --prefer-offline', '').replace('pnpm && ', '')], { encoding: 'utf8' }).stdout;
   assert.equal(args, "it's\nmy app\ntests\n"); // each is one shell word
+});
+
+test('installLine: the project install key replaces or removes the plain install suggestion', async (t) => {
+  const r = await repo(t, { lock: 'pnpm-lock.yaml' });
+  assert.match(installLine(r.dir), /`pnpm install --frozen-lockfile --prefer-offline`/); // unset: the plain install
+  assert.equal(installLine(r.dir, 'off'), null);
+  assert.deepEqual(dependencyLines(r.dir, [], 'off'), []); // nothing tells a worker to install with the real HOME
+  const own = 'scripts/private-install.sh';
+  const line = installLine(r.dir, own);
+  assert.match(line, /`scripts\/private-install\.sh`/);
+  assert.doesNotMatch(line, /pnpm install/);
+  assert.equal(installLine((await repo(t)).dir, own), null); // no pnpm project: no line at all
 });
 
 test('old pnpm links: a checkout\'s link to the main node_modules is removed (never its target), then a real install', async (t) => {
