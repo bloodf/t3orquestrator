@@ -77,16 +77,25 @@ test('candidate shape and confirmed flag', () => {
   assert.equal(out.retryAt, null);
 });
 
-test('differentFamily: other families first, same and unknown flagged and kept', () => {
+test('differentFamily: only other families, never the author family or unknown', () => {
   const r = reg({ a: inst() }, [
     mod('a', 'same', 2, { family: 'fam-a' }), mod('a', 'unk', 2, { family: 'unknown' }),
     mod('a', 'other', 3, { family: 'fam-b' }),
   ]);
   const out = go(r, { job: 'review', authorTier: 2, authorFamily: 'fam-a' });
-  assert.deepEqual(keys(out), ['a::other', 'a::same', 'a::unk']);
+  assert.deepEqual(keys(out), ['a::other']);
   assert.equal(out.candidates[0].sameFamily, undefined);
-  assert.equal(out.candidates[1].sameFamily, true);
-  assert.equal(out.candidates[2].sameFamily, true);
+});
+
+test('differentFamily: a multi-unit review excludes every author family, and fails loudly when none is left', () => {
+  const r = reg({ a: inst() }, [
+    mod('a', 'x', 3, { family: 'fam-a' }), mod('a', 'y', 3, { family: 'fam-b' }), mod('a', 'z', 2, { family: 'fam-c' }),
+  ]);
+  assert.deepEqual(keys(go(r, { job: 'review', authorTier: 2, authorFamily: ['fam-a', 'fam-b'] })), ['a::z']);
+  const none = go(r, { job: 'review', authorTier: 2, authorFamily: ['fam-a', 'fam-b', 'fam-c'] });
+  assert.deepEqual(none.candidates, []);
+  assert.equal(none.blocked, 'family');
+  assert.match(none.reason, /no usable model outside the author families \(fam-a, fam-b, fam-c\)/);
 });
 
 test('below tier: best available flagged when nothing reaches the floor', () => {

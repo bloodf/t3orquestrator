@@ -82,13 +82,11 @@ $ orq route --job implement
 3 provider-b model-next tier=4 family=family-b unconfirmed
 ```
 
-`review` of work written at tier 3 by `family-a` needs tier 3 or more and prefers another family. Same-family and unknown-family models move to the end:
+`review` of work written at tier 3 by `family-a` needs tier 3 or more and a model of another family. Same-family and unknown-family models are never listed for it:
 
 ```
 $ orq route --job review --author-tier 3 --author-family family-a
 1 provider-b model-next tier=4 family=family-b unconfirmed
-2 provider-a model-large tier=3 family=family-a unconfirmed same-family
-3 provider-c model-agent tier=3 family=unknown unconfirmed same-family
 ```
 
 A model shows `confirmed` once it has passed a gate, or once `orq sync` has found a completed thread on it in this project. If `provider-a` failed twice in a row, it would cool down. `orq instance list` would then show `cooldown_until=<time>`, and its models would drop out of these lists until then.

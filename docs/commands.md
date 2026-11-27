@@ -114,12 +114,12 @@ Prints `tier <key> = <n> (<by>)`. `--by` defaults to `orchestrator`. A tier set 
 Lists the eligible models in the order `orq` would use them:
 
 ```
-1 <instance> <model> tier=<n> family=<family> confirmed|unconfirmed[ free][ same-family][ below-tier][ over-limit][ score=<rate|-> n=<attempts>][ demoted][ headroom=<n>%]
+1 <instance> <model> tier=<n> family=<family> confirmed|unconfirmed[ free][ below-tier][ over-limit][ score=<rate|-> n=<attempts>][ demoted][ headroom=<n>%]
 ```
 
 `headroom` is what is left of the fullest usage window that binds the model, when T3 reports [account usage](scheduling.md#account-usage).
 
-`review` and `fix` need the author's tier, and `review` also needs the family. If the project has integrated units, the values come from the ledger. Exit 4 with `none blocked=<excluded|cooling|limit|mixed|empty> retry_at=<iso time|-> reason="<why>"` when nothing is eligible. When every model at the job's tier is cooling down for long, the best free tier below is listed instead (`below-tier`), and `plan` and `decide` list a model over its instance's concurrency limit (`over-limit`) rather than none: see [Routing](scheduling.md#routing).
+`review` and `fix` need the author's tier, and `review` also needs the family. If the project has integrated units, the values come from the ledger: the highest tier, and the family of every integrated unit. `review` never lists a model of an author's family or of unknown family; when no other is usable it exits 4 with `none blocked=family … reason="no usable model outside the author families (<families>); a review never runs on its author's family"`. Exit 4 with `none blocked=<excluded|cooling|limit|mixed|empty> retry_at=<iso time|-> reason="<why>"` when nothing is eligible. When every model at the job's tier is cooling down for long, the best free tier below is listed instead (`below-tier`), and `plan` and `decide` list a model over its instance's concurrency limit (`over-limit`) rather than none: see [Routing](scheduling.md#routing).
 
 ## config
 
@@ -244,7 +244,7 @@ Prints the real quota of each account, read from EasyCLIProxyAPI on this machine
 
 `orq review start [--order <file>] | orq review show [<n>]`
 
-`start` needs at least one integrated unit. It routes job `review` on the author's tier and family. Then it starts a thread on the integration head, on branch `orq/<planId>/review-<n>`, with the order file as its first message. The order file defaults to `.orq/orders/review.md`, must be under `.orq/orders/`, and is at most 40 lines. It prints `review <n>: thread=<id> model=<key> head=<sha>`. When no model is eligible it prints the same `none …` line as `route` and exits 4.
+`start` needs at least one integrated unit. It routes job `review` on the author's tier and on the family of every integrated unit: the reviewer is of none of them, never the author's family, and with no such model it prints the `none blocked=family …` line and exits 4. Then it starts a thread on the integration head, on branch `orq/<planId>/review-<n>`, with the order file as its first message. The order file defaults to `.orq/orders/review.md`, must be under `.orq/orders/`, and is at most 40 lines. It prints `review <n>: thread=<id> model=<key> head=<sha>`. When no model is eligible it prints the same `none …` line as `route` and exits 4.
 
 `show` reads the latest review, or review `n`. It prints `review <n>: running`, or `review <n>: completed` followed by the reviewer's last message, quoted: each line indented two spaces, control characters removed, at most 300 characters per line and 40 lines (the last then says `… <n> more lines`). A failed review (its thread ended failed, cancelled or interrupted) is replaced at once on another model, with the same order and head, and prints `review <n>: failed on <key>; replaced by review <m> on <key> (thread <id>)` (exit 0); the failed review's lease is released. At most two replacements are made for one review; after that, or when no other model is free, it prints `review <n>: failed; run "orq review start" again` and exits 4.
 
