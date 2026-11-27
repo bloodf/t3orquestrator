@@ -1068,7 +1068,9 @@ test('wait: a disk short of free inodes holds new launches, starts one cleanup r
 
 test('wait: a failing protected service holds launches on this machine, whatever the project cap says', async (t) => {
   const p = await makeProject(t, [unitSpec('a')], { cap: 8 });
-  await fs.writeFile(path.join(p.home, 'config.json'), JSON.stringify({ cap: 8, protect: [{ name: 'gateway', url: 'http://127.0.0.1:1/v1/models', timeoutMs: 200 }] }));
+  await fs.writeFile(path.join(p.home, 'config.json'), JSON.stringify({
+    cap: 8, gatePriority: false, protect: [{ name: 'gateway', url: 'http://127.0.0.1:1/v1/models', timeoutMs: 200 }],
+  })); // gatePriority as in makeProject: a real gate under background QoS can stall for minutes on a busy host
   await fs.writeFile(path.join(p.repo, '.orq', 'config.json'), JSON.stringify({ ...JSON.parse(await fs.readFile(path.join(p.repo, '.orq', 'config.json'), 'utf8')), cap: 6 }));
   const sim = simulator(p, { a: [['commit-complete']] });
   let up = false;
