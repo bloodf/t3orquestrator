@@ -56,6 +56,7 @@ test('ORCHESTRATOR.md: unit gates are scoped, the final run is the full suite; l
   assert.match(text, /most recent order from the user or their supervisor .* overrides older holds, guards and rules/);
   assert.match(text, /Work starts only as `orq` units in a plan: never start a worker yourself/);
   assert.match(text, /Never idle between plans/);
+  assert.match(text, /Never end a turn waiting on a pull request watch or any other git-host event: local checks and `orq wait` are the only waits/);
 });
 
 test('playbook docs name no real model, provider or tool', () => {
