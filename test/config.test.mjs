@@ -43,7 +43,7 @@ test('project config: validation', async () => {
   }
 });
 
-test('setConfigValue: project keys, immutability, null clears', () => {
+test('setConfigValue: project keys, immutability, null clears', async () => {
   const base = Object.freeze({
     autonomy: null, base: 'main', checks: Object.freeze({ setup: 'a', unit: null, full: null }), slots: {}, t3: null,
   });
@@ -62,6 +62,9 @@ test('setConfigValue: project keys, immutability, null clears', () => {
   assert.equal('shipMode' in setConfigValue({ ...base, shipMode: 'pr-squash' }, 'shipMode', 'null', 'project'), false);
   assert.throws(() => setConfigValue(base, 'shipMode', 'force', 'project'), /shipMode must be null or one of push, pr-squash/);
   assert.equal(setConfigValue(base, 'install', 'off', 'project').install, 'off');
+  assert.equal((await loadProjectConfig(await tmpFile('{"install":null}'))).install, null); // a literal null is the default
+  assert.equal((await loadProjectConfig(await tmpFile('{"install":"off"}'))).install, 'off');
+  await assert.rejects(loadProjectConfig(await tmpFile('{"install":3}')), /install must be/);
   assert.equal(setConfigValue(base, 'install', 'scripts/private-install.sh', 'project').install, 'scripts/private-install.sh');
   assert.equal('install' in setConfigValue({ ...base, install: 'off' }, 'install', 'null', 'project'), false);
   assert.throws(() => setConfigValue(base, 'install', '  ', 'project'), /install must be null/);
