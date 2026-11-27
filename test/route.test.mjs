@@ -98,6 +98,15 @@ test('differentFamily: a multi-unit review excludes every author family, and fai
   assert.match(none.reason, /no usable model outside the author families \(fam-a, fam-b, fam-c\)/);
 });
 
+test('differentFamily: composite families overlap on any part, on either side', () => {
+  const r = reg({ a: inst() }, [
+    mod('a', 'anth', 3, { family: 'anthropic' }), mod('a', 'mix', 3, { family: 'openai+anthropic' }), mod('a', 'oa', 3, { family: 'openai' }),
+  ]);
+  assert.deepEqual(keys(go(r, { job: 'review', authorTier: 2, authorFamily: ['google+anthropic'] })), ['a::oa']);
+  assert.deepEqual(keys(go(r, { job: 'review', authorTier: 2, authorFamily: 'anthropic' })), ['a::oa']);
+  assert.deepEqual(keys(go(r, { job: 'review', authorTier: 2, authorFamily: 'google' })), ['a::anth', 'a::mix', 'a::oa']);
+});
+
 test('below tier: best available flagged when nothing reaches the floor', () => {
   const r = reg({ a: inst() }, [mod('a', 'low', 1), mod('a', 'mid', 2), mod('a', 'mid2', 2)]);
   const out = go(r, { job: 'plan' });
