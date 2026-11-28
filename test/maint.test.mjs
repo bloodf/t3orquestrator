@@ -30,7 +30,17 @@ function fakeT3(dir, threads) {
   const bin = path.join(dir, 't3');
   fs.writeFileSync(bin, `#!/bin/sh
 [ -e "${dir}/FAIL" ] && { echo "t3 down" >&2; exit 1; }
-exec node -e 'const t = require(process.argv[1]); process.stdout.write(JSON.stringify(t[process.argv[2]] ?? []))' "${data}" "$4"
+exec node -e '
+const t = require(process.argv[1]);
+const [, , sub, id, , project] = process.argv;
+if (sub === "show") {
+  const row = Object.values(t).flat().find((r) => r.threadId === id);
+  if (!row) { process.stderr.write("no such thread\\n"); process.exit(1); }
+  const { hiddenWorktree, ...rest } = row;
+  process.stdout.write(JSON.stringify({ thread: { ...rest, worktreePath: hiddenWorktree ?? rest.worktreePath ?? null }, messages: [] }));
+} else {
+  process.stdout.write(JSON.stringify((t[project] ?? []).map(({ hiddenWorktree, ...r }) => r)));
+}' "${data}" "$2" "$3" "$4" "$4"
 `);
   fs.chmodSync(bin, 0o755);
   return bin;
@@ -167,6 +177,21 @@ test('keepPaths: leased projects, worktrees of leased threads and of T3 threads 
   await assert.rejects(keepPaths(k.ctx, ['/p/not-t3']), /threads of \/p\/not-t3 could not be read/); // never "not a T3 project"
   fs.rmSync(path.join(k.dir, 'FAIL'));
   assert.deepEqual(await keepPaths(k.ctx), []);
+});
+
+test('keepPaths: reads the worktree from thread show when thread list leaves it out (newer T3)', async (t) => {
+  const hidden = (id, wt, status) => ({ ...thread(id, undefined, status), hiddenWorktree: wt });
+  const k = await keepCtx(t, {
+    '/p/one': [hidden('th1', '/wt/one-1'), hidden('th2', '/wt/one-2', 'running'), hidden('th3', '/wt/one-3'), thread('th4', undefined, 'running')],
+  });
+  await writeLease(path.join(k.home, 'leases'), {
+    threadId: 'th1', project: '/p/one', unit: 'a', instance: 'i', model: 'm', startedAt: NOW,
+  });
+  await writeLease(path.join(k.home, 'leases'), {
+    threadId: 'th4', project: '/p/one', unit: 'b', instance: 'i', model: 'm', startedAt: NOW,
+  });
+  // th3 is neither leased nor at work: not kept; th4 has no worktree: it works in the leased project root
+  assert.deepEqual(await keepPaths(k.ctx), ['/p/one', '/wt/one-1', '/wt/one-2']);
 });
 
 test('startCleanup starts one run at most once an hour', async (t) => {
